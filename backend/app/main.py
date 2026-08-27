@@ -10,11 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app import config, gitinfo, paths, scanner, store
+from app import config, detail, gitinfo, graph, paths, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
 
@@ -50,6 +50,28 @@ def _repo_lock(host_path: str) -> threading.Lock:
             lock = threading.Lock()
             _repo_locks[host_path] = lock
         return lock
+
+
+def _known_repo(host_path: str) -> str:
+    with STATE_LOCK:
+        if host_path not in STATE:
+            raise HTTPException(status_code=404, detail="リポジトリが見つかりません")
+    return paths.to_container(host_path)
+
+
+def _build_graph_sync(host_path: str, repo: str, all_refs: bool, limit: int) -> dict[str, Any]:
+    with _repo_lock(host_path):
+        return graph.build(repo, all_refs, limit)
+
+
+def _get_commit_sync(host_path: str, repo: str, commit_hash: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return detail.get_commit(repo, commit_hash)
+
+
+def _get_branches_sync(host_path: str, repo: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return detail.get_branches(repo)
 
 
 def _upsert(repo: dict[str, Any]) -> None:
@@ -251,6 +273,51 @@ async def get_repos() -> dict[str, Any]:
             "log": "git log --oneline --graph --all",
         },
     }
+
+
+@app.get("/api/repo/graph")
+async def get_repo_graph(
+    path: str,
+    all: bool = False,
+    limit: int = 200,
+) -> dict[str, Any]:
+    if limit < 1:
+        raise HTTPException(status_code=422, detail="limit は 1 以上で指定してください")
+    repo = _known_repo(path)
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        pool,
+        _build_graph_sync,
+        path,
+        repo,
+        all,
+        limit,
+    )
+    if "command" not in result:
+        raise HTTPException(status_code=502, detail="git log を実行できませんでした")
+    return result
+
+
+@app.get("/api/repo/commit")
+async def get_repo_commit(path: str, hash: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    if not detail.valid_hash(hash):
+        raise HTTPException(status_code=400, detail="不正なコミットハッシュです")
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(pool, _get_commit_sync, path, repo, hash)
+    if result is None:
+        raise HTTPException(status_code=404, detail="コミットが見つかりません")
+    return result
+
+
+@app.get("/api/repo/branches")
+async def get_repo_branches(path: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(pool, _get_branches_sync, path, repo)
+    if result is None:
+        raise HTTPException(status_code=502, detail="ブランチ一覧を取得できませんでした")
+    return result
 
 
 @app.get("/api/stream")

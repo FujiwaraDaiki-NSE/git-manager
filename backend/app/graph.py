@@ -15,7 +15,7 @@ FORMAT = "%H%x1f%h%x1f%P%x1f%D%x1f%an%x1f%cI%x1f%s"
 
 
 def _parse_refs(raw: str) -> list[dict[str, str]]:
-    """%D の "HEAD -> main, origin/main, tag: v1" を分解する。"""
+    """%D の ref 表示を、local branch / remote / tag に分類する。"""
     refs: list[dict[str, str]] = []
     for part in raw.split(","):
         name = part.strip()
@@ -30,9 +30,19 @@ def _parse_refs(raw: str) -> list[dict[str, str]]:
         elif name.startswith("tag: "):
             name = name[len("tag: "):]
             kind = "tag"
-        elif name.startswith("refs/"):
-            continue
-        elif "/" in name:
+
+        if name.startswith("refs/heads/"):
+            name = name[len("refs/heads/"):]
+        elif name.startswith("refs/remotes/"):
+            name = name[len("refs/remotes/"):]
+            if kind == "branch":
+                kind = "remote"
+        elif name.startswith("refs/tags/"):
+            name = name[len("refs/tags/"):]
+            if kind == "branch":
+                kind = "tag"
+        elif kind == "branch" and "/" in name:
+            # --decorate=full を使わない呼び出し元との互換用。
             kind = "remote"
         refs.append({"name": name, "kind": kind})
     return refs
@@ -47,12 +57,35 @@ def _free_slot(lanes: list[str | None]) -> int:
 
 
 def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
-    args = ["log", "--date-order", f"--max-count={limit}", f"--format={FORMAT}"]
+    args = [
+        "log",
+        "--date-order",
+        "--decorate=full",
+        f"--max-count={limit + 1}",
+        f"--format={FORMAT}",
+    ]
     if all_refs:
         args.insert(1, "--all")
+    else:
+        upstream = _run(repo, ["rev-parse", "--symbolic-full-name", "@{upstream}"])
+        if upstream:
+            args.extend(["HEAD", upstream.strip()])
 
     out = _run(repo, args)
     if out is None:
+        # unborn HEAD の空リポジトリでは、現在ブランチを限定した git log が
+        # 終了コード 128 になる。HEAD が解決できない Git 管理下だけを
+        # 空グラフとして扱い、timeout や破損した履歴はエラーのまま返す。
+        inside = _run(repo, ["rev-parse", "--is-inside-work-tree"])
+        head = _run(repo, ["rev-parse", "--verify", "--quiet", "HEAD"])
+        if inside == "true\n" and head is None:
+            return {
+                "rows": [],
+                "max_lane": 0,
+                "head_lane": 0,
+                "truncated": False,
+                "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
+            }
         return {"rows": [], "max_lane": 0, "head_lane": None, "truncated": False}
 
     raw_rows: list[dict[str, Any]] = []
@@ -73,13 +106,15 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
             "subject": subject,
         })
 
+    truncated = len(raw_rows) > limit
+    raw_rows = raw_rows[:limit]
+
     lanes: list[str | None] = []
     rows: list[dict[str, Any]] = []
     max_lane = 0
     head_lane: int | None = None
 
     for row in raw_rows:
-        # 同じコミットを指すレーンが複数あることがある（複数の子が同じ親を持つ）
         occupied = [i for i, v in enumerate(lanes) if v == row["hash"]]
         if occupied:
             lane = occupied[0]
@@ -140,6 +175,6 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
         "rows": rows,
         "max_lane": max_lane,
         "head_lane": head_lane if head_lane is not None else 0,
-        "truncated": len(raw_rows) >= limit,
+        "truncated": truncated,
         "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
     }
