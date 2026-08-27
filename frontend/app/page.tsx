@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import RepoDetail from "./repo-detail";
 import { Repo, isDirty, hasConflict } from "./types";
 
 type Filter = "all" | "dirty" | "unpushed" | "behind";
+type Grouping = "none" | "parent" | "remote";
 
 function since(iso?: string) {
   if (!iso) return { text: "—", stale: false };
@@ -35,10 +37,30 @@ function BranchLine({ line }: { line: string }) {
   );
 }
 
+function remoteHost(remote: string | null | undefined) {
+  if (!remote) return "ローカルのみ";
+  const scp = remote.match(/^git@([^:]+):/);
+  if (scp) return scp[1];
+  try {
+    return new URL(remote).hostname;
+  } catch {
+    return remote;
+  }
+}
+
+function groupName(repo: Repo, grouping: Grouping) {
+  if (grouping === "parent") {
+    const slash = repo.path.lastIndexOf("/");
+    return slash >= 0 ? repo.path.slice(0, slash) || "/" : "(root)";
+  }
+  return remoteHost(repo.remote);
+}
+
 export default function Page() {
   const [repos, setRepos] = useState<Map<string, Repo>>(new Map());
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [grouping, setGrouping] = useState<Grouping>("none");
   const [open, setOpen] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -46,6 +68,7 @@ export default function Page() {
   const [copied, setCopied] = useState<string | null>(null);
 
   const visible = useRef<Set<string>>(new Set());
+  const observed = useRef<Map<string, HTMLDivElement>>(new Map());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const upsert = useCallback((repo: Repo) => {
@@ -96,6 +119,7 @@ export default function Page() {
         for (const entry of entries) {
           const path = (entry.target as HTMLElement).dataset.path;
           if (!path) continue;
+          if (observed.current.get(path) !== entry.target) continue;
           if (entry.isIntersecting) visible.current.add(path);
           else visible.current.delete(path);
         }
@@ -108,7 +132,13 @@ export default function Page() {
 
   const attach = useCallback(
     (node: HTMLDivElement | null) => {
-      if (node && observer) observer.observe(node);
+      if (!node || !observer) return;
+      const path = node.dataset.path;
+      if (!path) return;
+      const previous = observed.current.get(path);
+      if (previous && previous !== node) observer.unobserve(previous);
+      observed.current.set(path, node);
+      observer.observe(node);
     },
     [observer]
   );
@@ -156,6 +186,42 @@ export default function Page() {
     });
   };
 
+  const groups = useMemo(() => {
+    if (grouping === "none") return [{ key: "all", label: null, repos: list }];
+    const grouped = new Map<string, Repo[]>();
+    for (const repo of list) {
+      const key = groupName(repo, grouping);
+      const members = grouped.get(key);
+      if (members) members.push(repo);
+      else grouped.set(key, [repo]);
+    }
+    return [...grouped.entries()].map(([key, reposInGroup]) => ({
+      key,
+      label: key,
+      repos: reposInGroup,
+    }));
+  }, [grouping, list]);
+
+  useEffect(() => {
+    if (!observer) return;
+    for (const [path, node] of observed.current) {
+      if (!node.isConnected) {
+        observer.unobserve(node);
+        observed.current.delete(path);
+        visible.current.delete(path);
+      }
+    }
+  }, [groups, observer]);
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+    observer?.disconnect();
+    observed.current.clear();
+    visible.current.clear();
+  }, [observer]);
+
+  const toggleOpen = (path: string) => setOpen((current) => current === path ? null : path);
+
   return (
     <main className="wrap">
       <header className="masthead">
@@ -198,6 +264,14 @@ export default function Page() {
         <button className="chip" aria-pressed={filter === "dirty"} onClick={() => setFilter("dirty")}>変更あり</button>
         <button className="chip" aria-pressed={filter === "unpushed"} onClick={() => setFilter("unpushed")}>ahead</button>
         <button className="chip" aria-pressed={filter === "behind"} onClick={() => setFilter("behind")}>behind</button>
+        <label className="group-select">
+          <span>グループ</span>
+          <select aria-label="リポジトリのグループ" value={grouping} onChange={(e) => setGrouping(e.target.value as Grouping)}>
+            <option value="none">なし</option>
+            <option value="parent">親フォルダ</option>
+            <option value="remote">リモート</option>
+          </select>
+        </label>
         <button
           className="refresh"
           disabled={scanning}
@@ -209,88 +283,70 @@ export default function Page() {
 
       <div className="cmdhint">git status -sb</div>
 
-      {list.map((r) => {
-        const s = since(r.last_commit?.date);
-        const cls = [
-          "row",
-          r.pending ? "pending" : "",
-          hasConflict(r) ? "conflict" : isDirty(r) ? "dirty" : (r.ahead ?? 0) ? "unpushed" : (r.behind ?? 0) ? "behind" : "",
-        ].filter(Boolean).join(" ");
+      <section className={grouping === "none" ? "repo-group ungrouped" : "repo-group"}>
+        {groups.flatMap((group) => [
+          ...(group.label ? [
+            <div className="group-heading" key={`group-heading-${group.key}`}>
+              <h2>{group.label}</h2>
+              <span>{group.repos.length}</span>
+            </div>,
+          ] : []),
+          ...group.repos.map((r) => {
+            const s = since(r.last_commit?.date);
+            const cls = [
+              "row",
+              r.pending ? "pending" : "",
+              hasConflict(r) ? "conflict" : isDirty(r) ? "dirty" : (r.ahead ?? 0) ? "unpushed" : (r.behind ?? 0) ? "behind" : "",
+            ].filter(Boolean).join(" ");
 
-        return (
-          <div key={r.path}>
-            <div
-              className={cls}
-              data-path={r.path}
-              ref={attach}
-              onClick={() => setOpen(open === r.path ? null : r.path)}
-            >
-              <div>
-                <div className="name">{r.name}</div>
-                <div className="path" title={r.path}>{r.path}</div>
-              </div>
-              <div className="bline" title={r.branch_line}>
-                {r.branch_line ? <BranchLine line={r.branch_line} /> : "—"}
-              </div>
-              <div className="codes">
-                {(r.counts ?? []).map((c) => (
-                  <span key={c.xy} style={{ color: codeColor(c.xy) }}>
-                    {display(c.xy)} {c.count}
-                  </span>
-                ))}
-                {(r.stashes ?? 0) > 0 && (
-                  <span style={{ color: "var(--c-behind)" }}>stash {r.stashes}</span>
-                )}
-                {!r.pending && (r.counts?.length ?? 0) === 0 && (r.stashes ?? 0) === 0 && (
-                  <span style={{ color: "var(--muted)" }}>clean</span>
-                )}
-              </div>
-              <div className={s.stale ? "when stale" : "when"}>{s.text}</div>
-            </div>
-
-            {open === r.path && (
-              <div className="detail">
-                <div className="statusblock">
-                  <div style={{ color: "var(--muted)" }}>
+            return (
+              <div key={r.path}>
+                <div
+                  className={cls}
+                  data-path={r.path}
+                  ref={attach}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={open === r.path}
+                  onClick={() => toggleOpen(r.path)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      toggleOpen(r.path);
+                    }
+                  }}
+                >
+                  <div>
+                    <div className="name">{r.name}</div>
+                    <div className="path" title={r.path}>{r.path}</div>
+                  </div>
+                  <div className="bline" title={r.branch_line}>
                     {r.branch_line ? <BranchLine line={r.branch_line} /> : "—"}
                   </div>
-                  {(r.entries ?? []).slice(0, 40).map((e) => (
-                    <div key={e.xy + e.path}>
-                      <span className="xy" style={{ color: codeColor(e.xy) }}>{display(e.xy)}</span>
-                      {e.path}
-                    </div>
-                  ))}
-                  {(r.entries?.length ?? 0) > 40 && (
-                    <div style={{ color: "var(--muted)" }}>… 他 {(r.entries?.length ?? 0) - 40} 件</div>
-                  )}
-                  {(r.entries?.length ?? 0) === 0 && (
-                    <div style={{ color: "var(--muted)" }}>nothing to commit, working tree clean</div>
-                  )}
-                </div>
-
-                <div className="legend">
-                  <span>左列 = index</span>
-                  <span>右列 = worktree</span>
-                  <span>?? = 未追跡</span>
-                  {r.remote && <span>{r.remote}</span>}
-                </div>
-
-                {r.next_command && (
-                  <div className="next">
-                    <div className="reason">{r.next_command.reason}。次はこれです</div>
-                    <div className="cmdrow">
-                      <code>{r.next_command.command}</code>
-                      <button className="copy" onClick={() => copy(r.next_command!.command)}>
-                        {copied === r.next_command.command ? "コピーしました" : "コピー"}
-                      </button>
-                    </div>
+                  <div className="codes">
+                    {(r.counts ?? []).map((c) => (
+                      <span key={c.xy} style={{ color: codeColor(c.xy) }}>
+                        {display(c.xy)} {c.count}
+                      </span>
+                    ))}
+                    {(r.stashes ?? 0) > 0 && (
+                      <span style={{ color: "var(--c-behind)" }}>stash {r.stashes}</span>
+                    )}
+                    {!r.pending && (r.counts?.length ?? 0) === 0 && (r.stashes ?? 0) === 0 && (
+                      <span style={{ color: "var(--muted)" }}>clean</span>
+                    )}
                   </div>
+                  <div className={s.stale ? "when stale" : "when"}>{s.text}</div>
+                </div>
+
+                {open === r.path && (
+                  <RepoDetail repo={r} copied={copied} onCopy={copy} />
                 )}
               </div>
-            )}
-          </div>
-        );
-      })}
+            );
+          }),
+        ])}
+      </section>
 
       {list.length === 0 && (
         <div className="empty">
