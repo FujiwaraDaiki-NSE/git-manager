@@ -29,10 +29,16 @@ frontend のルートハンドラ経由でしか到達できない。
 | ブランチ、upstream、ahead / behind | `git status --porcelain=v2 --branch` |
 | ファイルごとの XY コード | 同上 |
 | 最終コミット | `git log -1` |
+| コミットグラフ | `git log --oneline --graph` |
+| コミット詳細（選択コミットの変更ファイルの統計、diff） | `git show <hash>` |
+| ブランチ一覧 | `git branch -vv` |
 | stash 数 | `git stash list` |
 | リモート URL | `git config --get remote.origin.url` |
 
 一覧には `git status -sb` の 1 行目をそのまま出す。
+
+リポジトリは、`なし`、`親フォルダ`、`リモートホスト` でグルーピングできる。
+表示の切り替えだけなので、設定は不要。
 
 ```
 ## feat/search...origin/feat/search [ahead 2, behind 4]
@@ -116,6 +122,8 @@ watch 数が爆発するのでやっていません。ブラウザにフォー�
 `ssh -oBatchMode=yes` を渡してあるため、鍵が ssh-agent に載っていない
 リポジトリは即座に失敗します（ハングしません）。
 
+**コミットグラフは既定で 200 件です。** それを超える履歴は切り詰めて表示します。
+
 **大きなリポジトリで `git status` が遅い場合**、対象リポジトリで一度だけ
 `git config core.untrackedCache true` を実行すると数倍速くなります。
 アプリ側から設定を書き換えることはしません。
@@ -134,10 +142,3 @@ cd frontend
 npm install
 BACKEND_ORIGIN=http://127.0.0.1:8000 npm run dev
 ```
-
-## 拡張するなら
-
-- コミットグラフ（`git log --all --date-order --parents` でレーン割り当て、
-  行ごとに小さな SVG を描くと仮想スクロールと両立する）
-- 選択コミットの `git show --stat` と diff
-- 親フォルダ単位、リモートホスト単位のグルーピング
