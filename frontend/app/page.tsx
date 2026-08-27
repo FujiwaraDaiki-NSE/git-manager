@@ -283,15 +283,15 @@ export default function Page() {
 
       <div className="cmdhint">git status -sb</div>
 
-      {groups.map((group) => (
-        <section className={grouping === "none" ? "repo-group ungrouped" : "repo-group"} key={group.key}>
-          {group.label && (
-            <div className="group-heading">
+      <section className={grouping === "none" ? "repo-group ungrouped" : "repo-group"}>
+        {groups.flatMap((group) => [
+          ...(group.label ? [
+            <div className="group-heading" key={`group-heading-${group.key}`}>
               <h2>{group.label}</h2>
               <span>{group.repos.length}</span>
-            </div>
-          )}
-          {group.repos.map((r) => {
+            </div>,
+          ] : []),
+          ...group.repos.map((r) => {
             const s = since(r.last_commit?.date);
             const cls = [
               "row",
@@ -344,9 +344,9 @@ export default function Page() {
                 )}
               </div>
             );
-          })}
-        </section>
-      ))}
+          }),
+        ])}
+      </section>
 
       {list.length === 0 && (
         <div className="empty">

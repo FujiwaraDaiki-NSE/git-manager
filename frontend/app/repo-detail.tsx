@@ -17,6 +17,9 @@ type RepoDetailProps = {
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
+const GRAPH_LIMIT = 200;
+const COMMIT_FETCH_DEBOUNCE_MS = 150;
+
 async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -201,9 +204,12 @@ function BranchesPane({ data, state, error, showMerged, onShowMerged, onRetry }:
           <div className="branch-group">
             <h4>ローカル</h4>
             {visibleLocal.map((branch) => <BranchRow key={branch.name} branch={branch} />)}
-            {visibleLocal.length === 0 && (
+            {!showMerged && mergedCount > 0 && (
+              <div className="muted-line">マージ済み {mergedCount} 件を折りたたんでいます</div>
+            )}
+            {visibleLocal.length === 0 && mergedCount === 0 && (
               <div className="muted-line">
-                {mergedCount > 0 ? `${mergedCount} 件のマージ済みブランチを折りたたんでいます` : "ローカルブランチはありません"}
+                ローカルブランチはありません
               </div>
             )}
           </div>
@@ -248,7 +254,7 @@ export default function RepoDetail({ repo, copied, onCopy }: RepoDetailProps) {
     setGraphState("loading");
     setGraphError(null);
     void getJson<GraphResponse>(
-      `/api/repo/graph?${apiQuery(repo.path, { all: String(allRefs), limit: "200" })}`,
+      `/api/repo/graph?${apiQuery(repo.path, { all: String(allRefs), limit: String(GRAPH_LIMIT) })}`,
       controller.signal,
     ).then((value) => {
       setGraph(value);
@@ -259,7 +265,7 @@ export default function RepoDetail({ repo, copied, onCopy }: RepoDetailProps) {
       setGraphState("error");
     });
     return () => controller.abort();
-  }, [allRefs, graphRetry, repo.branch, repo.fetched_at, repo.last_commit?.hash, repo.path]);
+  }, [allRefs, graphRetry, repo.branch, repo.last_commit?.hash, repo.path]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -277,7 +283,7 @@ export default function RepoDetail({ repo, copied, onCopy }: RepoDetailProps) {
       setBranchesState("error");
     });
     return () => controller.abort();
-  }, [branchesRetry, repo.branch, repo.fetched_at, repo.last_commit?.hash, repo.path]);
+  }, [branchesRetry, repo.branch, repo.last_commit?.hash, repo.path]);
 
   useEffect(() => {
     if (!selectedHash) {
@@ -289,18 +295,23 @@ export default function RepoDetail({ repo, copied, onCopy }: RepoDetailProps) {
     setCommit(null);
     setCommitState("loading");
     setCommitError(null);
-    void getJson<CommitDetail>(
-      `/api/repo/commit?${apiQuery(repo.path, { hash: selectedHash })}`,
-      controller.signal,
-    ).then((value) => {
-      setCommit(value);
-      setCommitState("ready");
-    }).catch((reason: unknown) => {
-      if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setCommitError(reason instanceof Error ? reason.message : "unknown error");
-      setCommitState("error");
-    });
-    return () => controller.abort();
+    const timer = window.setTimeout(() => {
+      void getJson<CommitDetail>(
+        `/api/repo/commit?${apiQuery(repo.path, { hash: selectedHash })}`,
+        controller.signal,
+      ).then((value) => {
+        setCommit(value);
+        setCommitState("ready");
+      }).catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === "AbortError") return;
+        setCommitError(reason instanceof Error ? reason.message : "unknown error");
+        setCommitState("error");
+      });
+    }, COMMIT_FETCH_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [repo.path, selectedHash, commitRetry]);
 
   const virtualNode = useMemo(() => {
@@ -376,7 +387,7 @@ export default function RepoDetail({ repo, copied, onCopy }: RepoDetailProps) {
               <div className="muted-line">コミットがありません</div>
             )}
             {graph.truncated && (
-              <div className="truncated" role="status">200 件まで表示しています。</div>
+              <div className="truncated" role="status">{GRAPH_LIMIT} 件まで表示しています。</div>
             )}
           </>
         )}

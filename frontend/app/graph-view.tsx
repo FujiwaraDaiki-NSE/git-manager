@@ -2,29 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
-
-export type GraphRefKind = "head" | "branch" | "remote" | "tag";
-
-export type GraphRef = {
-  name: string;
-  kind: GraphRefKind;
-};
-
-export type GraphRow = {
-  hash: string;
-  short: string;
-  parents: string[];
-  refs: GraphRef[];
-  author: string;
-  date: string;
-  subject: string;
-  lane: number;
-  in_lanes: number[];
-  through: number[];
-  out_lanes: number[];
-  is_head: boolean;
-  is_merge: boolean;
-};
+import type { GraphRef, GraphRow } from "./types";
 
 export type GraphVirtualNode = {
   lane: number;
@@ -54,7 +32,8 @@ const MAX_VISIBLE_LANES = 8;
 const graphWidth = (maxLane: number) =>
   Math.min(maxLane + 1, MAX_VISIBLE_LANES) * LANE_WIDTH + 16;
 
-const laneX = (lane: number) => lane * LANE_WIDTH + NODE_X_OFFSET;
+const laneX = (lane: number) =>
+  Math.min(lane, MAX_VISIBLE_LANES - 1) * LANE_WIDTH + NODE_X_OFFSET;
 
 function isGraphRow(item: GraphItem): item is GraphRow {
   return "hash" in item;
@@ -104,9 +83,15 @@ type GraphSvgProps = {
   item: GraphItem;
   width: number;
   connectFromVirtualLane?: number;
+  throughVirtualLane?: number;
 };
 
-function GraphSvg({ item, width, connectFromVirtualLane }: GraphSvgProps) {
+function GraphSvg({
+  item,
+  width,
+  connectFromVirtualLane,
+  throughVirtualLane,
+}: GraphSvgProps) {
   const lane = item.lane;
   const nodeX = laneX(lane);
   const lines = isGraphRow(item)
@@ -117,6 +102,13 @@ function GraphSvg({ item, width, connectFromVirtualLane }: GraphSvgProps) {
               className: "graph-line graph-line-virtual",
               d: connectorPath(connectFromVirtualLane, lane, 0, ROW_HEIGHT / 2),
               key: "virtual-in",
+            }]),
+        ...(throughVirtualLane === undefined
+          ? []
+          : [{
+              className: "graph-line graph-line-through",
+              d: connectorPath(throughVirtualLane, throughVirtualLane, 0, ROW_HEIGHT),
+              key: "virtual-through",
             }]),
         ...item.through.map((lineLane) => ({
           className: "graph-line graph-line-through",
@@ -198,6 +190,7 @@ type GraphRowViewProps = {
   onClick?: (item: GraphItem) => void;
   onMove?: (item: GraphItem, direction: -1 | 1) => void;
   connectFromVirtualLane?: number;
+  throughVirtualLane?: number;
 };
 
 function GraphRowView({
@@ -208,6 +201,7 @@ function GraphRowView({
   onClick,
   onMove,
   connectFromVirtualLane,
+  throughVirtualLane,
 }: GraphRowViewProps) {
   const interactive = onClick !== undefined;
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -255,6 +249,7 @@ function GraphRowView({
         item={item}
         width={width}
         connectFromVirtualLane={connectFromVirtualLane}
+        throughVirtualLane={throughVirtualLane}
       />
       <div className="graph-row-content">
         <div className="graph-row-title">
@@ -288,10 +283,16 @@ export function GraphView({
   useEffect(() => {
     setActiveKey((current) => {
       if (selectedHash && rows.some((row) => row.hash === selectedHash)) return selectedHash;
-      if (current && items.some((item) => isInteractive(item) && rowKey(item) === current)) return current;
+      if (
+        current &&
+        ((current === virtualKey && firstKey === virtualKey) ||
+          (onSelect !== undefined && rows.some((row) => row.hash === current)))
+      ) {
+        return current;
+      }
       return firstKey;
     });
-  }, [firstKey, items, onSelect, onVirtualSelect, rows, selectedHash]);
+  }, [firstKey, onSelect, onVirtualSelect, rows, selectedHash]);
 
   const select = (hash: string) => {
     setActiveKey(hash);
@@ -319,17 +320,20 @@ export function GraphView({
     document.getElementById(rowId(next))?.focus();
   };
   const classes = ["graph-view", className].filter(Boolean).join(" ");
+  const headIndex = virtualNode ? rows.findIndex((row) => row.is_head) : -1;
 
   return (
     <div aria-label={ariaLabel} className={classes} role="group">
       {items.map((item, index) => {
         const commit = isGraphRow(item);
-        const isFirstCommitAfterVirtual = Boolean(virtualNode) && commit && index === 1;
+        const isVirtualHeadRow = Boolean(virtualNode) && commit && index === headIndex + 1;
+        const isVirtualHeadIntermediate =
+          Boolean(virtualNode) && commit && index > 0 && index < headIndex + 1;
         const interactive = isInteractive(item);
         return (
           <GraphRowView
             active={interactive && rowKey(item) === activeKey}
-            connectFromVirtualLane={isFirstCommitAfterVirtual ? virtualNode?.lane : undefined}
+            connectFromVirtualLane={isVirtualHeadRow ? virtualNode?.lane : undefined}
             item={item}
             key={rowKey(item)}
             onClick={
@@ -343,6 +347,7 @@ export function GraphView({
             }
             onMove={interactive ? move : undefined}
             selected={commit && selectedHash === item.hash}
+            throughVirtualLane={isVirtualHeadIntermediate ? virtualNode?.lane : undefined}
             width={width}
           />
         );

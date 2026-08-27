@@ -10,33 +10,9 @@ export const runtime = "nodejs";
 
 const backendOrigin = () => process.env.BACKEND_ORIGIN ?? "http://backend:8000";
 
-const allowedMethods: Record<string, readonly string[]> = {
-  repos: ["GET"],
-  stream: ["GET"],
-  health: ["GET"],
-  rescan: ["POST"],
-  refresh: ["POST"],
-  "repo/graph": ["GET"],
-  "repo/commit": ["GET"],
-  "repo/branches": ["GET"],
-};
-
 async function proxy(req: Request, path: string[]): Promise<Response> {
-  const route = path.join("/");
-  const methods = allowedMethods[route];
-  if (!methods) {
-    return Response.json({ error: "利用できない API です" }, { status: 404 });
-  }
-  if (!methods.includes(req.method)) {
-    return Response.json(
-      { error: "この API では利用できないメソッドです" },
-      { status: 405, headers: { Allow: methods.join(", ") } },
-    );
-  }
-
   const search = new URL(req.url).search;
-  const encodedPath = path.map((segment) => encodeURIComponent(segment)).join("/");
-  const target = `${backendOrigin()}/api/${encodedPath}${search}`;
+  const target = `${backendOrigin()}/api/${path.join("/")}${search}`;
 
   const headers: Record<string, string> = {};
   const contentType = req.headers.get("content-type");
