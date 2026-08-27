@@ -11,8 +11,7 @@ from typing import Any
 from app.gitinfo import _run
 
 # %H ハッシュ / %P 親 / %D ref 名 / %an 作者 / %cI 日時 / %s 件名
-# --graph の表示用プレフィックスと機械用レコードを分ける。
-FORMAT = "%x1e%H%x1f%h%x1f%P%x1f%D%x1f%an%x1f%cI%x1f%s"
+FORMAT = "%H%x1f%h%x1f%P%x1f%D%x1f%an%x1f%cI%x1f%s"
 
 
 def _parse_refs(raw: str) -> list[dict[str, str]]:
@@ -49,15 +48,6 @@ def _parse_refs(raw: str) -> list[dict[str, str]]:
     return refs
 
 
-def _graph_lane(prefix: str) -> int:
-    star = prefix.find("*")
-    return max(star, 0) // 2
-
-
-def _graph_through(prefix: str) -> list[int]:
-    return [index // 2 for index, char in enumerate(prefix) if char == "|" and index % 2 == 0]
-
-
 def _free_slot(lanes: list[str | None]) -> int:
     for i, v in enumerate(lanes):
         if v is None:
@@ -71,7 +61,6 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
         "log",
         "--date-order",
         "--decorate=full",
-        "--graph",
         f"--max-count={limit + 1}",
         f"--format={FORMAT}",
     ]
@@ -100,12 +89,10 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
         return {"rows": [], "max_lane": 0, "head_lane": None, "truncated": False}
 
     raw_rows: list[dict[str, Any]] = []
-    # str.splitlines() は RS (\x1e) も改行として扱うため、LF だけで分ける。
-    for line in out.split("\n"):
-        marker = line.find("\x1e")
-        if marker < 0:
+    for line in out.splitlines():
+        if not line.strip():
             continue
-        fields = line[marker + 1:].split("\x1f")
+        fields = line.split("\x1f")
         if len(fields) != 7:
             continue
         full, short, parents, refs, author, date, subject = fields
@@ -117,8 +104,6 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
             "author": author,
             "date": date,
             "subject": subject,
-            "_lane": _graph_lane(line[:marker]),
-            "_through": _graph_through(line[:marker]),
         })
 
     truncated = len(raw_rows) > limit
@@ -130,28 +115,22 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
     head_lane: int | None = None
 
     for row in raw_rows:
-        visual_lane = row.pop("_lane")
-        visual_through = row.pop("_through")
-        # Git のグラフは遷移行で列を入れ替えることがある。コミット行の
-        # 実列を使って、親ハッシュを現在の表示列へ同期する。
         occupied = [i for i, v in enumerate(lanes) if v == row["hash"]]
-        other_targets = [v for v in lanes if v is not None and v != row["hash"]]
-        if len(other_targets) == len(visual_through):
-            aligned: list[str | None] = [None] * (max([visual_lane, *visual_through], default=0) + 1)
-            for position, target in zip(visual_through, other_targets):
-                aligned[position] = target
-            if occupied:
-                aligned[visual_lane] = row["hash"]
-                occupied = [visual_lane]
-            lanes = aligned
-            lane = visual_lane
+        if occupied:
+            lane = occupied[0]
+            merge_in = occupied[1:]
         else:
-            # Git 出力と内部状態が一致しない場合は、レスポンスを壊さず
-            # 従来の親追跡を使う。
-            lane = occupied[0] if occupied else _free_slot(lanes)
+            lane = _free_slot(lanes)
+            merge_in = []
 
         # このコミットに入ってくる線。上から降りてくるレーン
         in_lanes = occupied[:] if occupied else []
+
+        # 行全体を素通りするレーン（このコミットと無関係な枝）
+        through = [
+            i for i, v in enumerate(lanes)
+            if v is not None and i != lane and i not in merge_in
+        ]
 
         for i in occupied:
             lanes[i] = None
@@ -171,22 +150,22 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
                 lanes[slot] = parent
                 out_lanes.append(slot)
 
-        # git log --graph は遷移行で内部の空きレーンも左へ詰める。
-        # これをしないと、別枝が残るマージ後に `|/|` と lane がずれる。
-        lanes = [value for value in lanes if value is not None]
+        # 末尾の空きレーンを畳んで幅を詰める
+        while lanes and lanes[-1] is None:
+            lanes.pop()
 
-        current_max = max([visual_lane, *visual_through, *in_lanes, *out_lanes], default=0)
+        current_max = max([lane, *through, *in_lanes, *out_lanes], default=0)
         max_lane = max(max_lane, current_max)
 
         is_head = any(r["kind"] == "head" for r in row["refs"])
         if is_head and head_lane is None:
-            head_lane = visual_lane
+            head_lane = lane
 
         rows.append({
             **row,
-            "lane": visual_lane,
+            "lane": lane,
             "in_lanes": in_lanes,
-            "through": visual_through,
+            "through": through,
             "out_lanes": out_lanes,
             "is_head": is_head,
             "is_merge": len(row["parents"]) > 1,
