@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import selectors
 import shutil
 import subprocess
 import time
@@ -40,6 +41,62 @@ def _run(repo: str, args: list[str], timeout: int | None = None) -> str | None:
     except (subprocess.TimeoutExpired, OSError):
         return None
     return proc.stdout if proc.returncode == 0 else None
+
+
+def _run_limited(
+    repo: str,
+    args: list[str],
+    max_bytes: int,
+    timeout: int | None = None,
+) -> str | None:
+    """stdout を max_bytes + 1 bytes まで読み、超過時は git を終了させて返す。"""
+    proc: subprocess.Popen[bytes] | None = None
+    selector: selectors.BaseSelector | None = None
+    output = bytearray()
+    timeout_sec = timeout or config.GIT_TIMEOUT_SEC
+    try:
+        proc = subprocess.Popen(
+            [GIT, "-C", repo, *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={**os.environ, **NON_INTERACTIVE_ENV},
+        )
+        if proc.stdout is None:
+            raise OSError("git stdout is unavailable")
+        selector = selectors.DefaultSelector()
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        deadline = time.monotonic() + timeout_sec
+        while len(output) <= max_bytes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise subprocess.TimeoutExpired(proc.args, timeout_sec)
+            chunk = os.read(proc.stdout.fileno(), min(64 * 1024, max_bytes + 1 - len(output)))
+            if not chunk:
+                break
+            output.extend(chunk)
+
+        if len(output) > max_bytes:
+            proc.kill()
+            proc.wait()
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or proc.wait(timeout=remaining) != 0:
+                return None
+        return output.decode("utf-8", errors="replace")
+    except (subprocess.TimeoutExpired, OSError):
+        if proc is not None:
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=1)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+        return None
+    finally:
+        if selector is not None:
+            selector.close()
+        if proc is not None and proc.stdout is not None:
+            proc.stdout.close()
 
 
 def _unquote(path: str) -> str:

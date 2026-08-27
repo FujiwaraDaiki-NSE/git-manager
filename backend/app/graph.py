@@ -41,6 +41,8 @@ def _parse_refs(raw: str) -> list[dict[str, str]]:
             name = name[len("refs/tags/"):]
             if kind == "branch":
                 kind = "tag"
+        elif name.startswith("refs/"):
+            continue
         elif kind == "branch" and "/" in name:
             # --decorate=full を使わない呼び出し元との互換用。
             kind = "remote"
@@ -56,7 +58,7 @@ def _free_slot(lanes: list[str | None]) -> int:
     return len(lanes) - 1
 
 
-def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
+def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any] | None:
     args = [
         "log",
         "--date-order",
@@ -69,7 +71,7 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
     else:
         upstream = _run(repo, ["rev-parse", "--symbolic-full-name", "@{upstream}"])
         if upstream:
-            args.extend(["HEAD", upstream.strip()])
+            args.extend(["HEAD", upstream.strip(), "--"])
 
     out = _run(repo, args)
     if out is None:
@@ -82,11 +84,11 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
             return {
                 "rows": [],
                 "max_lane": 0,
-                "head_lane": 0,
+                "head_lane": None,
                 "truncated": False,
                 "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
             }
-        return {"rows": [], "max_lane": 0, "head_lane": None, "truncated": False}
+        return None
 
     raw_rows: list[dict[str, Any]] = []
     for line in out.splitlines():
@@ -118,6 +120,7 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
         occupied = [i for i, v in enumerate(lanes) if v == row["hash"]]
         if occupied:
             lane = occupied[0]
+            # 同じコミットを指すレーンが複数あることがある（複数の子が同じ親を持つ）
             merge_in = occupied[1:]
         else:
             lane = _free_slot(lanes)
@@ -174,7 +177,7 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any]:
     return {
         "rows": rows,
         "max_lane": max_lane,
-        "head_lane": head_lane if head_lane is not None else 0,
+        "head_lane": head_lane,
         "truncated": truncated,
         "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
     }

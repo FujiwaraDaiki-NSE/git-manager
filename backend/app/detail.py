@@ -90,7 +90,7 @@ def get_commit(repo: str, commit_hash: str) -> dict[str, Any] | None:
     if result is None:
         return None
 
-    patch = gitinfo._run(
+    patch = gitinfo._run_limited(
         repo,
         [
             "show",
@@ -99,8 +99,10 @@ def get_commit(repo: str, commit_hash: str) -> dict[str, Any] | None:
             "--format=",
             "--patch",
             "--unified=3",
+            "--cc",
             commit_hash,
         ],
+        PATCH_MAX_BYTES,
     )
     if patch is None:
         return None
@@ -114,6 +116,8 @@ def _parse_ref_line(line: str) -> dict[str, Any] | None:
     if len(fields) != 7 or not fields[0]:
         return None
     name, commit_hash, upstream, track, date, head, refname = fields
+    if refname.startswith("refs/remotes/") and refname.endswith("/HEAD"):
+        return None
     is_remote = refname.startswith("refs/remotes/")
     return {
         "name": name,
@@ -134,26 +138,9 @@ def get_branches(repo: str) -> dict[str, Any] | None:
         return None
     merged_raw = gitinfo._run(repo, ["branch", "--merged", "HEAD", "--format=%(refname:short)"])
     if merged_raw is None:
-        # HEAD がまだ無い新規リポジトリでは、このコマンドだけが失敗する。
-        # HEAD が解決できる場合は別の git エラーとして扱う。
-        if gitinfo._run(repo, ["rev-parse", "--verify", "--quiet", "HEAD"]):
-            return None
         merged = set()
     else:
         merged = {line.strip() for line in merged_raw.splitlines() if line.strip()}
-        merged_refs = gitinfo._run(
-            repo,
-            [
-                "for-each-ref",
-                "--merged=HEAD",
-                "--format=%(refname:short)",
-                "refs/heads",
-                "refs/remotes",
-            ],
-        )
-        if merged_refs is None:
-            return None
-        merged.update(line.strip() for line in merged_refs.splitlines() if line.strip())
     local: list[dict[str, Any]] = []
     remotes: list[dict[str, Any]] = []
     for line in refs.splitlines():

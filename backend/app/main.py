@@ -42,6 +42,8 @@ DEBOUNCE_SEC = 1.0
 _pending: set[str] = set()
 _pending_task: asyncio.Task | None = None
 
+MAX_GRAPH_LIMIT = 2_000
+
 
 def _repo_lock(host_path: str) -> threading.Lock:
     with _repo_locks_guard:
@@ -59,7 +61,12 @@ def _known_repo(host_path: str) -> str:
     return paths.to_container(host_path)
 
 
-def _build_graph_sync(host_path: str, repo: str, all_refs: bool, limit: int) -> dict[str, Any]:
+def _build_graph_sync(
+    host_path: str,
+    repo: str,
+    all_refs: bool,
+    limit: int,
+) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return graph.build(repo, all_refs, limit)
 
@@ -234,7 +241,13 @@ async def lifespan(_app: FastAPI):
     bus.bind(loop)
 
     # 探索せずキャッシュから即座に立ち上げる
-    cached = store.load()
+    cached = {
+        host_path: repo
+        for host_path, repo in store.load().items()
+        if isinstance(host_path, str)
+        and isinstance(repo, dict)
+        and os.path.isdir(paths.to_container(host_path))
+    }
     with STATE_LOCK:
         STATE.update(cached)
 
@@ -283,6 +296,11 @@ async def get_repo_graph(
 ) -> dict[str, Any]:
     if limit < 1:
         raise HTTPException(status_code=422, detail="limit は 1 以上で指定してください")
+    if limit > MAX_GRAPH_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"limit は {MAX_GRAPH_LIMIT} 以下で指定してください",
+        )
     repo = _known_repo(path)
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
@@ -293,7 +311,7 @@ async def get_repo_graph(
         all,
         limit,
     )
-    if "command" not in result:
+    if result is None:
         raise HTTPException(status_code=502, detail="git log を実行できませんでした")
     return result
 
