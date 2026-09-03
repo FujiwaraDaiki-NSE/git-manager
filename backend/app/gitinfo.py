@@ -450,8 +450,9 @@ def collect(
     merged_branches = list(context.get("merged_branches", []))
     merged_branch = context.get("merged_branch")
 
-    # Git's own common-dir result is authoritative.  Discovery context remains
-    # necessary for a prunable worktree whose directory no longer exists.
+    # Verified discovery context is authoritative.  Git's common-dir result
+    # fills only fields that were not supplied; a linked checkout alone cannot
+    # distinguish an external .git parent from the actual main checkout.
     common_raw = _run(repo, ["rev-parse", "--git-common-dir"])
     if common_raw:
         common_git_dir = common_raw.strip()
@@ -461,12 +462,16 @@ def collect(
             # scanner.repo_layout distinguishes a linked worktree from a
             # normal repository using actual != common, including the
             # separate-git-dir case where .git is a pointer file.
-            resolved_common_dir = paths.to_host(layout.common_root)
-            resolved_is_worktree = layout.is_worktree
+            if "common_dir" not in context:
+                resolved_common_dir = paths.to_host(layout.common_root)
+            if "is_worktree" not in context:
+                resolved_is_worktree = layout.is_worktree
         else:
             common_root = os.path.dirname(os.path.realpath(common_git_dir))
-            resolved_common_dir = paths.to_host(common_root)
-            resolved_is_worktree = os.path.realpath(repo) != common_root
+            if "common_dir" not in context:
+                resolved_common_dir = paths.to_host(common_root)
+            if "is_worktree" not in context:
+                resolved_is_worktree = os.path.realpath(repo) != common_root
 
     fetched_at: float | None = None
     if fetch and config.FETCH_ENABLED:
