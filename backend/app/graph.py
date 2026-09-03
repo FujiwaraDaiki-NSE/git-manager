@@ -58,7 +58,80 @@ def _free_slot(lanes: list[str | None]) -> int:
     return len(lanes) - 1
 
 
+def _origin_default(repo: str) -> tuple[str | None, str | None]:
+    """Return origin/HEAD's branch name and remote-tracking commit hash."""
+    raw = _run(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+    if not raw:
+        return None, None
+    value = raw.strip()
+    prefix = "origin/"
+    if not value.startswith(prefix):
+        return None, None
+    name = value[len(prefix):]
+    if not name:
+        return None, None
+    commit_hash = _run(
+        repo,
+        [
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"refs/remotes/origin/{name}",
+        ],
+    )
+    return name, commit_hash.strip() if commit_hash else None
+
+
+def _local_branch_heads(repo: str) -> list[dict[str, str]] | None:
+    """Return every local branch and its full HEAD hash.
+
+    Branch decorations in ``git log`` are limited to the displayed history,
+    so they cannot describe branches whose tip is outside the graph limit.
+    Keep this as a separate ref query and let the frontend decide which tips
+    are currently visible.
+    """
+    raw = _run(
+        repo,
+        [
+            "for-each-ref",
+            "--format=%(refname:short)%1f%(objectname)",
+            "refs/heads",
+        ],
+    )
+    if raw is None:
+        return None
+    heads: list[dict[str, str]] = []
+    for line in raw.splitlines():
+        name, separator, commit_hash = line.partition("\x1f")
+        if separator and name and commit_hash:
+            heads.append({"name": name, "hash": commit_hash})
+    return heads
+
+
+def _empty_response(
+    all_refs: bool,
+    default: str | None,
+    branch_heads: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Return the stable graph shape for an empty repository."""
+    return {
+        "rows": [],
+        "max_lane": 0,
+        "head_lane": None,
+        "default_branch": default,
+        "default_lane": None,
+        "branch_heads": branch_heads,
+        "truncated": False,
+        "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
+    }
+
+
 def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any] | None:
+    default, default_hash = _origin_default(repo)
+    branch_heads = _local_branch_heads(repo)
+    if branch_heads is None:
+        return None
+
     args = [
         "log",
         "--date-order",
@@ -81,13 +154,7 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any] 
         inside = _run(repo, ["rev-parse", "--is-inside-work-tree"])
         head = _run(repo, ["rev-parse", "--verify", "--quiet", "HEAD"])
         if inside == "true\n" and head is None:
-            return {
-                "rows": [],
-                "max_lane": 0,
-                "head_lane": None,
-                "truncated": False,
-                "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
-            }
+            return _empty_response(all_refs, default, branch_heads)
         return None
 
     raw_rows: list[dict[str, Any]] = []
@@ -174,10 +241,18 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any] 
             "is_merge": len(row["parents"]) > 1,
         })
 
+    default_lane = next(
+        (row["lane"] for row in rows if row["hash"] == default_hash),
+        None,
+    )
+
     return {
         "rows": rows,
         "max_lane": max_lane,
         "head_lane": head_lane,
+        "default_branch": default,
+        "default_lane": default_lane,
+        "branch_heads": branch_heads,
         "truncated": truncated,
         "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
     }

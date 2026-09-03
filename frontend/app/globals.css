@@ -686,6 +686,136 @@ body {
 .graph-line-virtual {
   stroke-dasharray: 3 2;
 }
+.branch-relation-summary {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  margin-bottom: 12px;
+  padding: 10px 12px;
+}
+.branch-relation-baseline,
+.branch-relation-count {
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+.branch-relation-baseline code {
+  color: var(--accent);
+  font-weight: 700;
+}
+.branch-relation-note {
+  border-top: 1px solid var(--rule);
+  color: var(--c-behind);
+  font-size: var(--fs-aux);
+  margin-bottom: 8px;
+  padding-top: 8px;
+}
+.branch-relation-diagram {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  margin: 4px 0 8px;
+}
+.branch-relation-svg {
+  display: block;
+  flex: 0 1 300px;
+  min-width: 170px;
+  max-width: 300px;
+  color: var(--c-worktree);
+}
+.branch-relation-line-default {
+  color: var(--accent);
+}
+.branch-relation-line-branch {
+  color: var(--c-worktree);
+}
+.branch-relation-line.unavailable {
+  stroke-dasharray: 4 3;
+  opacity: 0.65;
+}
+.branch-relation-node {
+  fill: currentColor;
+}
+.branch-relation-node-default {
+  color: var(--accent);
+}
+.branch-relation-node-branch {
+  color: var(--c-worktree);
+}
+.branch-relation-common {
+  color: var(--c-behind);
+}
+.branch-relation-head {
+  color: var(--c-worktree);
+}
+.branch-relation-head-default {
+  color: var(--accent);
+}
+.branch-relation-head-unavailable {
+  color: var(--muted);
+}
+.branch-relation-diagram-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+.branch-relation-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.branch-relation-item {
+  border-top: 1px solid var(--rule);
+  min-width: 0;
+  padding-top: 7px;
+}
+.branch-relation-item-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.branch-relation-item-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-relation-item-head code {
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+.branch-relation-group-count {
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+.branch-relation-default {
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--accent);
+  font-size: var(--fs-aux);
+  padding: 0 4px;
+}
+.branch-relation-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--muted-on-paper);
+  font-size: var(--fs-aux);
+  line-height: 1.45;
+  margin-top: 3px;
+}
+.branch-relation-detail span {
+  min-width: 0;
+}
+.branch-relation-detail code {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
 .graph-row-content {
   min-width: 0;
   overflow: hidden;
