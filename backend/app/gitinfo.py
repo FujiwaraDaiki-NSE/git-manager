@@ -273,6 +273,20 @@ def list_worktrees(repo: str) -> list[dict[str, Any]] | None:
         for item in worktrees:
             if os.path.realpath(os.path.abspath(str(item.get("path", "")))) == common_git_dir:
                 item["path"] = repo_path
+    elif layout is not None:
+        # From a linked checkout, the first record is indistinguishable from
+        # an administration directory when --separate-git-dir was used.  Mark
+        # the candidate so a caller with independent checkout evidence can
+        # decide whether it is safe to expose.
+        common_git_dir = os.path.realpath(layout.common_git_dir)
+        for item in worktrees:
+            item_path = os.path.realpath(os.path.abspath(str(item.get("path", ""))))
+            separate_dot_git_admin = (
+                os.path.basename(common_git_dir) == ".git"
+                and item_path == os.path.dirname(common_git_dir)
+            )
+            if item_path == common_git_dir or separate_dot_git_admin:
+                item["administrative_candidate"] = True
     return worktrees
 
 

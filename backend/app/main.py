@@ -222,11 +222,20 @@ def _refresh_sync(
             )
             default_branch = gitinfo.default_branch(container)
             if worktrees is not None:
+                with STATE_LOCK:
+                    common_row = STATE.get(common_host)
+                verified_main_host = (
+                    common_host
+                    if common_row is not None
+                    and common_row.get("is_worktree") is False
+                    else None
+                )
                 project_contexts = _worktree_contexts(
                     common_host,
                     worktrees,
                     merged or set(),
                     default_branch,
+                    verified_main_host,
                 )
                 project_result, target_present = _refresh_project_members(
                     common_host,
@@ -308,6 +317,7 @@ def _worktree_contexts(
     worktrees: list[dict[str, Any]],
     merged: set[str],
     default_branch: str | None,
+    verified_main_host: str | None,
 ) -> dict[str, dict[str, Any]]:
     """Build current project metadata from Git's worktree and merged refs."""
     common_key = _path_key(common_host)
@@ -336,6 +346,11 @@ def _worktree_contexts(
             continue
         host_path = paths.to_host(os.path.abspath(str(raw_path)))
         is_main = _path_key(host_path) == common_key
+        if item.get("administrative_candidate") is True and (
+            verified_main_host is None
+            or _path_key(host_path) != _path_key(verified_main_host)
+        ):
+            continue
         # When only a linked worktree from a --separate-git-dir repository is
         # visible, Git reports the common git directory as its first
         # "worktree" record.  It is administration data, not a checkout.
@@ -550,6 +565,7 @@ async def _discover() -> None:
             {
                 "common_host": common_host,
                 "main_host": host_path,
+                "verified_main_host": None,
                 "scan_paths": [],
             },
         )
@@ -557,6 +573,7 @@ async def _discover() -> None:
         if layout is not None and not layout.is_worktree:
             group["common_host"] = host_path
             group["main_host"] = host_path
+            group["verified_main_host"] = host_path
 
         # ``found`` counts unique paths, not duplicate scanner hits.
         scanning["found"] = len(discovered)
@@ -590,6 +607,7 @@ async def _discover() -> None:
             worktrees,
             merged,
             default_branch,
+            group["verified_main_host"],
         )
         for worktree_info in worktrees:
             raw_path = worktree_info.get("path")
@@ -820,9 +838,22 @@ def _project_refresh_representatives(host_paths: list[str]) -> list[str]:
                 for path in candidates
                 if scanner.repo_layout(paths.to_container(path)) is not None
             ),
-            pending_paths[0],
+            None,
         )
-        representatives.append(representative)
+        if representative is not None:
+            representatives.append(representative)
+            continue
+        # The last visible linked checkout can be removed while its main
+        # checkout is outside the scan.  With no directory from which Git can
+        # list the project, the vanished pending path itself is authoritative;
+        # remove it instead of collecting an error row back into STATE.
+        for path in pending_paths:
+            repo = snapshot.get(path, {})
+            if (
+                scanner.repo_layout(paths.to_container(path)) is None
+                and repo.get("worktree_state") not in {"locked", "prunable"}
+            ):
+                _remove_threadsafe(path)
     return representatives
 
 

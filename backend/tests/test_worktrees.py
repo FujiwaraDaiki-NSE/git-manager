@@ -68,6 +68,7 @@ def test_discovery_adds_worktree_outside_scan_and_preserves_context(
     monkeypatch.setattr(main.store, "save", lambda _state: None)
     monkeypatch.setattr(main, "watcher", None)
     main.STATE.clear()
+
     main._pending.clear()
 
     asyncio.run(main._discover())
@@ -201,6 +202,52 @@ def test_discovery_supports_only_linked_separate_git_dir(
     assert str(linked) in main.STATE
     assert str(git_dir) not in main.STATE
     assert main.STATE[str(linked)]["common_dir"] == str(git_dir)
+    assert main.STATE[str(linked)]["is_worktree"] is True
+    main.STATE.clear()
+
+
+def test_linked_separate_dot_git_does_not_expose_administration_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    admin = tmp_path / "admin"
+    git_dir = admin / ".git"
+    linked = tmp_path / "linked"
+    repo.mkdir()
+    admin.mkdir()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "init",
+            "-q",
+            "-b",
+            "main",
+            "--separate-git-dir",
+            str(git_dir),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.com")
+    git(repo, "commit", "--allow-empty", "-qm", "initial")
+    git(repo, "worktree", "add", "-q", "-b", "feature", str(linked))
+
+    monkeypatch.setattr(main.scanner, "find_repos", lambda: iter([str(linked)]))
+    monkeypatch.setattr(main.config, "SCAN_ROOT", str(tmp_path))
+    monkeypatch.setattr(main.config, "HOST_PREFIX", str(tmp_path))
+    monkeypatch.setattr(main.config, "FETCH_ENABLED", False)
+    monkeypatch.setattr(main.store, "save", lambda _state: None)
+    monkeypatch.setattr(main, "watcher", None)
+    main.STATE.clear()
+
+    asyncio.run(main._discover())
+
+    assert set(main.STATE) == {str(linked)}
     assert main.STATE[str(linked)]["is_worktree"] is True
     main.STATE.clear()
 
@@ -400,6 +447,63 @@ def test_debounce_refreshes_each_common_repository_once(
     asyncio.run(main._drain_pending())
 
     assert refreshed == [([str(repo)], True)]
+    main.STATE.clear()
+
+
+def test_debounce_removes_last_vanished_linked_checkout(
+    repo_with_worktree: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, worktree = repo_with_worktree
+    main.STATE.clear()
+    main.STATE[str(worktree)] = {
+        "path": str(worktree),
+        "common_dir": str(repo),
+        "is_worktree": True,
+    }
+    main._pending.clear()
+    main._pending.add(str(worktree))
+    main._suppress.clear()
+    refreshed: list[str] = []
+    removed: list[tuple[str, object]] = []
+    git(repo, "worktree", "remove", "-f", str(worktree))
+
+    async def fake_refresh_many(paths: list[str], **_kwargs: object) -> None:
+        refreshed.extend(paths)
+
+    monkeypatch.setattr(main, "DEBOUNCE_SEC", 0)
+    monkeypatch.setattr(main, "_refresh_many", fake_refresh_many)
+    monkeypatch.setattr(
+        main.bus,
+        "publish_threadsafe",
+        lambda event, data: removed.append((event, data)),
+    )
+    monkeypatch.setattr(main, "watcher", None)
+
+    asyncio.run(main._drain_pending())
+
+    assert refreshed == []
+    assert str(worktree) not in main.STATE
+    assert ("removed", {"path": str(worktree)}) in removed
+    main.STATE.clear()
+
+
+@pytest.mark.parametrize("worktree_state", ["locked", "prunable"])
+def test_missing_managed_worktree_is_not_removed_without_git_confirmation(
+    tmp_path: Path,
+    worktree_state: str,
+) -> None:
+    worktree = str(tmp_path / "missing")
+    main.STATE.clear()
+    main.STATE[worktree] = {
+        "path": worktree,
+        "common_dir": str(tmp_path / "admin.git"),
+        "is_worktree": True,
+        "worktree_state": worktree_state,
+    }
+
+    assert main._project_refresh_representatives([worktree]) == []
+    assert worktree in main.STATE
     main.STATE.clear()
 
 
