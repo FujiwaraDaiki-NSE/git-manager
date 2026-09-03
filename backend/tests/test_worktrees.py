@@ -250,6 +250,7 @@ def test_linked_separate_dot_git_does_not_expose_administration_directory(
     assert str(admin) not in main.STATE
     assert main.STATE[str(repo)]["is_worktree"] is False
     assert main.STATE[str(linked)]["is_worktree"] is True
+    assert main.STATE[str(linked)]["common_dir"] == str(repo)
     main.STATE.clear()
 
 
