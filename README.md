@@ -32,13 +32,16 @@ frontend のルートハンドラ経由でしか到達できない。
 | コミットグラフ | `git log --oneline --graph` |
 | コミット詳細（選択コミットの変更ファイルの統計、diff） | `git show <hash>` |
 | ブランチ一覧 | `git branch -vv` |
+| worktree 一覧と状態 | `git worktree list --porcelain` |
 | stash 数 | `git stash list` |
 | リモート URL | `git config --get remote.origin.url` |
 
 一覧には `git status -sb` の 1 行目をそのまま出す。
 
-リポジトリは、`なし`、`親フォルダ`、`リモートホスト` でグルーピングできる。
-表示の切り替えだけなので、設定は不要。
+リポジトリは既定で本体と linked worktree を同じ「プロジェクト」にまとめる。
+`なし`、`親フォルダ`、`リモート（リポジトリ）` にも切り替えられる。
+リモートは URL の表記差を正規化するため、同じリポジトリの SSH / HTTPS clone は
+同じグループになり、owner が異なる fork は別グループになる。
 
 ```
 ## feat/search...origin/feat/search [ahead 2, behind 4]
@@ -59,6 +62,10 @@ MM  frontend/app/page.tsx
 | 未ステージあり | `git add -p` |
 | 未追跡のみ | `git add -A` |
 | ステージ済みのみ | `git commit` |
+| detached HEAD | `git switch -` |
+| prunable worktree | `git worktree prune` |
+| マージ済み worktree | `git worktree remove <path>` |
+| マージ済みブランチ | `git branch -d <branch>` |
 | upstream なし | `git push -u origin <branch>` |
 | ahead かつ behind | `git pull --rebase` |
 | behind のみ | `git pull --ff-only` |
@@ -82,11 +89,12 @@ MM  frontend/app/page.tsx
 効かせている仕掛け:
 
 - 起動時は探索しない。`repos.json` のパスを検証して即表示する
-- `.git/logs/refs/HEAD` の mtime で活動順にソート。`os.stat` 1 回で決まるので
-  git を一度も起動する前に順序が決まっている
+- `.git/logs/HEAD` の mtime で活動順にソート。linked worktree は `.git` ファイルから
+  実体を解決するので、commit や checkout の時刻がそのまま反映される
 - `IntersectionObserver` が画面内の行を `POST /api/refresh` に送り、優先処理する
 - 探索で見つけ次第 SSE でパスを流し、状態は後から埋める
 - inotify で `.git` を監視。以降は変化したリポジトリだけ再取得する
+- fetch は `common_dir` ごとに 1 回だけ実行し、同じプロジェクトの worktree で共有する
 
 ## 設定
 
@@ -106,6 +114,8 @@ MM  frontend/app/page.tsx
 除外ディレクトリは `backend/app/scanner.py` の `SKIP_NAMES`。
 `node_modules` `.venv` `.cargo` `go/pkg` などは登録済み。
 `/proc` `/sys` とネットワークマウント（NFS、sshfs 等）も自動で弾く。
+ドットディレクトリ自体は走査対象外だが、本体で `git worktree list` を実行して
+`.cursor/worktrees` や `.claude/worktrees` にある linked worktree も補完する。
 
 ## 承知しておくべきこと
 

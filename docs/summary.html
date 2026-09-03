@@ -128,7 +128,7 @@
       <div class="label">Developer summary</div>
       <h1>gitdash</h1>
       <p class="lead">PC内に散在するGitリポジトリを登録なしで見つけ、状態・履歴・ブランチを読み取り専用で一覧するローカルダッシュボード。Docker Composeで常駐し、利用者は <code>http://localhost:4412</code> から確認する。</p>
-      <div class="stamp">対象実装: backend/app/main.py・detail.py・graph.py、frontend/app/graph-view.tsx・repo-detail.tsx・page.tsx</div>
+      <div class="stamp">対象実装: backend/app/main.py・scanner.py・watcher.py・gitinfo.py・detail.py・graph.py、frontend/app/graph-view.tsx・repo-detail.tsx・page.tsx、docker-compose.yml</div>
     </header>
 
     <section>
@@ -145,10 +145,10 @@
     <section>
       <h2>全体構成</h2>
       <div class="flow" aria-label="システム構成">
-        <div><strong>ブラウザ / Next.js</strong><small><code>page.tsx</code> が一覧・検索・フィルタ・グループ化を担当。詳細は <code>repo-detail.tsx</code>、グラフの各行は <code>graph-view.tsx</code>。</small></div>
+        <div><strong>ブラウザ / Next.js</strong><small><code>page.tsx</code> がプロジェクト階層、検索、フィルタ、remote repository単位のグループ化を担当。詳細は <code>repo-detail.tsx</code>、グラフの各行は <code>graph-view.tsx</code>。</small></div>
         <div><strong>Next API proxy</strong><small><code>app/api/[...path]/route.ts</code> が <code>/api/*</code> を実行時の <code>BACKEND_ORIGIN</code> へ転送。SSEのbodyはそのまま返す。</small></div>
         <div><strong>FastAPI backend</strong><small><code>STATE</code>（ホストパスをキー）とキャッシュを持ち、探索・git取得・グラフ・詳細・ブランチAPIを提供。backendのポートは外部公開しない。</small></div>
-        <div><strong>Git / filesystem</strong><small><code>/scan</code> を探索し、各リポジトリでGitを実行。<code>.git</code> はinotifyで監視し、変化したリポジトリだけ再取得する。</small></div>
+        <div><strong>Git / filesystem</strong><small>ホストと同じ絶対パスへ走査ルートをmountし、linked worktreeの <code>.git</code> ポインタを解決する。実体gitdirと共有refs/logsをinotifyで監視する。</small></div>
       </div>
       <p class="note">Composeではfrontendだけが <code>4412:3000</code> を公開し、backendは <code>expose: 8000</code> のみ。backendはホストのuid/gidで動作し、fetchのためマウントはrw。アプリはfetch以外に明示的な変更操作を行わないが、<code>git status</code> が <code>.git/index</code> を書き戻すことはある。ローカル処理用poolとfetch用fetch_poolは分離されている。</p>
 
@@ -174,8 +174,21 @@
       </table>
 
       <h3>探索とinotify</h3>
-      <p>起動時はキャッシュを先に読み、背景で探索を行う。探索は見つけた順にSSEでstubを流し、<code>.git/logs/refs/HEAD</code> のmtimeが新しい順にGit状態を取得する。Watcherは各リポジトリの <code>.git</code>、<code>.git/refs</code>、<code>.git/logs/refs</code> を監視し、<code>CLOSE_WRITE</code>・<code>MOVED_TO</code>・<code>CREATE</code>・<code>DELETE</code> を受ける。</p>
-      <p>イベント名が <code>.lock</code> で終わるものはWatcherで破棄する。残ったイベントは取得完了後3秒の抑止（<code>SUPPRESS_SEC</code>）、1秒のデバウンス（<code>DEBOUNCE_SEC</code>）、リポジトリ単位の排他を経て再取得される。作業ツリーの編集自体は <code>.git</code> を変えないためinotifyでは拾えず、frontendのフォーカス復帰時取得で補う。</p>
+      <p>起動時は新しいworktree契約を満たすキャッシュを先に読み、背景で探索を行う。探索で本体を見つけると、共通リポジトリのロック内で <code>git worktree list --porcelain</code> を一度実行し、走査対象外の <code>.cursor/worktrees</code> や <code>.claude/worktrees</code> もSTATEへ補完する。活動時刻は実体gitdirの <code>logs/HEAD</code> を使う。</p>
+      <p>Watcherは通常リポジトリのgitdir、linked worktree固有のgitdir、共有refs/logsを監視する。イベント名が <code>.lock</code> で終わるものは破棄し、残りは取得完了後3秒の抑止、1秒の共通リポジトリ単位デバウンス、<code>common_dir</code> 単位の排他を経て再取得する。作業ツリーのファイル編集自体は <code>.git</code> を変えないため、frontendのフォーカス復帰時取得で補う。</p>
+
+      <h3>リポジトリ状態のworktree契約</h3>
+      <table class="schema">
+        <thead><tr><th>フィールド</th><th>型</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td><code>common_dir</code></td><td>string</td><td>本体リポジトリのホスト絶対パス。本体自身では <code>path</code> と同じ。</td></tr>
+          <tr><td><code>is_worktree</code></td><td>boolean</td><td>linked worktreeならtrue、本体ならfalse。</td></tr>
+          <tr><td><code>worktree_state</code></td><td><code>"ok" | "prunable" | "locked" | null</code></td><td>linked worktreeの状態。本体ではnull。</td></tr>
+          <tr><td><code>merged_branches</code></td><td>string[]</td><td>現在の本体HEADへマージ済みで、現在の本体branchを除いたlocal branch。プロジェクト集計に使う。</td></tr>
+          <tr><td><code>merged_branch</code></td><td>string | null</td><td>上記のうちworktreeへ展開されていない最初の削除候補。<code>git branch -d</code> の提示に使う。</td></tr>
+        </tbody>
+      </table>
+      <p class="note">背景fetchは同じ <code>common_dir</code> につき1回だけ実行し、その後に各worktreeのlocal statusを更新する。Git操作は同じ共通リポジトリロックを共有する。</p>
     </section>
 
     <section>
@@ -268,7 +281,7 @@
             <tr><td><code>command</code></td><td>string</td><td>画面に表示する <code>git branch -vv</code>。</td></tr>
           </tbody>
         </table>
-        <p><code>local[]</code> と <code>remotes[]</code> の各要素は共通して、<code>name: string</code>、<code>hash: string</code>、<code>upstream: string | null</code>、<code>track: string | null</code>、<code>date: string</code>、<code>current: boolean</code>、<code>merged: boolean</code> を持つ。<code>merged</code> はHEADにマージ済みか、<code>current</code> は現在のHEADかを表す。画面は既定でcurrent以外のマージ済みlocal branchを折りたたむ。</p>
+        <p><code>local[]</code> と <code>remotes[]</code> の各要素は共通して、<code>name: string</code>、<code>hash: string</code>、<code>upstream: string | null</code>、<code>track: string | null</code>、<code>date: string</code>、<code>current: boolean</code>、<code>merged: boolean</code>、<code>worktree: string | null</code> を持つ。<code>worktree</code> はそのbranchをcheckout中のホスト絶対パス。画面は所在を「作業中 @ path」で示し、worktreeがないmerged local branchを削除候補として識別する。</p>
       </div>
     </section>
 

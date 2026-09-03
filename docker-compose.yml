@@ -8,7 +8,9 @@ services:
     # ホストの uid で動かす。root だと git の safe.directory に引っかかる
     user: "${GITDASH_UID}:${GITDASH_GID}"
     environment:
-      GITDASH_SCAN_ROOT: /scan
+      # linked worktree の .git はホスト絶対パスを保持するため、
+      # コンテナ内でも同じ絶対パスへ mount する
+      GITDASH_SCAN_ROOT: ${GITDASH_SCAN_ROOT}
       GITDASH_HOST_PREFIX: ${GITDASH_SCAN_ROOT}
       GITDASH_DATA_DIR: /data
       GITDASH_MAX_DEPTH: ${GITDASH_MAX_DEPTH:-8}
@@ -20,7 +22,7 @@ services:
       HOME: /home/host
     volumes:
       # fetch が .git に書き込むため rw。アプリは fetch 以外書き込まない
-      - ${GITDASH_SCAN_ROOT}:/scan
+      - ${GITDASH_SCAN_ROOT}:${GITDASH_SCAN_ROOT}
       - gitdash-data:/data
       # SSH リモートへ fetch するための鍵と設定。読み取り専用
       - ${HOME}/.ssh:/home/host/.ssh:ro

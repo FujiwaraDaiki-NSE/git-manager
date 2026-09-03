@@ -54,6 +54,7 @@ export type Branch = {
   date: string;
   current: boolean;
   merged: boolean;
+  worktree: string | null;
 };
 export type BranchesResponse = {
   local: Branch[];
@@ -64,6 +65,13 @@ export type BranchesResponse = {
 export type Repo = {
   path: string;
   name: string;
+  common_dir: string;
+  is_worktree: boolean;
+  worktree_state: "ok" | "prunable" | "locked" | null;
+  worktree?: string | null;
+  merged?: boolean;
+  merged_branches?: string[];
+  merged_branch?: string | null;
   pending?: boolean;
   activity?: number;
   error?: string | null;
@@ -82,6 +90,7 @@ export type Repo = {
   can_ff?: boolean;
   diverged?: boolean;
   fetched_at?: number | null;
+  checked_at?: number;
 };
 
 export const isDirty = (r: Repo) => (r.entries?.length ?? 0) > 0;

@@ -140,8 +140,9 @@ function CommitPane({ detail, state, error, onRetry, onCopy }: {
 
 function BranchRow({ branch }: { branch: BranchesResponse["local"][number] }) {
   const collapsedMerged = branch.merged && !branch.current;
+  const abandonedCandidate = collapsedMerged && !branch.worktree;
   return (
-    <div className={`branch-row${collapsedMerged ? " merged" : ""}`}>
+    <div className={`branch-row${collapsedMerged ? " merged" : ""}${abandonedCandidate ? " abandoned" : ""}`}>
       <span className={branch.current ? "branch-name current" : "branch-name"}>
         {branch.current && <span className="branch-marker" aria-label="現在のブランチ">*</span>}
         {branch.name}
@@ -150,7 +151,13 @@ function BranchRow({ branch }: { branch: BranchesResponse["local"][number] }) {
       {branch.upstream && <span className="branch-upstream">{branch.upstream}</span>}
       {branch.track && <span className="branch-track">{branch.track}</span>}
       <time className="branch-date" dateTime={branch.date}>{branch.date}</time>
-      {collapsedMerged && <span className="branch-merged">merged</span>}
+      <span className="branch-state">
+        {branch.worktree && (
+          <span className="branch-worktree" title={branch.worktree}>作業中 @ {branch.worktree}</span>
+        )}
+        {abandonedCandidate && <span className="branch-abandoned">merged · 削除候補</span>}
+        {collapsedMerged && !abandonedCandidate && <span className="branch-merged">merged</span>}
+      </span>
     </div>
   );
 }
@@ -166,8 +173,12 @@ function BranchesPane({ data, state, error, showMerged, onShowMerged, onRetry }:
   if (state === "idle") return null;
   const local = data?.local ?? [];
   const remote = data?.remotes ?? [];
-  const visibleLocal = showMerged ? local : local.filter((branch) => branch.current || !branch.merged);
-  const mergedCount = local.filter((branch) => !branch.current && branch.merged).length;
+  // A merged branch that is checked out in another worktree still represents
+  // an active checkout and must remain visible in the default view.
+  const visibleLocal = showMerged
+    ? local
+    : local.filter((branch) => branch.current || branch.worktree || !branch.merged);
+  const mergedCount = local.filter((branch) => !branch.current && branch.merged && !branch.worktree).length;
 
   return (
     <section
