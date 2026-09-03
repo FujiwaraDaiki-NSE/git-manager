@@ -1,341 +1,977 @@
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gitdash 開発者向け概要</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #f5f6f8;
-      --surface: #ffffff;
-      --surface-soft: #eef1f5;
-      --ink: #20252b;
-      --muted: #66717d;
-      --line: #d7dce2;
-      --accent: #276c9e;
-      --accent-soft: #dcebf5;
-      --code-bg: #20262d;
-      --code-ink: #e7edf3;
-      --warning: #8c4b1d;
-      --warning-bg: #fff0e4;
-      --shadow: 0 8px 24px rgba(24, 32, 40, .06);
-    }
-
-    @media (prefers-color-scheme: dark) {
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gitdash 開発者向け概要</title>
+    <style>
       :root {
-        --bg: #171a1e;
-        --surface: #20252b;
-        --surface-soft: #2a3037;
-        --ink: #edf1f5;
-        --muted: #a7b0ba;
-        --line: #3b444e;
-        --accent: #83c2ec;
-        --accent-soft: #263e4f;
-        --code-bg: #111418;
+        color-scheme: light dark;
+        --bg: #f5f6f8;
+        --surface: #ffffff;
+        --surface-soft: #eef1f5;
+        --ink: #20252b;
+        --muted: #66717d;
+        --line: #d7dce2;
+        --accent: #276c9e;
+        --accent-soft: #dcebf5;
+        --code-bg: #20262d;
         --code-ink: #e7edf3;
-        --warning: #ffc18f;
-        --warning-bg: #432c1d;
-        --shadow: 0 8px 24px rgba(0, 0, 0, .18);
+        --warning: #8c4b1d;
+        --warning-bg: #fff0e4;
+        --shadow: 0 8px 24px rgba(24, 32, 40, 0.06);
       }
-    }
 
-    * { box-sizing: border-box; }
-    html { background: var(--bg); }
-    body {
-      margin: 0;
-      color: var(--ink);
-      background: var(--bg);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.7;
-    }
-    main { max-width: 1100px; margin: 0 auto; padding: 42px 24px 72px; }
-    header { margin-bottom: 34px; }
-    h1, h2, h3 { line-height: 1.3; }
-    h1 { margin: 0 0 8px; font-size: clamp(26px, 4vw, 38px); letter-spacing: -.03em; }
-    h2 { margin: 0 0 16px; padding-bottom: 9px; border-bottom: 1px solid var(--line); font-size: 22px; }
-    h3 { margin: 24px 0 9px; color: var(--accent); font-size: 16px; }
-    p { margin: 9px 0; }
-    .lead { max-width: 780px; color: var(--muted); font-size: 16px; }
-    .stamp { color: var(--muted); font-size: 12px; }
-    section { margin-top: 34px; }
-    .card {
-      margin: 14px 0;
-      padding: 18px 20px;
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      box-shadow: var(--shadow);
-    }
-    .theme { border-left: 4px solid var(--accent); }
-    .warning { border-left: 4px solid var(--warning); background: var(--warning-bg); }
-    .label {
-      display: inline-block;
-      margin-bottom: 7px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-    }
-    .flow {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin: 16px 0;
-    }
-    .flow > div { min-height: 116px; padding: 13px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 7px; }
-    .flow strong { display: block; margin-bottom: 5px; color: var(--accent); }
-    .flow small { display: block; color: var(--muted); line-height: 1.55; }
-    .arrow { align-self: center; color: var(--muted); text-align: center; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
-    code { font-size: .92em; }
-    pre {
-      overflow-x: auto;
-      margin: 12px 0;
-      padding: 14px 16px;
-      color: var(--code-ink);
-      background: var(--code-bg);
-      border-radius: 7px;
-      font-size: 12px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; background: var(--surface); }
-    th, td { padding: 9px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { background: var(--surface-soft); font-size: 12px; }
-    td { font-size: 13px; }
-    .schema td:first-child { width: 25%; white-space: nowrap; }
-    .schema td:nth-child(2) { width: 22%; color: var(--accent); white-space: nowrap; }
-    .nested { margin: 0; padding-left: 17px; }
-    .nested li { margin: 3px 0; }
-    .note { color: var(--muted); font-size: 13px; }
-    .tag { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 6px; color: var(--accent); background: var(--accent-soft); border-radius: 4px; font-size: 12px; }
-    .nowrap { white-space: nowrap; }
-    @media (max-width: 760px) {
-      main { padding: 28px 15px 50px; }
-      .flow { grid-template-columns: 1fr 1fr; }
-      .flow .arrow { display: none; }
-      table { display: block; overflow-x: auto; white-space: normal; }
-      .schema { min-width: 650px; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <div class="label">Developer summary</div>
-      <h1>gitdash</h1>
-      <p class="lead">PC内に散在するGitリポジトリを登録なしで見つけ、状態・履歴・ブランチを読み取り専用で一覧するローカルダッシュボード。Docker Composeで常駐し、利用者は <code>http://localhost:4412</code> から確認する。</p>
-      <div class="stamp">対象実装: backend/app/main.py・scanner.py・watcher.py・gitinfo.py・detail.py・graph.py、frontend/app/graph-view.tsx・repo-detail.tsx・page.tsx、docker-compose.yml</div>
-    </header>
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #171a1e;
+          --surface: #20252b;
+          --surface-soft: #2a3037;
+          --ink: #edf1f5;
+          --muted: #a7b0ba;
+          --line: #3b444e;
+          --accent: #83c2ec;
+          --accent-soft: #263e4f;
+          --code-bg: #111418;
+          --code-ink: #e7edf3;
+          --warning: #ffc18f;
+          --warning-bg: #432c1d;
+          --shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+        }
+      }
 
-    <section>
-      <h2>目的と裏テーマ</h2>
-      <div class="card theme">
-        <strong>表の目的</strong>
-        <p>どのリポジトリに手をつけるべきかを一目で分かるようにする。未コミット、未push、上流との差分、分岐、放置されたブランチを、リポジトリごとに確認できる。</p>
-        <strong>裏テーマ（設計の背骨）</strong>
-        <p><b>使っているうちにGitコマンドを覚えられること。</b>状態表示は独自記法ではなく <code>git status -sb</code> の語彙を保ち、各ビューには人間が同じ情報を見るためのコマンドを出す。状態から「次に打つコマンド」を1つだけ提示する。</p>
-        <p>pull / pushボタンは置かない。操作はターミナルで行う必要を残すことで、<code>git pull --ff-only</code> や <code>git push</code> を状況と結びつけて覚えるための学習装置にしている。</p>
-      </div>
-    </section>
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        background: var(--bg);
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--bg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.7;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 42px 24px 72px;
+      }
+      header {
+        margin-bottom: 34px;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.3;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(26px, 4vw, 38px);
+        letter-spacing: -0.03em;
+      }
+      h2 {
+        margin: 0 0 16px;
+        padding-bottom: 9px;
+        border-bottom: 1px solid var(--line);
+        font-size: 22px;
+      }
+      h3 {
+        margin: 24px 0 9px;
+        color: var(--accent);
+        font-size: 16px;
+      }
+      p {
+        margin: 9px 0;
+      }
+      .lead {
+        max-width: 780px;
+        color: var(--muted);
+        font-size: 16px;
+      }
+      .stamp {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      section {
+        margin-top: 34px;
+      }
+      .card {
+        margin: 14px 0;
+        padding: 18px 20px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        box-shadow: var(--shadow);
+      }
+      .theme {
+        border-left: 4px solid var(--accent);
+      }
+      .warning {
+        border-left: 4px solid var(--warning);
+        background: var(--warning-bg);
+      }
+      .label {
+        display: inline-block;
+        margin-bottom: 7px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin: 16px 0;
+      }
+      .flow > div {
+        min-height: 116px;
+        padding: 13px;
+        background: var(--surface-soft);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+      }
+      .flow strong {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--accent);
+      }
+      .flow small {
+        display: block;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .arrow {
+        align-self: center;
+        color: var(--muted);
+        text-align: center;
+      }
+      code,
+      pre {
+        font-family:
+          ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      }
+      code {
+        font-size: 0.92em;
+      }
+      pre {
+        overflow-x: auto;
+        margin: 12px 0;
+        padding: 14px 16px;
+        color: var(--code-ink);
+        background: var(--code-bg);
+        border-radius: 7px;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0 18px;
+        background: var(--surface);
+      }
+      th,
+      td {
+        padding: 9px 10px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: var(--surface-soft);
+        font-size: 12px;
+      }
+      td {
+        font-size: 13px;
+      }
+      .schema td:first-child {
+        width: 25%;
+        white-space: nowrap;
+      }
+      .schema td:nth-child(2) {
+        width: 22%;
+        color: var(--accent);
+        white-space: nowrap;
+      }
+      .nested {
+        margin: 0;
+        padding-left: 17px;
+      }
+      .nested li {
+        margin: 3px 0;
+      }
+      .note {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .tag {
+        display: inline-block;
+        margin: 2px 4px 2px 0;
+        padding: 1px 6px;
+        color: var(--accent);
+        background: var(--accent-soft);
+        border-radius: 4px;
+        font-size: 12px;
+      }
+      .nowrap {
+        white-space: nowrap;
+      }
+      @media (max-width: 760px) {
+        main {
+          padding: 28px 15px 50px;
+        }
+        .flow {
+          grid-template-columns: 1fr 1fr;
+        }
+        .flow .arrow {
+          display: none;
+        }
+        table {
+          display: block;
+          overflow-x: auto;
+          white-space: normal;
+        }
+        .schema {
+          min-width: 650px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="label">Developer summary</div>
+        <h1>gitdash</h1>
+        <p class="lead">
+          PC内に散在するGitリポジトリを登録なしで見つけ、状態・履歴・ブランチを読み取り専用で一覧するローカルダッシュボード。Docker
+          Composeで常駐し、利用者は
+          <code>http://localhost:4412</code> から確認する。
+        </p>
+        <div class="stamp">
+          対象実装:
+          backend/app/main.py・scanner.py・watcher.py・gitinfo.py・detail.py・graph.py、frontend/app/graph-view.tsx・repo-detail.tsx・page.tsx、docker-compose.yml
+        </div>
+      </header>
 
-    <section>
-      <h2>全体構成</h2>
-      <div class="flow" aria-label="システム構成">
-        <div><strong>ブラウザ / Next.js</strong><small><code>page.tsx</code> がプロジェクト階層、検索、フィルタ、remote repository単位のグループ化を担当。詳細は <code>repo-detail.tsx</code>、グラフの各行は <code>graph-view.tsx</code>。</small></div>
-        <div><strong>Next API proxy</strong><small><code>app/api/[...path]/route.ts</code> が <code>/api/*</code> を実行時の <code>BACKEND_ORIGIN</code> へ転送。SSEのbodyはそのまま返す。</small></div>
-        <div><strong>FastAPI backend</strong><small><code>STATE</code>（ホストパスをキー）とキャッシュを持ち、探索・git取得・グラフ・詳細・ブランチAPIを提供。backendのポートは外部公開しない。</small></div>
-        <div><strong>Git / filesystem</strong><small>ホストと同じ絶対パスへ走査ルートをmountし、linked worktreeの <code>.git</code> ポインタを解決する。実体gitdirと共有refs/logsをinotifyで監視する。</small></div>
-      </div>
-      <p class="note">Composeではfrontendだけが <code>4412:3000</code> を公開し、backendは <code>expose: 8000</code> のみ。backendはホストのuid/gidで動作し、fetchのためマウントはrw。アプリはfetch以外に明示的な変更操作を行わないが、<code>git status</code> が <code>.git/index</code> を書き戻すことはある。ローカル処理用poolとfetch用fetch_poolは分離されている。</p>
+      <section>
+        <h2>目的と裏テーマ</h2>
+        <div class="card theme">
+          <strong>表の目的</strong>
+          <p>
+            どのリポジトリに手をつけるべきかを一目で分かるようにする。未コミット、未push、上流との差分、分岐、放置されたブランチを、リポジトリごとに確認できる。
+          </p>
+          <strong>裏テーマ（設計の背骨）</strong>
+          <p>
+            <b>使っているうちにGitコマンドを覚えられること。</b
+            >状態表示は独自記法ではなく
+            <code>git status -sb</code>
+            の語彙を保ち、各ビューには人間が同じ情報を見るためのコマンドを出す。状態から「次に打つコマンド」を1つだけ提示する。
+          </p>
+          <p>
+            pull /
+            pushボタンは置かない。操作はターミナルで行う必要を残すことで、<code
+              >git pull --ff-only</code
+            >
+            や
+            <code>git push</code>
+            を状況と結びつけて覚えるための学習装置にしている。
+          </p>
+        </div>
+      </section>
 
-      <h3>画面からbackendまで</h3>
-      <ul>
-        <li><code>page.tsx</code> は <code>EventSource("/api/stream")</code> でスナップショットと差分イベントを受け、画面内の行を <code>IntersectionObserver</code> で集めて <code>POST /api/refresh</code> に送る。フォーカス復帰時にも可視行を再取得する。</li>
-        <li>リポジトリを開くと <code>repo-detail.tsx</code> がグラフとブランチを取得する。グラフ行を選択すると150msのデバウンス後にコミット詳細を取得する。<code>--all</code> とマージ済みブランチ表示は画面側の切り替え。</li>
-        <li>APIハンドラの <code>_known_repo()</code> は、受け取ったpathが現在の <code>STATE</code> に存在する場合だけ許可し、コンテナ内パスへ変換する。グラフ・詳細・ブランチのGit実行はすべてリポジトリ単位の <code>_repo_lock()</code> を通る。</li>
-      </ul>
+      <section>
+        <h2>全体構成</h2>
+        <div class="flow" aria-label="システム構成">
+          <div>
+            <strong>ブラウザ / Next.js</strong
+            ><small
+              ><code>page.tsx</code>
+              がプロジェクト盤面、検索・状態フィルタ、選択とURL同期を担当。<code
+                >status.ts</code
+              >
+              がGit状態の語彙と色を集約し、詳細タブは
+              <code>repo-detail.tsx</code>、グラフ行は
+              <code>graph-view.tsx</code> が描画する。</small
+            >
+          </div>
+          <div>
+            <strong>Next API proxy</strong
+            ><small
+              ><code>app/api/[...path]/route.ts</code> が
+              <code>/api/*</code> を実行時の
+              <code>BACKEND_ORIGIN</code>
+              へ転送。SSEのbodyはそのまま返す。</small
+            >
+          </div>
+          <div>
+            <strong>FastAPI backend</strong
+            ><small
+              ><code>STATE</code
+              >（ホストパスをキー）とキャッシュを持ち、探索・git取得・グラフ・詳細・ブランチAPIを提供。backendのポートは外部公開しない。</small
+            >
+          </div>
+          <div>
+            <strong>Git / filesystem</strong
+            ><small
+              >ホストと同じ絶対パスへ走査ルートをmountし、linked worktreeの
+              <code>.git</code>
+              ポインタを解決する。実体gitdirと共有refs/logsをinotifyで監視する。</small
+            >
+          </div>
+        </div>
+        <p class="note">
+          Composeではfrontendだけが <code>4412:3000</code> を公開し、backendは
+          <code>expose: 8000</code>
+          のみ。backendはホストのuid/gidで動作し、fetchのためマウントはrw。アプリはfetch以外に明示的な変更操作を行わないが、<code
+            >git status</code
+          >
+          が
+          <code>.git/index</code>
+          を書き戻すことはある。ローカル処理用poolとfetch用fetch_poolは分離されている。
+        </p>
 
-      <h3>SSE（Server-Sent Events）</h3>
-      <p><code>GET /api/stream</code> の接続直後に <code>snapshot</code>（現在のリポジトリ配列）を送り、その後はbackendのBusがイベントを配信する。イベントループに紐づいた購読Queueを使い、20秒イベントがなければkeepaliveコメントを送る。</p>
-      <table>
-        <thead><tr><th>イベント</th><th>data</th><th>発生箇所</th></tr></thead>
-        <tbody>
-          <tr><td><code>snapshot</code></td><td>リポジトリオブジェクトの配列</td><td>接続時。activity降順</td></tr>
-          <tr><td><code>repo</code></td><td>更新済みリポジトリオブジェクト</td><td>探索でstubを発見、またはGit状態の取得完了</td></tr>
-          <tr><td><code>scan</code></td><td><code>{active: boolean, found: number}</code></td><td>探索開始・終了</td></tr>
-          <tr><td><code>done</code></td><td><code>{count: number}</code></td><td>全体取得完了</td></tr>
-          <tr><td><code>removed</code></td><td><code>{path: string}</code></td><td>探索で消えたリポジトリ</td></tr>
-          <tr><td><code>fetch</code></td><td><code>{active: boolean, total: number}</code></td><td>背景fetchの開始・終了</td></tr>
-        </tbody>
-      </table>
+        <h3>画面からbackendまで</h3>
+        <ul>
+          <li>
+            <code>page.tsx</code> は
+            <code>EventSource("/api/stream")</code>
+            でスナップショットと差分イベントを受け、画面内の行を
+            <code>IntersectionObserver</code> で集めて
+            <code>POST /api/refresh</code>
+            に送る。フォーカス復帰時にも可視行を再取得する。
+          </li>
+          <li>
+            一覧は本体とlinked
+            worktreeをプロジェクト単位に並べ、worktreeがないリポジトリは単独行にする。状態フィルタは一致した子行だけでなく所属プロジェクトも保持し、集計カードからも切り替えられる。
+          </li>
+          <li>
+            選択したリポジトリは幅1200px以上でstickyな右ペイン、未満でEsc／scrimにより閉じられるドロワーへ表示する。選択pathとタブは
+            <code>?repo=...&amp;tab=...</code> に同期され、再読込で復元される。
+          </li>
+          <li>
+            <code>repo-detail.tsx</code>
+            は状態・グラフ・ブランチのうち現在のタブに必要なAPIだけを取得する。グラフ行を選択すると150msのデバウンス後にコミット詳細を取得する。<code
+              >--all</code
+            >
+            とマージ済みブランチ表示は画面側の切り替え。
+          </li>
+          <li>
+            APIハンドラの <code>_known_repo()</code> は、受け取ったpathが現在の
+            <code>STATE</code>
+            に存在する場合だけ許可し、コンテナ内パスへ変換する。グラフ・詳細・ブランチのGit実行はすべてリポジトリ単位の
+            <code>_repo_lock()</code> を通る。
+          </li>
+        </ul>
 
-      <h3>探索とinotify</h3>
-      <p>起動時は新しいworktree契約を満たすキャッシュを先に読み、背景で探索を行う。探索で本体を見つけると、共通リポジトリのロック内で <code>git worktree list --porcelain</code> を一度実行し、走査対象外の <code>.cursor/worktrees</code> や <code>.claude/worktrees</code> もSTATEへ補完する。活動時刻は実体gitdirの <code>logs/HEAD</code> を使う。</p>
-      <p>Watcherは通常リポジトリのgitdir、linked worktree固有のgitdir、共有refs/logsを監視する。イベント名が <code>.lock</code> で終わるものは破棄し、残りは取得完了後3秒の抑止、1秒の共通リポジトリ単位デバウンス、<code>common_dir</code> 単位の排他を経て再取得する。作業ツリーのファイル編集自体は <code>.git</code> を変えないため、frontendのフォーカス復帰時取得で補う。</p>
-
-      <h3>リポジトリ状態のworktree契約</h3>
-      <table class="schema">
-        <thead><tr><th>フィールド</th><th>型</th><th>説明</th></tr></thead>
-        <tbody>
-          <tr><td><code>common_dir</code></td><td>string</td><td>本体リポジトリのホスト絶対パス。本体自身では <code>path</code> と同じ。</td></tr>
-          <tr><td><code>is_worktree</code></td><td>boolean</td><td>linked worktreeならtrue、本体ならfalse。</td></tr>
-          <tr><td><code>worktree_state</code></td><td><code>"ok" | "prunable" | "locked" | null</code></td><td>linked worktreeの状態。本体ではnull。</td></tr>
-          <tr><td><code>merged_branches</code></td><td>string[]</td><td>現在の本体HEADへマージ済みで、現在の本体branchを除いたlocal branch。プロジェクト集計に使う。</td></tr>
-          <tr><td><code>merged_branch</code></td><td>string | null</td><td>上記のうちworktreeへ展開されていない最初の削除候補。<code>git branch -d</code> の提示に使う。</td></tr>
-        </tbody>
-      </table>
-      <p class="note">背景fetchは同じ <code>common_dir</code> につき1回だけ実行し、その後に各worktreeのlocal statusを更新する。Git操作は同じ共通リポジトリロックを共有する。</p>
-    </section>
-
-    <section>
-      <h2>追加APIの契約</h2>
-      <p>3 APIとも <code>path</code> はホスト側パスだが、<code>STATE</code> に存在する登録済みリポジトリだけが対象。任意パスでGitを実行しないための認可境界である。</p>
-
-      <div class="card">
-        <h3>GET /api/repo/graph</h3>
-        <p><code>/api/repo/graph?path=&lt;hostパス&gt;&amp;all=&lt;bool&gt;&amp;limit=&lt;int&gt;</code></p>
-        <table class="schema">
-          <thead><tr><th>入力</th><th>型・既定値</th><th>実装上の意味</th></tr></thead>
+        <h3>SSE（Server-Sent Events）</h3>
+        <p>
+          <code>GET /api/stream</code> の接続直後に
+          <code>snapshot</code
+          >（現在のリポジトリ配列）を送り、その後はbackendのBusがイベントを配信する。イベントループに紐づいた購読Queueを使い、20秒イベントがなければkeepaliveコメントを送る。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>イベント</th>
+              <th>data</th>
+              <th>発生箇所</th>
+            </tr>
+          </thead>
           <tbody>
-            <tr><td><code>path</code></td><td>string / 必須</td><td>STATEに存在するホストパス。未知なら404。</td></tr>
-            <tr><td><code>all</code></td><td>boolean / <code>false</code></td><td>trueなら <code>--all</code>。falseなら現在のHEADとupstream（存在時）を対象にする。</td></tr>
-            <tr><td><code>limit</code></td><td>integer / <code>200</code></td><td>1未満は422。Gitには <code>limit + 1</code> 件を要求し、返却行をlimit件に切ってtruncatedを判定する。</td></tr>
+            <tr>
+              <td><code>snapshot</code></td>
+              <td>リポジトリオブジェクトの配列</td>
+              <td>接続時。activity降順</td>
+            </tr>
+            <tr>
+              <td><code>repo</code></td>
+              <td>更新済みリポジトリオブジェクト</td>
+              <td>探索でstubを発見、またはGit状態の取得完了</td>
+            </tr>
+            <tr>
+              <td><code>scan</code></td>
+              <td><code>{active: boolean, found: number}</code></td>
+              <td>探索開始・終了</td>
+            </tr>
+            <tr>
+              <td><code>done</code></td>
+              <td><code>{count: number}</code></td>
+              <td>全体取得完了</td>
+            </tr>
+            <tr>
+              <td><code>removed</code></td>
+              <td><code>{path: string}</code></td>
+              <td>探索で消えたリポジトリ</td>
+            </tr>
+            <tr>
+              <td><code>fetch</code></td>
+              <td><code>{active: boolean, total: number}</code></td>
+              <td>背景fetchの開始・終了</td>
+            </tr>
           </tbody>
         </table>
-        <p>レスポンス:</p>
-        <table class="schema">
-          <thead><tr><th>フィールド</th><th>型</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr><td><code>rows</code></td><td>object[]</td><td>コミット行。各要素は下表のフィールドを持つ。</td></tr>
-            <tr><td><code>max_lane</code></td><td>integer</td><td>行中で使われた最大レーン番号。</td></tr>
-            <tr><td><code>head_lane</code></td><td>integer</td><td>最初に見つかったhead refのレーン。通常は0。head refが見つからない場合も0へフォールバックする。Git実行エラー時はAPIが502を返す。</td></tr>
-            <tr><td><code>truncated</code></td><td>boolean</td><td>limit+1件目が存在したか。</td></tr>
-            <tr><td><code>command</code></td><td>string</td><td>画面に表示する人間向けコマンド。<code>git log --oneline --graph</code>、all=true時は末尾に <code> --all</code>。</td></tr>
-          </tbody>
-        </table>
-        <p><code>rows[]</code> の正確なフィールド:</p>
-        <table class="schema">
-          <thead><tr><th>フィールド</th><th>型</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr><td><code>hash</code></td><td>string</td><td>完全ハッシュ。</td></tr>
-            <tr><td><code>short</code></td><td>string</td><td>短縮ハッシュ。</td></tr>
-            <tr><td><code>parents</code></td><td>string[]</td><td>親コミットの完全ハッシュ。親の順序はGitの出力順。</td></tr>
-            <tr><td><code>refs</code></td><td>object[]</td><td><code>{name: string, kind: "head" | "branch" | "remote" | "tag"}</code>。HEAD、local branch、remote、tagを分類。</td></tr>
-            <tr><td><code>author</code></td><td>string</td><td>作者名。</td></tr>
-            <tr><td><code>date</code></td><td>string</td><td>コミッター日時（ISO形式）。</td></tr>
-            <tr><td><code>subject</code></td><td>string</td><td>コミット件名。</td></tr>
-            <tr><td><code>lane</code></td><td>integer</td><td>そのコミットのレーン番号。</td></tr>
-            <tr><td><code>in_lanes</code></td><td>integer[]</td><td>上の行からこのコミットへ入るレーン。</td></tr>
-            <tr><td><code>through</code></td><td>integer[]</td><td>このコミットと無関係に行を素通りするレーン。</td></tr>
-            <tr><td><code>out_lanes</code></td><td>integer[]</td><td>このコミットから親へ出るレーン。親の順序に対応。</td></tr>
-            <tr><td><code>is_head</code></td><td>boolean</td><td>refsのいずれかがkind=headか。</td></tr>
-            <tr><td><code>is_merge</code></td><td>boolean</td><td>親が2つ以上か。</td></tr>
-          </tbody>
-        </table>
-      </div>
 
-      <div class="card">
-        <h3>GET /api/repo/commit</h3>
-        <p><code>/api/repo/commit?path=&lt;hostパス&gt;&amp;hash=&lt;hash&gt;</code></p>
-        <table class="schema">
-          <thead><tr><th>入力</th><th>型・条件</th><th>エラー</th></tr></thead>
-          <tbody>
-            <tr><td><code>path</code></td><td>string / 必須</td><td>STATEにない場合404。</td></tr>
-            <tr><td><code>hash</code></td><td>string / 4〜64文字の16進数</td><td>未指定は422、正規表現に合わない場合400。Git上でcommitでない、または詳細の取得・解析に失敗した場合404。</td></tr>
-          </tbody>
-        </table>
-        <p>レスポンスは次のフィールドを持つ:</p>
-        <table class="schema">
-          <thead><tr><th>フィールド</th><th>型</th><th>説明</th></tr></thead>
-          <tbody>
-            <tr><td><code>hash</code></td><td>string</td><td>コミットハッシュ。</td></tr>
-            <tr><td><code>subject</code></td><td>string</td><td>件名。</td></tr>
-            <tr><td><code>author</code></td><td>string</td><td>作者名。</td></tr>
-            <tr><td><code>date</code></td><td>string</td><td>コミッター日時。</td></tr>
-            <tr><td><code>parents</code></td><td>string[]</td><td>親コミットのハッシュ配列。</td></tr>
-            <tr><td><code>files</code></td><td>object[]</td><td>numstat配列。各要素は <code>additions: integer | "-"</code>、<code>deletions: integer | "-"</code>、<code>path: string</code>、<code>binary: boolean</code>。バイナリは追加・削除が <code>"-"</code>。</td></tr>
-            <tr><td><code>patch</code></td><td>string</td><td><code>git show</code> のunified=3 patch。UTF-8換算200,000 bytesを超える場合は途中まで。</td></tr>
-            <tr><td><code>patch_truncated</code></td><td>boolean</td><td>patchを200,000 bytesで切ったか。</td></tr>
-            <tr><td><code>command</code></td><td>string</td><td><code>git show &lt;hash&gt;</code>。画面からコピーできる等価コマンド。</td></tr>
-          </tbody>
-        </table>
-      </div>
+        <h3>探索とinotify</h3>
+        <p>
+          起動時は新しいworktree契約を満たすキャッシュを先に読み、背景で探索を行う。探索で本体を見つけると、共通リポジトリのロック内で
+          <code>git worktree list --porcelain</code> を一度実行し、走査対象外の
+          <code>.cursor/worktrees</code> や
+          <code>.claude/worktrees</code>
+          もSTATEへ補完する。活動時刻は実体gitdirの
+          <code>logs/HEAD</code> を使う。
+        </p>
+        <p>
+          Watcherは通常リポジトリのgitdir、linked
+          worktree固有のgitdir、共有refs/logsを監視する。イベント名が
+          <code>.lock</code>
+          で終わるものは破棄し、残りは取得完了後3秒の抑止、1秒の共通リポジトリ単位デバウンス、<code
+            >common_dir</code
+          >
+          単位の排他を経て再取得する。作業ツリーのファイル編集自体は
+          <code>.git</code>
+          を変えないため、frontendのフォーカス復帰時取得で補う。
+        </p>
 
-      <div class="card">
-        <h3>GET /api/repo/branches</h3>
-        <p><code>/api/repo/branches?path=&lt;hostパス&gt;</code></p>
+        <h3>リポジトリ状態のworktree契約</h3>
         <table class="schema">
-          <thead><tr><th>入力</th><th>型</th><th>エラー</th></tr></thead>
-          <tbody><tr><td><code>path</code></td><td>string / 必須</td><td>STATEにない場合404。Git取得失敗時502。</td></tr></tbody>
-        </table>
-        <p>レスポンス:</p>
-        <table class="schema">
-          <thead><tr><th>フィールド</th><th>型</th><th>説明</th></tr></thead>
+          <thead>
+            <tr>
+              <th>フィールド</th>
+              <th>型</th>
+              <th>説明</th>
+            </tr>
+          </thead>
           <tbody>
-            <tr><td><code>local</code></td><td>object[]</td><td>ローカルrefの配列。</td></tr>
-            <tr><td><code>remotes</code></td><td>object[]</td><td>リモートrefの配列。キーは <code>remote</code> ではなく <code>remotes</code>。</td></tr>
-            <tr><td><code>command</code></td><td>string</td><td>画面に表示する <code>git branch -vv</code>。</td></tr>
+            <tr>
+              <td><code>common_dir</code></td>
+              <td>string</td>
+              <td>
+                本体リポジトリのホスト絶対パス。本体自身では
+                <code>path</code> と同じ。
+              </td>
+            </tr>
+            <tr>
+              <td><code>is_worktree</code></td>
+              <td>boolean</td>
+              <td>linked worktreeならtrue、本体ならfalse。</td>
+            </tr>
+            <tr>
+              <td><code>worktree_state</code></td>
+              <td><code>"ok" | "prunable" | "locked" | null</code></td>
+              <td>linked worktreeの状態。本体ではnull。</td>
+            </tr>
+            <tr>
+              <td><code>merged_branches</code></td>
+              <td>string[]</td>
+              <td>
+                現在の本体HEADへマージ済みで、現在の本体branchを除いたlocal
+                branch。プロジェクト集計に使う。
+              </td>
+            </tr>
+            <tr>
+              <td><code>merged_branch</code></td>
+              <td>string | null</td>
+              <td>
+                上記のうちworktreeへ展開されていない最初の削除候補。<code
+                  >git branch -d</code
+                >
+                の提示に使う。
+              </td>
+            </tr>
           </tbody>
         </table>
-        <p><code>local[]</code> と <code>remotes[]</code> の各要素は共通して、<code>name: string</code>、<code>hash: string</code>、<code>upstream: string | null</code>、<code>track: string | null</code>、<code>date: string</code>、<code>current: boolean</code>、<code>merged: boolean</code>、<code>worktree: string | null</code> を持つ。<code>worktree</code> はそのbranchをcheckout中のホスト絶対パス。画面は所在を「作業中 @ path」で示し、worktreeがないmerged local branchを削除候補として識別する。</p>
-      </div>
-    </section>
+        <p class="note">
+          背景fetchは同じ
+          <code>common_dir</code> につき1回だけ実行し、その後に各worktreeのlocal
+          statusを更新する。Git操作は同じ共通リポジトリロックを共有する。
+        </p>
+      </section>
 
-    <section>
-      <h2>グラフのレーンと描画</h2>
-      <p><code>graph.py</code> は <code>git log --date-order --decorate=full --parents</code> 相当の親情報から、行をまたいで生きる枝をレーン番号に割り当てる。frontendはその番号を受け取って曲線を描く。</p>
-      <table>
-        <thead><tr><th>フィールド</th><th>この行での意味</th><th>frontendの描画</th></tr></thead>
-        <tbody>
-          <tr><td><code>lane</code></td><td>このコミットのノードが置かれるレーン。</td><td>ノード中心のx座標。レーン幅14px、左余白8px。</td></tr>
-          <tr><td><code>in_lanes</code></td><td>上から降りてきて、このコミットに入る線。マージで複数になることがある。</td><td>各レーン上端からノード中心までを直線または曲線で結ぶ。</td></tr>
-          <tr><td><code>through</code></td><td>このコミットには関係せず、同じ行を通過する別枝。</td><td>そのレーンの上端から下端まで直線を引く。</td></tr>
-          <tr><td><code>out_lanes</code></td><td>このコミットから親へ出る線。配列順が親の順序。</td><td>ノード中心から行下端へ直線または曲線で結ぶ。</td></tr>
-        </tbody>
-      </table>
-      <div class="card">
-        <h3>なぜ「1行 = 1枚のSVG」か</h3>
-        <p>1000コミットを1枚の巨大SVGにまとめると、DOM・再描画・クリック処理が重くなり、仮想スクロールとも両立しない。そこで各コミット行が自分の行を通る線分とノードだけを、高さ30pxの小さなSVGとして持つ。行ごとの再描画と通常のスクロールを保ちつつ、レーンの縦位置は全行で固定幅にする。</p>
-        <pre>W = 14px, H = 30px
+      <section>
+        <h2>追加APIの契約</h2>
+        <p>
+          3 APIとも <code>path</code> はホスト側パスだが、<code>STATE</code>
+          に存在する登録済みリポジトリだけが対象。任意パスでGitを実行しないための認可境界である。
+        </p>
+
+        <div class="card">
+          <h3>GET /api/repo/graph</h3>
+          <p>
+            <code
+              >/api/repo/graph?path=&lt;hostパス&gt;&amp;all=&lt;bool&gt;&amp;limit=&lt;int&gt;</code
+            >
+          </p>
+          <table class="schema">
+            <thead>
+              <tr>
+                <th>入力</th>
+                <th>型・既定値</th>
+                <th>実装上の意味</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>path</code></td>
+                <td>string / 必須</td>
+                <td>STATEに存在するホストパス。未知なら404。</td>
+              </tr>
+              <tr>
+                <td><code>all</code></td>
+                <td>boolean / <code>false</code></td>
+                <td>
+                  trueなら
+                  <code>--all</code
+                  >。falseなら現在のHEADとupstream（存在時）を対象にする。
+                </td>
+              </tr>
+              <tr>
+                <td><code>limit</code></td>
+                <td>integer / <code>200</code></td>
+                <td>
+                  1未満は422。Gitには
+                  <code>limit + 1</code>
+                  件を要求し、返却行をlimit件に切ってtruncatedを判定する。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>レスポンス:</p>
+          <table class="schema">
+            <thead>
+              <tr>
+                <th>フィールド</th>
+                <th>型</th>
+                <th>説明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>rows</code></td>
+                <td>object[]</td>
+                <td>コミット行。各要素は下表のフィールドを持つ。</td>
+              </tr>
+              <tr>
+                <td><code>max_lane</code></td>
+                <td>integer</td>
+                <td>行中で使われた最大レーン番号。</td>
+              </tr>
+              <tr>
+                <td><code>head_lane</code></td>
+                <td>integer</td>
+                <td>
+                  最初に見つかったhead refのレーン。通常は0。head
+                  refが見つからない場合も0へフォールバックする。Git実行エラー時はAPIが502を返す。
+                </td>
+              </tr>
+              <tr>
+                <td><code>truncated</code></td>
+                <td>boolean</td>
+                <td>limit+1件目が存在したか。</td>
+              </tr>
+              <tr>
+                <td><code>command</code></td>
+                <td>string</td>
+                <td>
+                  画面に表示する人間向けコマンド。<code
+                    >git log --oneline --graph</code
+                  >、all=true時は末尾に <code> --all</code>。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p><code>rows[]</code> の正確なフィールド:</p>
+          <table class="schema">
+            <thead>
+              <tr>
+                <th>フィールド</th>
+                <th>型</th>
+                <th>説明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>hash</code></td>
+                <td>string</td>
+                <td>完全ハッシュ。</td>
+              </tr>
+              <tr>
+                <td><code>short</code></td>
+                <td>string</td>
+                <td>短縮ハッシュ。</td>
+              </tr>
+              <tr>
+                <td><code>parents</code></td>
+                <td>string[]</td>
+                <td>親コミットの完全ハッシュ。親の順序はGitの出力順。</td>
+              </tr>
+              <tr>
+                <td><code>refs</code></td>
+                <td>object[]</td>
+                <td>
+                  <code
+                    >{name: string, kind: "head" | "branch" | "remote" |
+                    "tag"}</code
+                  >。HEAD、local branch、remote、tagを分類。
+                </td>
+              </tr>
+              <tr>
+                <td><code>author</code></td>
+                <td>string</td>
+                <td>作者名。</td>
+              </tr>
+              <tr>
+                <td><code>date</code></td>
+                <td>string</td>
+                <td>コミッター日時（ISO形式）。</td>
+              </tr>
+              <tr>
+                <td><code>subject</code></td>
+                <td>string</td>
+                <td>コミット件名。</td>
+              </tr>
+              <tr>
+                <td><code>lane</code></td>
+                <td>integer</td>
+                <td>そのコミットのレーン番号。</td>
+              </tr>
+              <tr>
+                <td><code>in_lanes</code></td>
+                <td>integer[]</td>
+                <td>上の行からこのコミットへ入るレーン。</td>
+              </tr>
+              <tr>
+                <td><code>through</code></td>
+                <td>integer[]</td>
+                <td>このコミットと無関係に行を素通りするレーン。</td>
+              </tr>
+              <tr>
+                <td><code>out_lanes</code></td>
+                <td>integer[]</td>
+                <td>このコミットから親へ出るレーン。親の順序に対応。</td>
+              </tr>
+              <tr>
+                <td><code>is_head</code></td>
+                <td>boolean</td>
+                <td>refsのいずれかがkind=headか。</td>
+              </tr>
+              <tr>
+                <td><code>is_merge</code></td>
+                <td>boolean</td>
+                <td>親が2つ以上か。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>GET /api/repo/commit</h3>
+          <p>
+            <code
+              >/api/repo/commit?path=&lt;hostパス&gt;&amp;hash=&lt;hash&gt;</code
+            >
+          </p>
+          <table class="schema">
+            <thead>
+              <tr>
+                <th>入力</th>
+                <th>型・条件</th>
+                <th>エラー</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>path</code></td>
+                <td>string / 必須</td>
+                <td>STATEにない場合404。</td>
+              </tr>
+              <tr>
+                <td><code>hash</code></td>
+                <td>string / 4〜64文字の16進数</td>
+                <td>
+                  未指定は422、正規表現に合わない場合400。Git上でcommitでない、または詳細の取得・解析に失敗した場合404。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>レスポンスは次のフィールドを持つ:</p>
+          <table class="schema">
+            <thead>
+              <tr>
+                <th>フィールド</th>
+                <th>型</th>
+                <th>説明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>hash</code></td>
+                <td>string</td>
+                <td>コミットハッシュ。</td>
+              </tr>
+              <tr>
+                <td><code>subject</code></td>
+                <td>string</td>
+                <td>件名。</td>
+              </tr>
+              <tr>
+                <td><code>author</code></td>
+                <td>string</td>
+                <td>作者名。</td>
+              </tr>
+              <tr>
+                <td><code>date</code></td>
+                <td>string</td>
+                <td>コミッター日時。</td>
+              </tr>
+              <tr>
+                <td><code>parents</code></td>
+                <td>string[]</td>
+                <td>親コミットのハッシュ配列。</td>
+              </tr>
+              <tr>
+                <td><code>files</code></td>
+                <td>object[]</td>
+                <td>
+                  numstat配列。各要素は
+                  <code>additions: integer | "-"</code>、<code
+                    >deletions: integer | "-"</code
+                  >、<code>path: string</code>、<code>binary: boolean</code
+                  >。バイナリは追加・削除が <code>"-"</code>。
+                </td>
+              </tr>
+              <tr>
+                <td><code>patch</code></td>
+                <td>string</td>
+                <td>
+                  <code>git show</code> のunified=3 patch。UTF-8換算200,000
+                  bytesを超える場合は途中まで。
+                </td>
+              </tr>
+              <tr>
+                <td><code>patch_truncated</code></td>
+                <td>boolean</td>
+                <td>patchを200,000 bytesで切ったか。</td>
+              </tr>
+              <tr>
+                <td><code>command</code></td>
+                <td>string</td>
+                <td>
+                  <code>git show &lt;hash&gt;</code
+                  >。画面からコピーできる等価コマンド。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>GET /api/repo/branches</h3>
+          <p><code>/api/repo/branches?path=&lt;hostパス&gt;</code></p>
+          <table class="schema">
+            <thead>
+              <tr>
+                <th>入力</th>
+                <th>型</th>
+                <th>エラー</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>path</code></td>
+                <td>string / 必須</td>
+                <td>STATEにない場合404。Git取得失敗時502。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>レスポンス:</p>
+          <table class="schema">
+            <thead>
+              <tr>
+                <th>フィールド</th>
+                <th>型</th>
+                <th>説明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>local</code></td>
+                <td>object[]</td>
+                <td>ローカルrefの配列。</td>
+              </tr>
+              <tr>
+                <td><code>remotes</code></td>
+                <td>object[]</td>
+                <td>
+                  リモートrefの配列。キーは <code>remote</code> ではなく
+                  <code>remotes</code>。
+                </td>
+              </tr>
+              <tr>
+                <td><code>command</code></td>
+                <td>string</td>
+                <td>画面に表示する <code>git branch -vv</code>。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            <code>local[]</code> と
+            <code>remotes[]</code> の各要素は共通して、<code>name: string</code
+            >、<code>hash: string</code>、<code>upstream: string | null</code
+            >、<code>track: string | null</code>、<code>date: string</code
+            >、<code>current: boolean</code>、<code>merged: boolean</code
+            >、<code>worktree: string | null</code> を持つ。<code
+              >worktree</code
+            >
+            はそのbranchをcheckout中のホスト絶対パス。画面は所在を「作業中 @
+            path」で示し、worktreeがないmerged local
+            branchを削除候補として識別する。
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2>グラフのレーンと描画</h2>
+        <p>
+          <code>graph.py</code> は
+          <code>git log --date-order --decorate=full --parents</code>
+          相当の親情報から、行をまたいで生きる枝をレーン番号に割り当てる。frontendはその番号を受け取って曲線を描く。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>フィールド</th>
+              <th>この行での意味</th>
+              <th>frontendの描画</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>lane</code></td>
+              <td>このコミットのノードが置かれるレーン。</td>
+              <td>ノード中心のx座標。レーン幅14px、左余白8px。</td>
+            </tr>
+            <tr>
+              <td><code>in_lanes</code></td>
+              <td>
+                上から降りてきて、このコミットに入る線。マージで複数になることがある。
+              </td>
+              <td>各レーン上端からノード中心までを直線または曲線で結ぶ。</td>
+            </tr>
+            <tr>
+              <td><code>through</code></td>
+              <td>このコミットには関係せず、同じ行を通過する別枝。</td>
+              <td>そのレーンの上端から下端まで直線を引く。</td>
+            </tr>
+            <tr>
+              <td><code>out_lanes</code></td>
+              <td>このコミットから親へ出る線。配列順が親の順序。</td>
+              <td>ノード中心から行下端へ直線または曲線で結ぶ。</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="card">
+          <h3>なぜ「1行 = 1枚のSVG」か</h3>
+          <p>
+            1000コミットを1枚の巨大SVGにまとめると、DOM・再描画・クリック処理が重くなり、仮想スクロールとも両立しない。そこで各コミット行が自分の行を通る線分とノードだけを、高さ30pxの小さなSVGとして持つ。行ごとの再描画と通常のスクロールを保ちつつ、レーンの縦位置は全行で固定幅にする。
+          </p>
+          <pre>
+W = 14px, H = 30px
 node = (min(lane, 7) * W + 8, H / 2), radius = 4
 through[i]  : (min(i, 7)*W+8, 0) → (min(i, 7)*W+8, H)
 in_lanes[i] : (min(i, 7)*W+8, 0) → node
 out_lanes[i]: node → (min(i, 7)*W+8, H)
-SVG width   : min(max_lane + 1, 8) * W + 16</pre>
-        <p><code>lane</code> の値はAPIに保持するが、frontendの座標は8レーン分に収める。レーン番号8以上の枝は描画上、最後のレーン位置に重なる。</p>
-        <p>未コミット変更があるときは、<code>repo.branch_line</code>（<code>git status -sb</code>相当）とXYコード集計を持つ破線丸の仮想ノードを最上部に追加する。レーンは <code>head_lane</code> で、現在の作業がどのコミット系列の上に乗っているかを示す。</p>
-        <p>refバッジは <code>head</code> を強調、<code>remote</code> を淡く、<code>tag</code> を別色で表示する。既定は <code>all=false</code> で現在ブランチとupstreamを見せ、トグルで <code>--all</code> に切り替える。</p>
-      </div>
-    </section>
+SVG width   : min(max_lane + 1, 8) * W + 16</pre
+          >
+          <p>
+            <code>lane</code>
+            の値はAPIに保持するが、frontendの座標は8レーン分に収める。レーン番号8以上の枝は描画上、最後のレーン位置に重なる。
+          </p>
+          <p>
+            未コミット変更があるときは、<code>repo.branch_line</code>（<code
+              >git status -sb</code
+            >相当）とXYコード集計を持つ破線丸の仮想ノードを最上部に追加する。レーンは
+            <code>head_lane</code>
+            で、現在の作業がどのコミット系列の上に乗っているかを示す。
+          </p>
+          <p>
+            refバッジは <code>head</code> を強調、<code>remote</code>
+            を淡く、<code>tag</code> を別色で表示する。既定は
+            <code>all=false</code> で現在ブランチとupstreamを見せ、トグルで
+            <code>--all</code> に切り替える。
+          </p>
+        </div>
+      </section>
 
-    <section>
-      <h2>踏んではいけない罠</h2>
-      <div class="card warning">
-        <h3>1. inotify自己励起ループ</h3>
-        <p><code>git status</code> は作業ツリーのstat変化に応じて <code>.git/index</code> を書き戻すことがある。これをinotifyが拾って再取得し、再取得中のGitがまたindexを書き、無限に自己励起する。検証時にはアイドル10秒で1968イベント、同時実行時には <code>index.lock</code> の競合が発生した。</p>
-        <p>次の3層を外さないこと: (1) Watcherで <code>.lock</code> イベントを破棄、(2)取得完了から <code>SUPPRESS_SEC = 3.0</code> 秒は対象repoのイベントを無視、(3) <code>_repo_lock()</code> で同一repoのGit実行を排他。さらに <code>DEBOUNCE_SEC = 1.0</code> 秒で複数イベントをまとめる。新しいGit呼び出しは直接 <code>gitinfo._run()</code> せず、必ずrepo lockを通す。</p>
-      </div>
-      <div class="card warning">
-        <h3>2. Next.js rewritesの実行時固定だと思い込む</h3>
-        <p><code>next.config.mjs</code> の <code>rewrites</code> は <code>next build</code> 時点で評価される。Compose起動時に <code>BACKEND_ORIGIN</code> を差し替えても、ビルド時に決まった転送先は変わらない。</p>
-        <p>現在は <code>frontend/app/api/[...path]/route.ts</code> のNode.jsルートハンドラで、リクエスト時に <code>process.env.BACKEND_ORIGIN</code> を読む。<code>dynamic = "force-dynamic"</code> とし、SSEはupstreamのbodyを触らずストリームとして返している。proxyをrewritesへ戻さないこと。</p>
-      </div>
-    </section>
+      <section>
+        <h2>踏んではいけない罠</h2>
+        <div class="card warning">
+          <h3>1. inotify自己励起ループ</h3>
+          <p>
+            <code>git status</code> は作業ツリーのstat変化に応じて
+            <code>.git/index</code>
+            を書き戻すことがある。これをinotifyが拾って再取得し、再取得中のGitがまたindexを書き、無限に自己励起する。検証時にはアイドル10秒で1968イベント、同時実行時には
+            <code>index.lock</code> の競合が発生した。
+          </p>
+          <p>
+            次の3層を外さないこと: (1) Watcherで
+            <code>.lock</code> イベントを破棄、(2)取得完了から
+            <code>SUPPRESS_SEC = 3.0</code> 秒は対象repoのイベントを無視、(3)
+            <code>_repo_lock()</code> で同一repoのGit実行を排他。さらに
+            <code>DEBOUNCE_SEC = 1.0</code>
+            秒で複数イベントをまとめる。新しいGit呼び出しは直接
+            <code>gitinfo._run()</code> せず、必ずrepo lockを通す。
+          </p>
+        </div>
+        <div class="card warning">
+          <h3>2. Next.js rewritesの実行時固定だと思い込む</h3>
+          <p>
+            <code>next.config.mjs</code> の <code>rewrites</code> は
+            <code>next build</code> 時点で評価される。Compose起動時に
+            <code>BACKEND_ORIGIN</code>
+            を差し替えても、ビルド時に決まった転送先は変わらない。
+          </p>
+          <p>
+            現在は
+            <code>frontend/app/api/[...path]/route.ts</code>
+            のNode.jsルートハンドラで、リクエスト時に
+            <code>process.env.BACKEND_ORIGIN</code> を読む。<code
+              >dynamic = "force-dynamic"</code
+            >
+            とし、SSEはupstreamのbodyを触らずストリームとして返している。proxyをrewritesへ戻さないこと。
+          </p>
+        </div>
+      </section>
 
-    <section>
-      <h2>変更時のチェックポイント</h2>
-      <ul>
-        <li>新しいrepo APIでは、最初にSTATE存在確認を行い、ホストパスをそのままGitに渡さない。</li>
-        <li>Gitを呼ぶ処理はrepo単位の排他を通す。fetchはローカル取得を詰まらせないため別poolを使う。</li>
-        <li>グラフ行のフィールド名（特に <code>lane</code> / <code>in_lanes</code> / <code>through</code> / <code>out_lanes</code>）と、APIの <code>remotes</code> キーを変更する場合はbackendとfrontendを同時に確認する。</li>
-        <li>表示用コマンドは内部のporcelainやformat文字列そのものではなく、利用者がターミナルで打つ等価なコマンドにする。</li>
-        <li>作業ツリー編集はinotifyの責務外。画面復帰時の可視行refreshを外すと、保存直後の状態が古いままになる。</li>
-      </ul>
-    </section>
-  </main>
-</body>
+      <section>
+        <h2>変更時のチェックポイント</h2>
+        <ul>
+          <li>
+            新しいrepo
+            APIでは、最初にSTATE存在確認を行い、ホストパスをそのままGitに渡さない。
+          </li>
+          <li>
+            Gitを呼ぶ処理はrepo単位の排他を通す。fetchはローカル取得を詰まらせないため別poolを使う。
+          </li>
+          <li>
+            グラフ行のフィールド名（特に <code>lane</code> /
+            <code>in_lanes</code> / <code>through</code> /
+            <code>out_lanes</code>）と、APIの
+            <code>remotes</code>
+            キーを変更する場合はbackendとfrontendを同時に確認する。
+          </li>
+          <li>
+            表示用コマンドは内部のporcelainやformat文字列そのものではなく、利用者がターミナルで打つ等価なコマンドにする。
+          </li>
+          <li>
+            作業ツリー編集はinotifyの責務外。画面復帰時の可視行refreshを外すと、保存直後の状態が古いままになる。
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
 </html>

@@ -2,23 +2,27 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { GraphView } from "./graph-view";
-import {
-  BranchesResponse,
-  CommitDetail,
-  GraphResponse,
-  Repo,
-} from "./types";
+import { BranchesResponse, CommitDetail, GraphResponse, Repo } from "./types";
+import { codeColor, stateBadges, truncationLabel } from "./status";
+
+export type DetailTab = "status" | "graph" | "branches";
 
 type RepoDetailProps = {
   repo: Repo;
   copied: string | null;
   onCopy: (command: string) => void;
+  activeTab: DetailTab;
+  onTabChange: (tab: DetailTab) => void;
 };
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 const GRAPH_LIMIT = 200;
 const COMMIT_FETCH_DEBOUNCE_MS = 150;
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
 
 async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal });
@@ -31,15 +35,19 @@ function apiQuery(path: string, params: Record<string, string>) {
   return search.toString();
 }
 
-function codeColor(xy: string) {
-  if (xy === "??") return "var(--c-untracked)";
-  if (["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(xy)) return "var(--c-conflict)";
-  if (xy[1] !== ".") return "var(--c-worktree)";
-  return "var(--c-index)";
-}
-
 /** porcelain v2 の "." を、git status -sb と同じ空白に戻す */
 const display = (xy: string) => xy.replace(/\./g, " ");
+
+function xyTitle(xy: string) {
+  const index = xy[0] === "." ? " " : xy[0];
+  const worktree = xy[1] === "." ? " " : xy[1];
+  return `index: ${index} / worktree: ${worktree}`;
+}
+
+function projectName(repo: Repo) {
+  const parts = repo.common_dir.split("/").filter(Boolean);
+  return parts.at(-1) ?? repo.common_dir;
+}
 
 function BranchLine({ line }: { line: string }) {
   const m = line.match(/^(## [^\[]*)(\[.*\])?$/);
@@ -53,28 +61,81 @@ function BranchLine({ line }: { line: string }) {
 }
 
 function StatusBlock({ repo }: { repo: Repo }) {
+  const badges = stateBadges(repo);
   return (
     <div className="statusblock">
-      <div style={{ color: "var(--muted)" }}>
+      <div className="status-branch">
         {repo.branch_line ? <BranchLine line={repo.branch_line} /> : "—"}
+      </div>
+      <div className="status-badges" aria-label="状態">
+        {badges.map((badge) => (
+          <span
+            className={`state-badge token-${badge.token}`}
+            key={`${badge.token}-${badge.text}`}
+          >
+            {badge.text}
+          </span>
+        ))}
       </div>
       {(repo.entries ?? []).slice(0, 40).map((entry) => (
         <div key={entry.xy + entry.path}>
-          <span className="xy" style={{ color: codeColor(entry.xy) }}>{display(entry.xy)}</span>
+          <span
+            className="xy"
+            style={{ color: codeColor(entry.xy) }}
+            title={xyTitle(entry.xy)}
+          >
+            {display(entry.xy)}
+          </span>
           {entry.path}
         </div>
       ))}
       {(repo.entries?.length ?? 0) > 40 && (
-        <div style={{ color: "var(--muted)" }}>… 他 {(repo.entries?.length ?? 0) - 40} 件</div>
+        <div className="muted-line">
+          … 他 {(repo.entries?.length ?? 0) - 40} 件
+        </div>
       )}
-      {(repo.entries?.length ?? 0) === 0 && (
-        <div style={{ color: "var(--muted)" }}>nothing to commit, working tree clean</div>
+      {badges.some((badge) => badge.token === "clean") && (
+        <div className="muted-line">nothing to commit, working tree clean</div>
       )}
     </div>
   );
 }
 
-function CommitPane({ detail, state, error, onRetry, onCopy }: {
+function StatusPane({ repo }: { repo: Repo }) {
+  return (
+    <section className="status-pane" aria-labelledby="status-pane-title">
+      <div className="section-head">
+        <h3 id="status-pane-title">変更ファイル</h3>
+        <code className="cmdhint">git status --short</code>
+      </div>
+      <div className="status-files">
+        {(repo.entries ?? []).map((entry) => (
+          <div key={entry.xy + entry.path}>
+            <span
+              className="xy"
+              style={{ color: codeColor(entry.xy) }}
+              title={xyTitle(entry.xy)}
+            >
+              {display(entry.xy)}
+            </span>
+            {entry.path}
+          </div>
+        ))}
+        {(repo.entries?.length ?? 0) === 0 && (
+          <div className="muted-line">変更ファイルはありません</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CommitPane({
+  detail,
+  state,
+  error,
+  onRetry,
+  onCopy,
+}: {
   detail: CommitDetail | null;
   state: LoadState;
   error: string | null;
@@ -94,16 +155,26 @@ function CommitPane({ detail, state, error, onRetry, onCopy }: {
           {detail && <code className="cmdhint">{detail.command}</code>}
         </div>
         {detail && (
-          <button className="copy" type="button" onClick={() => onCopy(detail.command)}>
+          <button
+            className="copy"
+            type="button"
+            onClick={() => onCopy(detail.command)}
+          >
             コマンドをコピー
           </button>
         )}
       </div>
-      {state === "loading" && <div className="loading" role="status">コミット詳細を取得中…</div>}
+      {state === "loading" && (
+        <div className="loading" role="status">
+          コミット詳細を取得中…
+        </div>
+      )}
       {state === "error" && (
         <div className="inline-error" role="alert">
           コミット詳細を取得できませんでした。
-          <button className="copy" type="button" onClick={onRetry}>再取得</button>
+          <button className="copy" type="button" onClick={onRetry}>
+            再取得
+          </button>
           {error && <span className="sr-only">{error}</span>}
         </div>
       )}
@@ -115,7 +186,11 @@ function CommitPane({ detail, state, error, onRetry, onCopy }: {
             <span>{detail.date}</span>
           </div>
           <div className="numstat" aria-label="変更ファイルの集計">
-            <div className="numstat-head"><span>追加</span><span>削除</span><span>パス</span></div>
+            <div className="numstat-head">
+              <span>追加</span>
+              <span>削除</span>
+              <span>パス</span>
+            </div>
             {detail.files.map((file) => (
               <div className="numstat-row" key={file.path}>
                 <span className="additions">{file.additions}</span>
@@ -126,11 +201,17 @@ function CommitPane({ detail, state, error, onRetry, onCopy }: {
                 </span>
               </div>
             ))}
-            {detail.files.length === 0 && <div className="muted-line">変更ファイルはありません</div>}
+            {detail.files.length === 0 && (
+              <div className="muted-line">変更ファイルはありません</div>
+            )}
           </div>
-          <pre className="patch" aria-label="コミットの diff">{detail.patch}</pre>
+          <pre className="patch" aria-label="コミットの diff">
+            {detail.patch}
+          </pre>
           {detail.patch_truncated && (
-            <div className="truncated" role="status">diff は大きいため途中まで表示しています。</div>
+            <div className="truncated" role="status">
+              {truncationLabel(200)}
+            </div>
           )}
         </>
       )}
@@ -138,43 +219,87 @@ function CommitPane({ detail, state, error, onRetry, onCopy }: {
   );
 }
 
-function BranchRow({ branch }: { branch: BranchesResponse["local"][number] }) {
+function BranchRow({
+  branch,
+  onCopy,
+}: {
+  branch: BranchesResponse["local"][number];
+  onCopy: (command: string) => void;
+}) {
   const collapsedMerged = branch.merged && !branch.current;
   const abandonedCandidate = collapsedMerged && !branch.worktree;
   return (
-    <div className={`branch-row${collapsedMerged ? " merged" : ""}${abandonedCandidate ? " abandoned" : ""}`}>
+    <div
+      className={`branch-row${collapsedMerged ? " merged" : ""}${abandonedCandidate ? " abandoned" : ""}`}
+    >
       <span className={branch.current ? "branch-name current" : "branch-name"}>
-        {branch.current && <span className="branch-marker" aria-label="現在のブランチ">*</span>}
+        {branch.current && (
+          <span className="branch-marker" aria-label="現在のブランチ">
+            *
+          </span>
+        )}
         {branch.name}
       </span>
       <code>{branch.hash}</code>
-      {branch.upstream && <span className="branch-upstream">{branch.upstream}</span>}
+      {branch.upstream && (
+        <span className="branch-upstream">{branch.upstream}</span>
+      )}
       {branch.track && <span className="branch-track">{branch.track}</span>}
-      <time className="branch-date" dateTime={branch.date}>{branch.date}</time>
+      <time className="branch-date" dateTime={branch.date}>
+        {branch.date}
+      </time>
       <span className="branch-state">
         {branch.worktree && (
-          <span className="branch-worktree" title={branch.worktree}>作業中 @ {branch.worktree}</span>
+          <span className="branch-worktree" title={branch.worktree}>
+            作業中 @ {branch.worktree}
+          </span>
         )}
-        {abandonedCandidate && <span className="branch-abandoned">merged · 削除候補</span>}
-        {collapsedMerged && !abandonedCandidate && <span className="branch-merged">merged</span>}
+        {abandonedCandidate && (
+          <span className="branch-action">
+            <span className="branch-abandoned">merged · 削除候補</span>
+            <button
+              className="branch-delete"
+              type="button"
+              onClick={() => onCopy(`git branch -d ${shellQuote(branch.name)}`)}
+            >
+              削除コマンドをコピー
+            </button>
+          </span>
+        )}
+        {collapsedMerged && !abandonedCandidate && (
+          <span className="branch-merged">merged</span>
+        )}
       </span>
     </div>
   );
 }
 
-function BranchesPane({ data, state, error, showMerged, onShowMerged, onRetry }: {
+function BranchesPane({
+  data,
+  state,
+  error,
+  showMerged,
+  onShowMerged,
+  onRetry,
+  onCopy,
+}: {
   data: BranchesResponse | null;
   state: LoadState;
   error: string | null;
   showMerged: boolean;
   onShowMerged: (show: boolean) => void;
   onRetry: () => void;
+  onCopy: (command: string) => void;
 }) {
   if (state === "idle") return null;
   const local = data?.local ?? [];
   const remote = data?.remotes ?? [];
-  const visibleLocal = showMerged ? local : local.filter((branch) => branch.current || !branch.merged);
-  const mergedCount = local.filter((branch) => !branch.current && branch.merged).length;
+  const visibleLocal = showMerged
+    ? local
+    : local.filter((branch) => branch.current || !branch.merged);
+  const mergedCount = local.filter(
+    (branch) => !branch.current && branch.merged,
+  ).length;
 
   return (
     <section
@@ -187,22 +312,18 @@ function BranchesPane({ data, state, error, showMerged, onShowMerged, onRetry }:
           <h3 id="branches-pane-title">ブランチ</h3>
           {data && <code className="cmdhint">{data.command}</code>}
         </div>
-        {data && (
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={showMerged}
-              onChange={(event) => onShowMerged(event.target.checked)}
-            />
-            マージ済みを表示
-          </label>
-        )}
       </div>
-      {state === "loading" && <div className="loading" role="status">ブランチを取得中…</div>}
+      {state === "loading" && (
+        <div className="loading" role="status">
+          ブランチを取得中…
+        </div>
+      )}
       {state === "error" && (
         <div className="inline-error" role="alert">
           ブランチを取得できませんでした。
-          <button className="copy" type="button" onClick={onRetry}>再取得</button>
+          <button className="copy" type="button" onClick={onRetry}>
+            再取得
+          </button>
           {error && <span className="sr-only">{error}</span>}
         </div>
       )}
@@ -210,20 +331,30 @@ function BranchesPane({ data, state, error, showMerged, onShowMerged, onRetry }:
         <div className="branch-groups">
           <div className="branch-group">
             <h4>ローカル</h4>
-            {visibleLocal.map((branch) => <BranchRow key={branch.name} branch={branch} />)}
+            {visibleLocal.map((branch) => (
+              <BranchRow key={branch.name} branch={branch} onCopy={onCopy} />
+            ))}
             {!showMerged && mergedCount > 0 && (
-              <div className="muted-line">マージ済み {mergedCount} 件を折りたたんでいます</div>
+              <button
+                className="show-merged"
+                type="button"
+                onClick={() => onShowMerged(true)}
+              >
+                merged {mergedCount} 件を表示
+              </button>
             )}
             {visibleLocal.length === 0 && mergedCount === 0 && (
-              <div className="muted-line">
-                ローカルブランチはありません
-              </div>
+              <div className="muted-line">ローカルブランチはありません</div>
             )}
           </div>
           <div className="branch-group">
             <h4>リモート</h4>
-            {remote.map((branch) => <BranchRow key={branch.name} branch={branch} />)}
-            {remote.length === 0 && <div className="muted-line">リモートブランチはありません</div>}
+            {remote.map((branch) => (
+              <BranchRow key={branch.name} branch={branch} onCopy={onCopy} />
+            ))}
+            {remote.length === 0 && (
+              <div className="muted-line">リモートブランチはありません</div>
+            )}
           </div>
         </div>
       )}
@@ -231,7 +362,13 @@ function BranchesPane({ data, state, error, showMerged, onShowMerged, onRetry }:
   );
 }
 
-export default function RepoDetail({ repo, copied, onCopy }: RepoDetailProps) {
+export default function RepoDetail({
+  repo,
+  copied,
+  onCopy,
+  activeTab,
+  onTabChange,
+}: RepoDetailProps) {
   const [allRefs, setAllRefs] = useState(false);
   const [graph, setGraph] = useState<GraphResponse | null>(null);
   const [graphState, setGraphState] = useState<LoadState>("idle");
@@ -257,42 +394,80 @@ export default function RepoDetail({ repo, copied, onCopy }: RepoDetailProps) {
   }, [repo.path]);
 
   useEffect(() => {
+    if (activeTab !== "graph") {
+      setGraphState("idle");
+      return;
+    }
     const controller = new AbortController();
+    setGraph(null);
     setGraphState("loading");
     setGraphError(null);
     void getJson<GraphResponse>(
       `/api/repo/graph?${apiQuery(repo.path, { all: String(allRefs), limit: String(GRAPH_LIMIT) })}`,
       controller.signal,
-    ).then((value) => {
-      setGraph(value);
-      setGraphState("ready");
-    }).catch((reason: unknown) => {
-      if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setGraphError(reason instanceof Error ? reason.message : "unknown error");
-      setGraphState("error");
-    });
+    )
+      .then((value) => {
+        setGraph(value);
+        setGraphState("ready");
+      })
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === "AbortError")
+          return;
+        setGraphError(
+          reason instanceof Error ? reason.message : "unknown error",
+        );
+        setGraphState("error");
+      });
     return () => controller.abort();
-  }, [allRefs, graphRetry, repo.branch, repo.last_commit?.hash, repo.path]);
+  }, [
+    activeTab,
+    allRefs,
+    graphRetry,
+    repo.branch,
+    repo.last_commit?.hash,
+    repo.path,
+  ]);
 
   useEffect(() => {
+    if (activeTab !== "branches") {
+      setBranchesState("idle");
+      return;
+    }
     const controller = new AbortController();
+    setBranches(null);
     setBranchesState("loading");
     setBranchesError(null);
     void getJson<BranchesResponse>(
       `/api/repo/branches?${apiQuery(repo.path, {})}`,
       controller.signal,
-    ).then((value) => {
-      setBranches(value);
-      setBranchesState("ready");
-    }).catch((reason: unknown) => {
-      if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setBranchesError(reason instanceof Error ? reason.message : "unknown error");
-      setBranchesState("error");
-    });
+    )
+      .then((value) => {
+        setBranches(value);
+        setBranchesState("ready");
+      })
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === "AbortError")
+          return;
+        setBranchesError(
+          reason instanceof Error ? reason.message : "unknown error",
+        );
+        setBranchesState("error");
+      });
     return () => controller.abort();
-  }, [branchesRetry, repo.branch, repo.last_commit?.hash, repo.path]);
+  }, [
+    activeTab,
+    branchesRetry,
+    repo.branch,
+    repo.last_commit?.hash,
+    repo.path,
+  ]);
 
   useEffect(() => {
+    if (activeTab !== "graph") {
+      setCommit(null);
+      setCommitState("idle");
+      return;
+    }
     if (!selectedHash) {
       setCommit(null);
       setCommitState("idle");
@@ -306,116 +481,192 @@ export default function RepoDetail({ repo, copied, onCopy }: RepoDetailProps) {
       void getJson<CommitDetail>(
         `/api/repo/commit?${apiQuery(repo.path, { hash: selectedHash })}`,
         controller.signal,
-      ).then((value) => {
-        setCommit(value);
-        setCommitState("ready");
-      }).catch((reason: unknown) => {
-        if (reason instanceof DOMException && reason.name === "AbortError") return;
-        setCommitError(reason instanceof Error ? reason.message : "unknown error");
-        setCommitState("error");
-      });
+      )
+        .then((value) => {
+          setCommit(value);
+          setCommitState("ready");
+        })
+        .catch((reason: unknown) => {
+          if (reason instanceof DOMException && reason.name === "AbortError")
+            return;
+          setCommitError(
+            reason instanceof Error ? reason.message : "unknown error",
+          );
+          setCommitState("error");
+        });
     }, COMMIT_FETCH_DEBOUNCE_MS);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [repo.path, selectedHash, commitRetry]);
+  }, [activeTab, repo.path, selectedHash, commitRetry]);
 
   const virtualNode = useMemo(() => {
-    if (!graph || !repo.entries?.length || graph.head_lane === null || !repo.branch_line) return undefined;
+    if (
+      !graph ||
+      !repo.entries?.length ||
+      graph.head_lane === null ||
+      !repo.branch_line
+    )
+      return undefined;
     return {
       lane: graph.head_lane,
       label: repo.branch_line,
-      summary: (repo.counts ?? []).map((count) => `${display(count.xy)} ${count.count}`).join("  "),
+      summary: (repo.counts ?? [])
+        .map((count) => `${display(count.xy)} ${count.count}`)
+        .join("  "),
     };
   }, [graph, repo.branch_line, repo.counts, repo.entries]);
 
   return (
     <div className="detail">
-      <StatusBlock repo={repo} />
-
-      <div className="legend">
-        <span>左列 = index</span>
-        <span>右列 = worktree</span>
-        <span>?? = 未追跡</span>
-        {repo.remote && <span>{repo.remote}</span>}
+      <div className="detail-header">
+        <div className="detail-breadcrumb">
+          {projectName(repo)} <span>›</span>{" "}
+          {repo.branch || (repo.detached ? "detached HEAD" : "本体")}
+        </div>
+        <div className="detail-path-row">
+          <code className="detail-path" title={repo.path}>
+            {repo.path}
+          </code>
+          <button
+            className="copy"
+            type="button"
+            onClick={() => onCopy(repo.path)}
+          >
+            {copied === repo.path ? "コピーしました" : "パスをコピー"}
+          </button>
+        </div>
       </div>
 
+      <StatusBlock repo={repo} />
       {repo.next_command && (
         <div className="next">
-          <div className="reason">{repo.next_command.reason}。次はこれです</div>
           <div className="cmdrow">
             <code>{repo.next_command.command}</code>
-            <button className="copy" type="button" onClick={() => onCopy(repo.next_command!.command)}>
-              {copied === repo.next_command.command ? "コピーしました" : "コピー"}
+            <button
+              className="copy"
+              type="button"
+              onClick={() => onCopy(repo.next_command!.command)}
+            >
+              {copied === repo.next_command.command
+                ? "コピーしました"
+                : "コピー"}
             </button>
           </div>
+          <div className="reason">{repo.next_command.reason}</div>
         </div>
       )}
 
-      <section
-        aria-busy={graphState === "loading"}
-        aria-labelledby="graph-pane-title"
-        className="graph-pane"
-      >
-        <div className="section-head">
-          <div>
-            <h3 id="graph-pane-title">コミットグラフ</h3>
-            {graph && <code className="cmdhint">{graph.command}</code>}
-          </div>
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={allRefs}
-              onChange={(event) => setAllRefs(event.target.checked)}
-            />
-            --all
-          </label>
-        </div>
-        {graphState === "loading" && <div className="loading" role="status">コミットグラフを取得中…</div>}
-        {graphState === "error" && (
-          <div className="inline-error" role="alert">
-            コミットグラフを取得できませんでした。
-            <button className="copy" type="button" onClick={() => setGraphRetry((value) => value + 1)}>再取得</button>
-            {graphError && <span className="sr-only">{graphError}</span>}
-          </div>
-        )}
-      {(graphState === "loading" || graphState === "ready") && graph && (
-          <>
-            {graph.rows.length > 0 || virtualNode ? (
-              <GraphView
-                rows={graph.rows}
-                maxLane={graph.max_lane}
-                selectedHash={selectedHash}
-                onSelect={setSelectedHash}
-                virtualNode={virtualNode}
+      <div className="detail-tabs" role="tablist" aria-label="リポジトリ詳細">
+        {(["status", "graph", "branches"] as DetailTab[]).map((tab) => (
+          <button
+            className="detail-tab"
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            onClick={() => onTabChange(tab)}
+          >
+            {tab === "status"
+              ? "状態"
+              : tab === "graph"
+                ? "グラフ"
+                : "ブランチ"}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "status" && <StatusPane repo={repo} />}
+
+      {activeTab === "graph" && (
+        <section
+          aria-busy={graphState === "loading"}
+          aria-labelledby="graph-pane-title"
+          className="graph-pane"
+        >
+          <div className="section-head">
+            <div>
+              <h3 id="graph-pane-title">コミットグラフ</h3>
+              {graph && <code className="cmdhint">{graph.command}</code>}
+            </div>
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={allRefs}
+                onChange={(event) => setAllRefs(event.target.checked)}
               />
-            ) : (
-              <div className="muted-line">コミットがありません</div>
-            )}
-            {graph.truncated && (
-              <div className="truncated" role="status">{GRAPH_LIMIT} 件まで表示しています。</div>
-            )}
-          </>
-        )}
-      </section>
+              --all
+            </label>
+          </div>
+          {graphState === "loading" && (
+            <div
+              className="graph-skeletons"
+              role="status"
+              aria-label="コミットグラフを取得中"
+            >
+              {[0, 1, 2, 3, 4].map((item) => (
+                <div className="graph-skeleton" key={item} />
+              ))}
+            </div>
+          )}
+          {graphState === "error" && (
+            <div className="inline-error" role="alert">
+              コミットグラフを取得できませんでした。
+              <button
+                className="copy"
+                type="button"
+                onClick={() => setGraphRetry((value) => value + 1)}
+              >
+                再取得
+              </button>
+              {graphError && <span className="sr-only">{graphError}</span>}
+            </div>
+          )}
+          {(graphState === "loading" || graphState === "ready") && graph && (
+            <>
+              {graph.rows.length > 0 || virtualNode ? (
+                <GraphView
+                  rows={graph.rows}
+                  maxLane={graph.max_lane}
+                  selectedHash={selectedHash}
+                  onSelect={setSelectedHash}
+                  virtualNode={virtualNode}
+                />
+              ) : (
+                <div className="muted-line">コミットがありません</div>
+              )}
+              {graph.truncated && (
+                <div className="truncated" role="status">
+                  {GRAPH_LIMIT} 件まで表示しています。
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
-      <CommitPane
-        detail={commit}
-        state={commitState}
-        error={commitError}
-        onRetry={() => setCommitRetry((value) => value + 1)}
-        onCopy={onCopy}
-      />
+      {activeTab === "graph" && (
+        <CommitPane
+          detail={commit}
+          state={commitState}
+          error={commitError}
+          onRetry={() => setCommitRetry((value) => value + 1)}
+          onCopy={onCopy}
+        />
+      )}
 
-      <BranchesPane
-        data={branches}
-        state={branchesState}
-        error={branchesError}
-        showMerged={showMerged}
-        onShowMerged={setShowMerged}
-        onRetry={() => setBranchesRetry((value) => value + 1)}
-      />
+      {activeTab === "branches" && (
+        <BranchesPane
+          data={branches}
+          state={branchesState}
+          error={branchesError}
+          showMerged={showMerged}
+          onShowMerged={setShowMerged}
+          onRetry={() => setBranchesRetry((value) => value + 1)}
+          onCopy={onCopy}
+        />
+      )}
     </div>
   );
 }

@@ -24,24 +24,29 @@ frontend のルートハンドラ経由でしか到達できない。
 
 ## 表示するもの
 
-| 項目 | 元になる git コマンド |
-|---|---|
-| ブランチ、upstream、ahead / behind | `git status --porcelain=v2 --branch` |
-| ファイルごとの XY コード | 同上 |
-| 最終コミット | `git log -1` |
-| コミットグラフ | `git log --oneline --graph` |
-| コミット詳細（選択コミットの変更ファイルの統計、diff） | `git show <hash>` |
-| ブランチ一覧 | `git branch -vv` |
-| worktree 一覧と状態 | `git worktree list --porcelain` |
-| stash 数 | `git stash list` |
-| リモート URL | `git config --get remote.origin.url` |
+| 項目                                                   | 元になる git コマンド                |
+| ------------------------------------------------------ | ------------------------------------ |
+| ブランチ、upstream、ahead / behind                     | `git status --porcelain=v2 --branch` |
+| ファイルごとの XY コード                               | 同上                                 |
+| 最終コミット                                           | `git log -1`                         |
+| コミットグラフ                                         | `git log --oneline --graph`          |
+| コミット詳細（選択コミットの変更ファイルの統計、diff） | `git show <hash>`                    |
+| ブランチ一覧                                           | `git branch -vv`                     |
+| worktree 一覧と状態                                    | `git worktree list --porcelain`      |
+| stash 数                                               | `git stash list`                     |
+| リモート URL                                           | `git config --get remote.origin.url` |
 
 一覧には `git status -sb` の 1 行目をそのまま出す。
 
-リポジトリは既定で本体と linked worktree を同じ「プロジェクト」にまとめる。
-`なし`、`親フォルダ`、`リモート（リポジトリ）` にも切り替えられる。
-リモートは URL の表記差を正規化するため、同じリポジトリの SSH / HTTPS clone は
-同じグループになり、owner が異なる fork は別グループになる。
+リポジトリは本体と linked worktree を同じ「プロジェクト」にまとめ、本体、活動順の
+worktree の順で表示する。worktree がないリポジトリは単独行のまま表示する。
+`worktree`、`merged`、`prunable` などのフィルタでは、一致した行と所属プロジェクトを
+残す。上部の集計カードからも対応するフィルタへ移動できる。
+
+行を選ぶと、幅 1200px 以上では右ペイン、未満ではドロワーに詳細を表示する。
+詳細は「状態」「グラフ」「ブランチ」のタブに分かれ、選択したタブだけを取得する。
+選択中のリポジトリとタブは URL に同期されるため、そのまま共有・再読込できる。
+一覧では上下キーで行を移動し、Enter で選択、Escape で詳細を閉じられる。
 
 ```
 ## feat/search...origin/feat/search [ahead 2, behind 4]
@@ -50,26 +55,29 @@ MM  frontend/app/page.tsx
 ??  notes.md
 ```
 
-左列が index、右列が worktree。`??` は未追跡。
+XY コードにはツールチップを付け、状態は色だけでなく `ahead`、`behind`、`merged`、
+`prunable`、`detached`、`clean` などの文字バッジでも同時に示す。表示はOSの
+ライト／ダーク設定に追従する。
 
 ## git を覚えるための仕掛け
 
-行を開くと、今の状態から導かれる「次に打つコマンド」が 1 つだけ出る。
+行を選ぶと、どの詳細タブでも今の状態から導かれる「次に打つコマンド」が
+1 つだけ出る。
 
-| 状態 | 提示 |
-|---|---|
-| コンフリクトあり | `git status` |
-| 未ステージあり | `git add -p` |
-| 未追跡のみ | `git add -A` |
-| ステージ済みのみ | `git commit` |
-| detached HEAD | `git switch -` |
-| prunable worktree | `git worktree prune` |
-| マージ済み worktree | `git worktree remove <path>` |
-| マージ済みブランチ | `git branch -d <branch>` |
-| upstream なし | `git push -u origin <branch>` |
-| ahead かつ behind | `git pull --rebase` |
-| behind のみ | `git pull --ff-only` |
-| ahead のみ | `git push` |
+| 状態                | 提示                          |
+| ------------------- | ----------------------------- |
+| コンフリクトあり    | `git status`                  |
+| 未ステージあり      | `git add -p`                  |
+| 未追跡のみ          | `git add -A`                  |
+| ステージ済みのみ    | `git commit`                  |
+| detached HEAD       | `git switch -`                |
+| prunable worktree   | `git worktree prune`          |
+| マージ済み worktree | `git worktree remove <path>`  |
+| マージ済みブランチ  | `git branch -d <branch>`      |
+| upstream なし       | `git push -u origin <branch>` |
+| ahead かつ behind   | `git pull --rebase`           |
+| behind のみ         | `git pull --ff-only`          |
+| ahead のみ          | `git push`                    |
 
 作業ツリーが汚れているときは pull を勧めない（失敗するため）。
 
@@ -79,12 +87,12 @@ MM  frontend/app/page.tsx
 
 ## 速度
 
-| 時刻 | 画面 |
-|---|---|
+| 時刻   | 画面                                     |
+| ------ | ---------------------------------------- |
 | 〜10ms | キャッシュから全行が並ぶ（前回値、淡色） |
-| 〜1s | 画面内の行が最新値に置き換わる |
-| 〜数秒 | 残りが埋まる。活動が新しい順 |
-| 背景 | 再探索と fetch |
+| 〜1s   | 画面内の行が最新値に置き換わる           |
+| 〜数秒 | 残りが埋まる。活動が新しい順             |
+| 背景   | 再探索と fetch                           |
 
 効かせている仕掛け:
 
@@ -100,16 +108,16 @@ MM  frontend/app/page.tsx
 
 `.env` で調整する。
 
-| 変数 | 既定 | 意味 |
-|---|---|---|
-| `GITDASH_SCAN_ROOT` | — | 走査するホスト側ディレクトリ（必須） |
-| `GITDASH_UID` / `GITDASH_GID` | — | コンテナを動かす uid/gid（必須） |
-| `GITDASH_MAX_DEPTH` | 8 | 何階層まで潜るか |
-| `GITDASH_WORKERS` | 16 | ローカル処理の並列数 |
-| `GITDASH_FETCH` | true | fetch するか |
-| `GITDASH_FETCH_WORKERS` | 4 | fetch の並列数 |
-| `GITDASH_FETCH_INTERVAL_SEC` | 300 | 同一リポジトリの fetch 間隔 |
-| `GITDASH_WATCH` | true | inotify を使うか |
+| 変数                          | 既定 | 意味                                 |
+| ----------------------------- | ---- | ------------------------------------ |
+| `GITDASH_SCAN_ROOT`           | —    | 走査するホスト側ディレクトリ（必須） |
+| `GITDASH_UID` / `GITDASH_GID` | —    | コンテナを動かす uid/gid（必須）     |
+| `GITDASH_MAX_DEPTH`           | 8    | 何階層まで潜るか                     |
+| `GITDASH_WORKERS`             | 16   | ローカル処理の並列数                 |
+| `GITDASH_FETCH`               | true | fetch するか                         |
+| `GITDASH_FETCH_WORKERS`       | 4    | fetch の並列数                       |
+| `GITDASH_FETCH_INTERVAL_SEC`  | 300  | 同一リポジトリの fetch 間隔          |
+| `GITDASH_WATCH`               | true | inotify を使うか                     |
 
 除外ディレクトリは `backend/app/scanner.py` の `SKIP_NAMES`。
 `node_modules` `.venv` `.cargo` `go/pkg` などは登録済み。
