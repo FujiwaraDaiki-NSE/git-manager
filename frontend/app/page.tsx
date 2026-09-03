@@ -5,7 +5,7 @@ import RepoDetail from "./repo-detail";
 import { Repo, isDirty, hasConflict } from "./types";
 
 type Filter = "all" | "dirty" | "unpushed" | "behind";
-type Grouping = "none" | "parent" | "remote";
+type Grouping = "project" | "none" | "parent" | "remote";
 
 function since(iso?: string) {
   if (!iso) return { text: "—", stale: false };
@@ -37,30 +37,76 @@ function BranchLine({ line }: { line: string }) {
   );
 }
 
-function remoteHost(remote: string | null | undefined) {
+/** SSH/HTTPS の表記差を吸収して、同じリモートリポジトリを同じキーにする。 */
+function remoteRepository(remote: string | null | undefined) {
   if (!remote) return "ローカルのみ";
-  const scp = remote.match(/^git@([^:]+):/);
-  if (scp) return scp[1];
-  try {
-    return new URL(remote).hostname;
-  } catch {
-    return remote;
+  const value = remote.trim();
+  let host: string;
+  let path: string;
+
+  // git@host:owner/repository.git (scp-like syntax)
+  const scp = !value.includes("://") && value.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
+  if (scp) {
+    host = scp[1].toLowerCase();
+    path = scp[2];
+  } else {
+    try {
+      const url = new URL(value.includes("://") ? value : `https://${value}`);
+      host = url.host.toLowerCase();
+      path = url.pathname;
+    } catch {
+      return value.replace(/\.git\/?$/i, "");
+    }
   }
+
+  path = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/i, "");
+  return path ? `${host}/${path}` : host;
 }
 
-function groupName(repo: Repo, grouping: Grouping) {
+function groupName(repo: Repo, grouping: Grouping, projectRemotes: Map<string, string>) {
+  if (grouping === "project") return repo.common_dir;
   if (grouping === "parent") {
     const slash = repo.path.lastIndexOf("/");
     return slash >= 0 ? repo.path.slice(0, slash) || "/" : "(root)";
   }
-  return remoteHost(repo.remote);
+  return remoteRepository(repo.remote ?? projectRemotes.get(repo.common_dir));
+}
+
+function repoDisplayName(repo: Repo) {
+  if (!repo.is_worktree) return repo.name;
+  if (repo.branch && !repo.detached && repo.branch !== "(detached)") return repo.branch;
+  return repo.detached ? "detached HEAD" : repo.name;
+}
+
+function worktreeStateLabel(repo: Repo) {
+  if (repo.worktree_state === "prunable") return "prunable";
+  if (repo.worktree_state === "locked") return "locked";
+  return "worktree";
+}
+
+function repoAccessibleName(repo: Repo) {
+  const counts = (repo.counts ?? [])
+    .map((count) => `${display(count.xy)} ${count.count}`)
+    .join(" ");
+  return [
+    repoDisplayName(repo),
+    repo.path,
+    repo.is_worktree ? `状態 ${worktreeStateLabel(repo)}` : "本体",
+    repo.branch_line,
+    counts,
+  ].filter(Boolean).join(" ");
+}
+
+function sortProjectRepos(a: Repo, b: Repo) {
+  if (a.is_worktree !== b.is_worktree) return a.is_worktree ? 1 : -1;
+  return (b.activity ?? 0) - (a.activity ?? 0);
 }
 
 export default function Page() {
   const [repos, setRepos] = useState<Map<string, Repo>>(new Map());
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [grouping, setGrouping] = useState<Grouping>("none");
+  const [grouping, setGrouping] = useState<Grouping>("project");
   const [open, setOpen] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -154,6 +200,16 @@ export default function Page() {
     };
   }, [flushVisible]);
 
+  const projectRemotes = useMemo(() => {
+    const remotes = new Map<string, string>();
+    for (const repo of repos.values()) {
+      if (repo.remote && (!remotes.has(repo.common_dir) || !repo.is_worktree)) {
+        remotes.set(repo.common_dir, repo.remote);
+      }
+    }
+    return remotes;
+  }, [repos]);
+
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...repos.values()]
@@ -165,18 +221,31 @@ export default function Page() {
         return (
           r.name.toLowerCase().includes(q) ||
           r.path.toLowerCase().includes(q) ||
-          (r.branch ?? "").toLowerCase().includes(q)
+          (r.branch ?? "").toLowerCase().includes(q) ||
+          r.common_dir.toLowerCase().includes(q) ||
+          remoteRepository(r.remote ?? projectRemotes.get(r.common_dir)).toLowerCase().includes(q)
         );
       })
       .sort((a, b) => (b.activity ?? 0) - (a.activity ?? 0));
-  }, [repos, query, filter]);
+  }, [repos, query, filter, projectRemotes]);
 
   const all = [...repos.values()];
+  const mergedByProject = new Map<string, { checkedAt: number; count: number }>();
+  for (const repo of all) {
+    const checkedAt = repo.checked_at ?? 0;
+    const current = mergedByProject.get(repo.common_dir);
+    if (!current || checkedAt >= current.checkedAt) {
+      mergedByProject.set(repo.common_dir, {
+        checkedAt,
+        count: repo.merged_branches?.length ?? 0,
+      });
+    }
+  }
   const stats = {
-    dirty: all.filter(isDirty).length,
-    ahead: all.filter((r) => (r.ahead ?? 0) > 0).length,
-    behind: all.filter((r) => (r.behind ?? 0) > 0).length,
-    diverged: all.filter((r) => r.diverged).length,
+    projects: new Set(all.map((repo) => repo.common_dir)).size,
+    active: all.filter((repo) => !repo.pending && repo.worktree_state !== "prunable").length,
+    merged: [...mergedByProject.values()].reduce((count, project) => count + project.count, 0),
+    prunable: all.filter((repo) => repo.worktree_state === "prunable").length,
   };
 
   const copy = (cmd: string) => {
@@ -190,7 +259,7 @@ export default function Page() {
     if (grouping === "none") return [{ key: "all", label: null, repos: list }];
     const grouped = new Map<string, Repo[]>();
     for (const repo of list) {
-      const key = groupName(repo, grouping);
+      const key = groupName(repo, grouping, projectRemotes);
       const members = grouped.get(key);
       if (members) members.push(repo);
       else grouped.set(key, [repo]);
@@ -198,9 +267,9 @@ export default function Page() {
     return [...grouped.entries()].map(([key, reposInGroup]) => ({
       key,
       label: key,
-      repos: reposInGroup,
+      repos: grouping === "project" ? [...reposInGroup].sort(sortProjectRepos) : reposInGroup,
     }));
-  }, [grouping, list]);
+  }, [grouping, list, projectRemotes]);
 
   useEffect(() => {
     if (!observer) return;
@@ -236,43 +305,46 @@ export default function Page() {
 
       <div className="cards">
         <div className="card">
-          <div className="label">変更あり</div>
-          <div className="value" style={{ color: "var(--c-worktree)" }}>{stats.dirty}</div>
+          <div className="label">プロジェクト</div>
+          <div className="value" style={{ color: "var(--accent)" }}>{stats.projects}</div>
         </div>
         <div className="card">
-          <div className="label">ahead</div>
-          <div className="value" style={{ color: "var(--c-ahead)" }}>{stats.ahead}</div>
+          <div className="label">作業中ブランチ</div>
+          <div className="value" style={{ color: "var(--c-worktree)" }}>{stats.active}</div>
         </div>
         <div className="card">
-          <div className="label">behind</div>
-          <div className="value" style={{ color: "var(--c-behind)" }}>{stats.behind}</div>
+          <div className="label">merged 未削除</div>
+          <div className="value" style={{ color: "var(--c-behind)" }}>{stats.merged}</div>
         </div>
         <div className="card">
-          <div className="label">分岐</div>
-          <div className="value" style={{ color: "var(--c-conflict)" }}>{stats.diverged}</div>
+          <div className="label">prunable</div>
+          <div className="value" style={{ color: "var(--c-conflict)" }}>{stats.prunable}</div>
         </div>
       </div>
 
       <div className="toolbar">
         <input
           className="search"
+          aria-label="名前、パス、ブランチで検索"
           placeholder="名前、パス、ブランチ"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <button className="chip" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>すべて</button>
-        <button className="chip" aria-pressed={filter === "dirty"} onClick={() => setFilter("dirty")}>変更あり</button>
-        <button className="chip" aria-pressed={filter === "unpushed"} onClick={() => setFilter("unpushed")}>ahead</button>
-        <button className="chip" aria-pressed={filter === "behind"} onClick={() => setFilter("behind")}>behind</button>
+        <button type="button" className="chip" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>すべて</button>
+        <button type="button" className="chip" aria-pressed={filter === "dirty"} onClick={() => setFilter("dirty")}>変更あり</button>
+        <button type="button" className="chip" aria-pressed={filter === "unpushed"} onClick={() => setFilter("unpushed")}>ahead</button>
+        <button type="button" className="chip" aria-pressed={filter === "behind"} onClick={() => setFilter("behind")}>behind</button>
         <label className="group-select">
           <span>グループ</span>
           <select aria-label="リポジトリのグループ" value={grouping} onChange={(e) => setGrouping(e.target.value as Grouping)}>
+            <option value="project">プロジェクト</option>
             <option value="none">なし</option>
             <option value="parent">親フォルダ</option>
-            <option value="remote">リモート</option>
+            <option value="remote">リモート（リポジトリ）</option>
           </select>
         </label>
         <button
+          type="button"
           className="refresh"
           disabled={scanning}
           onClick={() => fetch("/api/rescan", { method: "POST" })}
@@ -287,20 +359,25 @@ export default function Page() {
         {groups.flatMap((group) => [
           ...(group.label ? [
             <div className="group-heading" key={`group-heading-${group.key}`}>
-              <h2>{group.label}</h2>
+              <div className="group-heading-main">
+                <h2>{group.label}</h2>
+                {grouping === "project" && <code className="cmdhint group-command">git worktree list</code>}
+              </div>
               <span>{group.repos.length}</span>
             </div>,
           ] : []),
           ...group.repos.map((r) => {
             const s = since(r.last_commit?.date);
+            const projectWorktree = grouping === "project" && r.is_worktree;
             const cls = [
               "row",
               r.pending ? "pending" : "",
+              r.worktree_state === "prunable" ? "prunable" : r.worktree_state === "locked" ? "locked" : "",
               hasConflict(r) ? "conflict" : isDirty(r) ? "dirty" : (r.ahead ?? 0) ? "unpushed" : (r.behind ?? 0) ? "behind" : "",
             ].filter(Boolean).join(" ");
 
             return (
-              <div key={r.path}>
+              <div className={projectWorktree ? "repo-item worktree-item" : "repo-item"} key={r.path}>
                 <div
                   className={cls}
                   data-path={r.path}
@@ -308,6 +385,7 @@ export default function Page() {
                   role="button"
                   tabIndex={0}
                   aria-expanded={open === r.path}
+                  aria-label={repoAccessibleName(r)}
                   onClick={() => toggleOpen(r.path)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
@@ -317,7 +395,14 @@ export default function Page() {
                   }}
                 >
                   <div>
-                    <div className="name">{r.name}</div>
+                    <div className="row-primary">
+                      <div className="name">{repoDisplayName(r)}</div>
+                      {r.is_worktree && (
+                        <span className={`row-kind row-kind-${r.worktree_state ?? "ok"}`}>
+                          {worktreeStateLabel(r)}
+                        </span>
+                      )}
+                    </div>
                     <div className="path" title={r.path}>{r.path}</div>
                   </div>
                   <div className="bline" title={r.branch_line}>

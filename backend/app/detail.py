@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app import gitinfo
+from app import gitinfo, paths
 
 PATCH_MAX_BYTES = 200_000
 HASH_RE = re.compile(r"^[0-9a-fA-F]{4,64}$")
@@ -14,7 +14,7 @@ REF_SEPARATOR = "\x1f"
 REF_FORMAT = (
     "%(refname:short)%1f%(objectname:short)%1f%(upstream:short)"
     "%1f%(upstream:track)%1f%(committerdate:iso-strict)%1f%(HEAD)"
-    "%1f%(refname)"
+    "%1f%(refname)%1f%(worktreepath)"
 )
 
 
@@ -113,9 +113,10 @@ def get_commit(repo: str, commit_hash: str) -> dict[str, Any] | None:
 
 def _parse_ref_line(line: str) -> dict[str, Any] | None:
     fields = line.split(REF_SEPARATOR)
-    if len(fields) != 7 or not fields[0]:
+    if len(fields) not in {7, 8} or not fields[0]:
         return None
-    name, commit_hash, upstream, track, date, head, refname = fields
+    name, commit_hash, upstream, track, date, head, refname = fields[:7]
+    worktree_path = fields[7] if len(fields) == 8 else ""
     if refname.startswith("refs/remotes/") and refname.endswith("/HEAD"):
         return None
     is_remote = refname.startswith("refs/remotes/")
@@ -128,6 +129,7 @@ def _parse_ref_line(line: str) -> dict[str, Any] | None:
         "current": head.strip() == "*",
         "merged": False,
         "remote": is_remote,
+        "worktree": paths.to_host(worktree_path.strip()) if worktree_path.strip() else None,
     }
 
 

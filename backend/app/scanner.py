@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, NamedTuple
 
 from app import config
 
@@ -35,6 +35,81 @@ NETWORK_FSTYPES = {
 }
 
 
+class RepoLayout(NamedTuple):
+    """Filesystem paths used by a normal repository or a linked worktree."""
+
+    git_dir: str
+    common_git_dir: str
+    common_root: str
+    is_worktree: bool
+
+
+def _gitdir_from_file(dot_git: str, repo: str) -> str | None:
+    """Resolve the ``gitdir:`` pointer used by linked worktrees."""
+    try:
+        with open(dot_git, encoding="utf-8", errors="replace") as f:
+            line = f.readline().strip()
+    except OSError:
+        return None
+    if not line.lower().startswith("gitdir:"):
+        return None
+    value = line[len("gitdir:"):].strip()
+    if not value:
+        return None
+    if not os.path.isabs(value):
+        value = os.path.join(repo, value)
+    return os.path.realpath(value)
+
+
+def git_dir(repo: str) -> str | None:
+    """Return the actual git directory for ``repo`` without invoking git."""
+    repo = os.path.abspath(repo)
+    dot_git = os.path.join(repo, ".git")
+    if os.path.isdir(dot_git):
+        return os.path.realpath(dot_git)
+    if os.path.isfile(dot_git):
+        return _gitdir_from_file(dot_git, repo)
+    return None
+
+
+def common_git_dir(repo: str, actual_git_dir: str | None = None) -> str | None:
+    """Resolve the shared git directory for a worktree or normal repository."""
+    actual = actual_git_dir or git_dir(repo)
+    if actual is None:
+        return None
+
+    # Linked worktree gitdirs contain a commondir file.  It is more reliable
+    # than assuming that the worktree id is exactly one directory deep.
+    commondir_file = os.path.join(actual, "commondir")
+    try:
+        with open(commondir_file, encoding="utf-8", errors="replace") as f:
+            value = f.readline().strip()
+    except OSError:
+        value = ""
+    if value:
+        if not os.path.isabs(value):
+            value = os.path.join(actual, value)
+        return os.path.realpath(value)
+
+    return actual
+
+
+def repo_layout(repo: str) -> RepoLayout | None:
+    """Resolve gitdir/common gitdir and whether ``repo`` is a linked worktree."""
+    actual = git_dir(repo)
+    if actual is None:
+        return None
+    common = common_git_dir(repo, actual)
+    if common is None:
+        return None
+    repo = os.path.abspath(repo)
+    common_root = os.path.dirname(common)
+    # A normal repository has ``repo/.git`` as both its gitdir and common
+    # gitdir.  A linked worktree has a .git file and a separate gitdir.
+    is_worktree = os.path.isfile(os.path.join(repo, ".git")) or actual != common
+    return RepoLayout(actual, common, os.path.realpath(common_root), is_worktree)
+
+
 def network_mountpoints() -> set[str]:
     """ネットワークマウントを 1 リポジトリ数秒の地雷にしないため事前に集める。"""
     points: set[str] = set()
@@ -56,11 +131,26 @@ def activity_mtime(repo: str) -> float:
     os.stat 1 回で済むので、git を一度も起動する前に活動順ソートができる。
     """
     dot_git = os.path.join(repo, ".git")
-    for candidate in (
-        os.path.join(dot_git, "logs", "refs", "HEAD"),
-        os.path.join(dot_git, "HEAD"),
-        dot_git,
-    ):
+    actual_git_dir = git_dir(repo)
+    # logs/HEAD is updated for commits, checkouts, merges, pulls, and resets.
+    # For linked worktrees this must be resolved through the .git file; the
+    # shared logs/refs directory does not contain a refs/HEAD file.
+    candidates: list[str] = []
+    if actual_git_dir is not None:
+        candidates.extend(
+            (
+                os.path.join(actual_git_dir, "logs", "HEAD"),
+                os.path.join(actual_git_dir, "HEAD"),
+            )
+        )
+    candidates.extend(
+        (
+            os.path.join(dot_git, "logs", "HEAD"),
+            os.path.join(dot_git, "HEAD"),
+            dot_git,
+        )
+    )
+    for candidate in candidates:
         try:
             return os.stat(candidate).st_mtime
         except OSError:
