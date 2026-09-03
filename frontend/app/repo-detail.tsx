@@ -296,9 +296,11 @@ function BranchesPane({
   const remote = data?.remotes ?? [];
   const visibleLocal = showMerged
     ? local
-    : local.filter((branch) => branch.current || !branch.merged);
+    : local.filter(
+        (branch) => branch.current || !branch.merged || branch.worktree,
+      );
   const mergedCount = local.filter(
-    (branch) => !branch.current && branch.merged,
+    (branch) => !branch.current && branch.merged && !branch.worktree,
   ).length;
 
   return (
