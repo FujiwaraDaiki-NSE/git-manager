@@ -566,14 +566,18 @@ async def _discover() -> None:
                 "common_host": common_host,
                 "main_host": host_path,
                 "verified_main_host": None,
+                "verified_main_uses_pointer": False,
                 "scan_paths": [],
             },
         )
         group["scan_paths"].append(path)
         if layout is not None and not layout.is_worktree:
-            group["common_host"] = host_path
-            group["main_host"] = host_path
-            group["verified_main_host"] = host_path
+            uses_pointer = os.path.isfile(os.path.join(path, ".git"))
+            if group["verified_main_host"] is None or uses_pointer:
+                group["common_host"] = host_path
+                group["main_host"] = host_path
+                group["verified_main_host"] = host_path
+                group["verified_main_uses_pointer"] = uses_pointer
 
         # ``found`` counts unique paths, not duplicate scanner hits.
         scanning["found"] = len(discovered)
@@ -602,6 +606,20 @@ async def _discover() -> None:
         merged = merged or set()
         common_host = group["common_host"]
         common_key = _path_key(common_host)
+        if group["verified_main_uses_pointer"]:
+            # The parent of an external ``.git`` directory looks like a
+            # normal repository to a filesystem scan.  Once its real main
+            # checkout is independently identified by the .git pointer,
+            # discard that administration-only scan record.
+            for scan_path in group["scan_paths"]:
+                scan_layout = scanner.repo_layout(scan_path)
+                if (
+                    scan_layout is not None
+                    and not scan_layout.is_worktree
+                    and not os.path.isfile(os.path.join(scan_path, ".git"))
+                    and _path_key(paths.to_host(scan_path)) != common_key
+                ):
+                    discovered.pop(_path_key(paths.to_host(scan_path)), None)
         project_contexts = _worktree_contexts(
             common_host,
             worktrees,
