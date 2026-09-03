@@ -173,8 +173,12 @@ function BranchesPane({ data, state, error, showMerged, onShowMerged, onRetry }:
   if (state === "idle") return null;
   const local = data?.local ?? [];
   const remote = data?.remotes ?? [];
-  const visibleLocal = showMerged ? local : local.filter((branch) => branch.current || !branch.merged);
-  const mergedCount = local.filter((branch) => !branch.current && branch.merged).length;
+  // A merged branch that is checked out in another worktree still represents
+  // an active checkout and must remain visible in the default view.
+  const visibleLocal = showMerged
+    ? local
+    : local.filter((branch) => branch.current || branch.worktree || !branch.merged);
+  const mergedCount = local.filter((branch) => !branch.current && branch.merged && !branch.worktree).length;
 
   return (
     <section

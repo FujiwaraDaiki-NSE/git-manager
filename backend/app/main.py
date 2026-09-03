@@ -40,10 +40,17 @@ _repo_locks_guard = threading.Lock()
 # inotify は 1 操作で複数イベントを出すのでまとめてから叩く
 DEBOUNCE_SEC = 1.0
 _pending: set[str] = set()
-_pending_groups: dict[str, str] = {}
 _pending_task: asyncio.Task | None = None
 
 MAX_GRAPH_LIMIT = 2_000
+
+
+class _RefreshResult(dict[str, Any]):
+    """A refresh result carrying whether its worker already published state."""
+
+    def __init__(self, values: dict[str, Any], *, state_published: bool = False) -> None:
+        super().__init__(values)
+        self.state_published = state_published
 
 
 def _repo_lock_key(host_path: str) -> str:
@@ -128,6 +135,31 @@ def _upsert(repo: dict[str, Any]) -> None:
     bus.publish("repo", merged)
 
 
+def _upsert_threadsafe(repo: dict[str, Any]) -> None:
+    """Store and publish a row from a worker thread.
+
+    ``_refresh_sync`` runs in an executor, so putting directly into an
+    ``asyncio.Queue`` would bind an SSE queue to the wrong thread.  The bus
+    schedules the actual publish on the event loop instead.
+    """
+    with STATE_LOCK:
+        existing = STATE.get(repo["path"], {})
+        merged = {**existing, **repo}
+        STATE[repo["path"]] = merged
+    bus.publish_threadsafe("repo", merged)
+
+
+def _remove_threadsafe(host_path: str) -> None:
+    """Remove a stale project member and notify both SSE and the watcher."""
+    with STATE_LOCK:
+        removed = STATE.pop(host_path, None)
+    if removed is None:
+        return
+    if watcher is not None:
+        watcher.unwatch(paths.to_container(host_path))
+    bus.publish_threadsafe("removed", {"path": host_path})
+
+
 def _stub(
     container_path: str,
     mtime: float,
@@ -154,17 +186,41 @@ def _refresh_sync(
     fetch: bool = False,
     context: dict[str, Any] | None = None,
     refresh_project_metadata: bool = False,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     container = paths.to_container(host_path)
     with STATE_LOCK:
         existing_fetched_at = STATE.get(host_path, {}).get("fetched_at")
     context = context if context is not None else _repo_context(host_path)
+    if refresh_project_metadata and not context.get("common_dir"):
+        layout = scanner.repo_layout(container)
+        if layout is not None:
+            context = {
+                **context,
+                "common_dir": paths.to_host(layout.common_root),
+            }
+    project_result: dict[str, Any] | None = None
+    target_confirmed_absent = False
+    state_published = False
     with _repo_lock(host_path):
+        # Set suppression before listing metadata as worktree add/remove also
+        # changes the shared gitdir and would otherwise schedule a duplicate
+        # refresh while this one is reconciling the project.
+        suppress_until = time.time() + SUPPRESS_SEC
+        _suppress[host_path] = suppress_until
+        _suppress[_suppress_key(host_path)] = suppress_until
         if refresh_project_metadata and context.get("common_dir"):
             common_host = context["common_dir"]
-            worktrees = gitinfo.list_worktrees(paths.to_container(common_host))
-            merged = gitinfo.merged_branches(paths.to_container(common_host))
-            default_branch = gitinfo.default_branch(paths.to_container(common_host))
+            # The stored common path can be a separate git directory rather
+            # than a checkout.  Run Git from the concrete checkout that
+            # triggered this refresh.
+            worktrees = gitinfo.list_worktrees(container)
+            main_head = worktrees[0].get("head") if worktrees else None
+            merged = (
+                gitinfo.merged_branches(container, main_head)
+                if isinstance(main_head, str)
+                else None
+            )
+            default_branch = gitinfo.default_branch(container)
             if worktrees is not None:
                 project_contexts = _worktree_contexts(
                     common_host,
@@ -172,24 +228,41 @@ def _refresh_sync(
                     merged or set(),
                     default_branch,
                 )
-                with STATE_LOCK:
-                    for path, current_context in project_contexts.items():
-                        if path in STATE:
-                            STATE[path].update(current_context)
-                context = project_contexts.get(host_path, context)
-        suppress_until = time.time() + SUPPRESS_SEC
-        _suppress[host_path] = suppress_until
-        _suppress[_suppress_key(host_path)] = suppress_until
-        result = gitinfo.collect(container, fetch=fetch, context=context)
-        if not fetch:
-            result["fetched_at"] = existing_fetched_at
+                project_result, target_present = _refresh_project_members(
+                    common_host,
+                    project_contexts,
+                    host_path,
+                )
+                target_confirmed_absent = not target_present
+                for path, current_context in project_contexts.items():
+                    if _path_key(path) == _path_key(host_path):
+                        context = current_context
+                        break
+
+        if project_result is not None:
+            result = project_result
+            state_published = True
+        elif target_confirmed_absent:
+            result = None
+        else:
+            result = gitinfo.collect(container, fetch=fetch, context=context)
+            if not fetch:
+                result["fetched_at"] = existing_fetched_at
+        if result is None:
+            # The target was confirmed to have disappeared from Git's
+            # worktree list.  Keep the removal emitted by reconciliation and
+            # do not let _refresh_many reinsert this stale row.
+            suppress_until = time.time() + SUPPRESS_SEC
+            _suppress[host_path] = suppress_until
+            _suppress[_suppress_key(host_path)] = suppress_until
+            return None
         result["activity"] = scanner.activity_mtime(container)
         result["pending"] = False
         # git の書き込みが落ち着くまで、取得完了時点から数える
         suppress_until = time.time() + SUPPRESS_SEC
         _suppress[host_path] = suppress_until
         _suppress[_suppress_key(host_path)] = suppress_until
-    return result
+    return _RefreshResult(result, state_published=state_published)
 
 
 async def _refresh_many(
@@ -213,7 +286,15 @@ async def _refresh_many(
     ]
     for coro in asyncio.as_completed(tasks):
         try:
-            _upsert(await coro)
+            result = await coro
+            if result is None:
+                continue
+            _upsert_result = result
+            if isinstance(result, _RefreshResult) and result.state_published:
+                # A metadata refresh reconciles and publishes the target from
+                # its worker thread together with all siblings.
+                continue
+            _upsert(_upsert_result)
         except Exception:
             continue
 
@@ -255,6 +336,11 @@ def _worktree_contexts(
             continue
         host_path = paths.to_host(os.path.abspath(str(raw_path)))
         is_main = _path_key(host_path) == common_key
+        # When only a linked worktree from a --separate-git-dir repository is
+        # visible, Git reports the common git directory as its first
+        # "worktree" record.  It is administration data, not a checkout.
+        if is_main and scanner.repo_layout(paths.to_container(host_path)) is None:
+            continue
         branch = item.get("branch")
         context: dict[str, Any] = {
             "common_dir": common_host,
@@ -269,6 +355,69 @@ def _worktree_contexts(
         }
         contexts[host_path] = context
     return contexts
+
+
+def _refresh_project_members(
+    common_host: str,
+    project_contexts: dict[str, dict[str, Any]],
+    target_host_path: str,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Reconcile and refresh every member of one common Git repository.
+
+    This function is called while the common repository lock is held.  Git's
+    worktree list is the source of truth: rows absent from it are removed,
+    newly listed rows are collected and inserted, and every surviving sibling
+    is collected with its current merged/lock/branch context.
+    """
+    common_key = _path_key(common_host)
+    with STATE_LOCK:
+        existing_paths = [
+            path
+            for path, repo in STATE.items()
+            if (
+                isinstance(repo.get("common_dir"), str)
+                and _path_key(repo["common_dir"]) == common_key
+            )
+            or _path_key(path) == common_key
+        ]
+
+    current_by_key = {
+        _path_key(path): (path, context)
+        for path, context in project_contexts.items()
+    }
+    current_keys = set(current_by_key)
+    for path in existing_paths:
+        if _path_key(path) not in current_keys:
+            _remove_threadsafe(path)
+
+    target_key = _path_key(target_host_path)
+    target_result: dict[str, Any] | None = None
+    target_present = target_key in current_by_key
+
+    for path, context in project_contexts.items():
+        container_path = paths.to_container(path)
+        with STATE_LOCK:
+            existing_fetched_at = STATE.get(path, {}).get("fetched_at")
+        try:
+            result = gitinfo.collect(container_path, context=context)
+        except Exception:
+            # A single inaccessible sibling must not prevent the rest of the
+            # project from being reconciled.
+            continue
+        if existing_fetched_at is not None:
+            result["fetched_at"] = existing_fetched_at
+        result["path"] = path
+        result["activity"] = scanner.activity_mtime(container_path)
+        result["pending"] = False
+        _upsert_threadsafe(result)
+        if _path_key(path) == target_key:
+            target_result = result
+        if watcher is not None and os.path.isdir(container_path):
+            watcher.watch(container_path)
+
+    if not target_present:
+        return None, False
+    return target_result, True
 
 
 def _base_worktree_context(container_path: str) -> tuple[str, dict[str, Any]]:
@@ -299,7 +448,12 @@ def _list_worktrees_sync(
         worktrees = gitinfo.list_worktrees(container_path)
         if worktrees is None:
             return None, None, None
-        merged = gitinfo.merged_branches(container_path)
+        main_head = worktrees[0].get("head") if worktrees else None
+        merged = (
+            gitinfo.merged_branches(container_path, main_head)
+            if isinstance(main_head, str)
+            else None
+        )
         default_branch = gitinfo.default_branch(container_path)
     return worktrees, merged, default_branch
 
@@ -385,17 +539,23 @@ async def _discover() -> None:
         layout = scanner.repo_layout(path)
         common_container = layout.common_root if layout is not None else path
         common_host = paths.to_host(common_container)
-        group_key = _path_key(common_host)
+        group_identity = (
+            paths.to_host(layout.common_git_dir)
+            if layout is not None
+            else common_host
+        )
+        group_key = _path_key(group_identity)
         group = groups.setdefault(
             group_key,
             {
                 "common_host": common_host,
-                "main_host": common_host,
+                "main_host": host_path,
                 "scan_paths": [],
             },
         )
         group["scan_paths"].append(path)
-        if not os.path.isdir(paths.to_container(group["main_host"])):
+        if layout is not None and not layout.is_worktree:
+            group["common_host"] = host_path
             group["main_host"] = host_path
 
         # ``found`` counts unique paths, not duplicate scanner hits.
@@ -403,14 +563,22 @@ async def _discover() -> None:
         if watcher is not None:
             watcher.watch(path)
 
-    # A worktree can live outside SCAN_ROOT.  Resolve each common repository
-    # once, and make every git invocation in discovery pass through its lock.
-    for group in groups.values():
+    # A worktree can live outside SCAN_ROOT.  Submit every common repository
+    # at once so a slow repository does not delay metadata discovery for all
+    # groups that follow it; publish/merge each result as it completes.
+    async def resolve_group(
+        group: dict[str, Any],
+    ) -> tuple[dict[str, Any], tuple[list[dict[str, Any]] | None, set[str] | None, str | None]]:
         result = await loop.run_in_executor(
             pool,
             _list_worktrees_sync,
             group["main_host"],
         )
+        return group, result
+
+    group_tasks = [resolve_group(group) for group in groups.values()]
+    for group_future in asyncio.as_completed(group_tasks):
+        group, result = await group_future
         worktrees, merged, default_branch = result
         if worktrees is None:
             continue
@@ -430,7 +598,9 @@ async def _discover() -> None:
             container_path = os.path.abspath(str(raw_path))
             host_path = paths.to_host(container_path)
             is_main = _path_key(host_path) == common_key
-            context = project_contexts[host_path]
+            context = project_contexts.get(host_path)
+            if context is None:
+                continue
             key = add_record(
                 container_path,
                 scanner.activity_mtime(container_path),
@@ -518,13 +688,15 @@ async def _fetch_round(host_paths: list[str]) -> None:
         common: str,
         representative: str,
         members: list[str],
-    ) -> tuple[str, str, list[str], dict[str, Any]]:
+    ) -> tuple[str, str, list[str], dict[str, Any] | None]:
         fetched = await loop.run_in_executor(
             fetch_pool,
             _refresh_sync,
             representative,
             True,
         )
+        if fetched is None:
+            return common, representative, members, None
         fetched_at = fetched.get("fetched_at")
         if fetched_at is None:
             return common, representative, members, fetched
@@ -550,6 +722,14 @@ async def _fetch_round(host_paths: list[str]) -> None:
         try:
             _common, representative, members, result = await future
         except Exception:
+            continue
+        if result is None:
+            continue
+        if isinstance(result, _RefreshResult) and result.state_published:
+            # Project metadata reconciliation already updated and published
+            # every current member.  Re-upserting the old representative or
+            # refreshing the pre-fetch member snapshot can resurrect a
+            # removed worktree.
             continue
         _upsert(result)
         fetched_at = result.get("fetched_at")
@@ -596,10 +776,54 @@ async def _drain_pending() -> None:
         if time.time() >= max(_suppress.get(p, 0), _suppress.get(_suppress_key(p), 0))
     ]
     _pending.clear()
-    _pending_groups.clear()
     _pending_task = None
     if targets:
-        await _refresh_many(targets, refresh_project_metadata=True)
+        await _refresh_many(
+            _project_refresh_representatives(targets),
+            refresh_project_metadata=True,
+        )
+
+
+def _project_refresh_representatives(host_paths: list[str]) -> list[str]:
+    """Choose one usable checkout per common Git repository."""
+    with STATE_LOCK:
+        snapshot = {path: dict(repo) for path, repo in STATE.items()}
+
+    grouped: dict[str, list[str]] = {}
+    for host_path in host_paths:
+        repo = snapshot.get(host_path, {})
+        common = repo.get("common_dir")
+        identity = common if isinstance(common, str) else host_path
+        grouped.setdefault(_path_key(identity), []).append(host_path)
+
+    representatives: list[str] = []
+    for identity_key, pending_paths in grouped.items():
+        known_paths = [
+            path
+            for path, repo in snapshot.items()
+            if _path_key(
+                repo.get("common_dir")
+                if isinstance(repo.get("common_dir"), str)
+                else path
+            )
+            == identity_key
+        ]
+        main_paths = [
+            path
+            for path in known_paths
+            if snapshot[path].get("is_worktree") is False
+        ]
+        candidates = list(dict.fromkeys(main_paths + pending_paths + known_paths))
+        representative = next(
+            (
+                path
+                for path in candidates
+                if scanner.repo_layout(paths.to_container(path)) is not None
+            ),
+            pending_paths[0],
+        )
+        representatives.append(representative)
+    return representatives
 
 
 def _on_watch_event(container_path: str) -> None:
@@ -617,22 +841,10 @@ def _on_watch_event(container_path: str) -> None:
 
     def schedule() -> None:
         global _pending_task
-        target = host_path
-        group = _suppress_key(target)
-        previous = _pending_groups.get(group)
-        if previous is not None and previous != target:
-            # A linked worktree commit also emits an event in the shared git
-            # directory.  Keep one representative per common repository and
-            # prefer the linked path because its private HEAD changed.
-            with STATE_LOCK:
-                current = STATE.get(target, {})
-                old = STATE.get(previous, {})
-            if not current.get("is_worktree") and old.get("is_worktree"):
-                target = previous
-            else:
-                _pending.discard(previous)
-        _pending.add(target)
-        _pending_groups[group] = target
+        # Watcher already collapses shared-gitdir noise.  Keep every private
+        # worktree target in this debounce batch: two linked HEAD changes can
+        # carry different working-tree status and must both be refreshed.
+        _pending.add(host_path)
         if _pending_task is None or _pending_task.done():
             _pending_task = asyncio.create_task(_drain_pending())
 

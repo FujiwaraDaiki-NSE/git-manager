@@ -103,10 +103,23 @@ def repo_layout(repo: str) -> RepoLayout | None:
     if common is None:
         return None
     repo = os.path.abspath(repo)
-    common_root = os.path.dirname(common)
-    # A normal repository has ``repo/.git`` as both its gitdir and common
-    # gitdir.  A linked worktree has a .git file and a separate gitdir.
-    is_worktree = os.path.isfile(os.path.join(repo, ".git")) or actual != common
+    # ``--separate-git-dir`` also leaves a .git *file*, but it is a normal
+    # repository: unlike a linked worktree its gitdir has no ``commondir``
+    # pointing at another gitdir.  The actual/common distinction is the
+    # authoritative signal for linked worktrees.
+    is_worktree = actual != common
+    # For a normal repository whose gitdir lives elsewhere, the project root
+    # is still the repository itself.  For a linked worktree, the common git
+    # directory normally is ``<main>/.git``.  With --separate-git-dir there
+    # is no checkout path to derive from the common git directory, so retain
+    # that directory as the stable project identity until the main checkout
+    # itself is discovered.
+    if not is_worktree:
+        common_root = repo
+    else:
+        embedded_root = os.path.dirname(common)
+        embedded_dot_git = os.path.realpath(os.path.join(embedded_root, ".git"))
+        common_root = embedded_root if embedded_dot_git == common else common
     return RepoLayout(actual, common, os.path.realpath(common_root), is_worktree)
 
 
