@@ -176,7 +176,13 @@ def count_by_code(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
 
 
 def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
-    """Parse ``git worktree list --porcelain`` into JSON-friendly records."""
+    """Parse ``git worktree list --porcelain`` into JSON-friendly records.
+
+    Newer Git supports ``-z`` for this output.  The NUL form is important for
+    worktree paths containing newlines, so prefer it in :func:`list_worktrees`
+    while retaining the line-oriented parser for callers/tests with legacy
+    output.
+    """
     worktrees: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
 
@@ -187,6 +193,41 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
             current["state"] = "ok"
         current["detached"] = not bool(current.get("branch"))
         worktrees.append(current.copy())
+
+    if "\x00" in raw:
+        # ``git worktree list --porcelain -z`` emits NUL-terminated fields and
+        # an additional NUL between records.  Do not use splitlines here: a
+        # valid worktree path itself may contain a newline.
+        for field in raw.split("\x00"):
+            if not field:
+                finish()
+                current = None
+                continue
+            if field.startswith("worktree "):
+                finish()
+                current = {
+                    "path": field[len("worktree "):],
+                    "head": None,
+                    "branch": None,
+                    "state": None,
+                }
+            elif current is None:
+                continue
+            elif field.startswith("HEAD "):
+                current["head"] = field[len("HEAD "):].strip() or None
+            elif field.startswith("branch "):
+                branch = field[len("branch "):].strip()
+                if branch.startswith("refs/heads/"):
+                    branch = branch[len("refs/heads/"):]
+                current["branch"] = branch or None
+            elif field == "detached":
+                current["detached"] = True
+            elif field.startswith("prunable"):
+                current["state"] = "prunable"
+            elif field.startswith("locked") and current.get("state") != "prunable":
+                current["state"] = "locked"
+        finish()
+        return worktrees
 
     for line in raw.splitlines():
         if line.startswith("worktree "):
@@ -218,13 +259,26 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
 
 def list_worktrees(repo: str) -> list[dict[str, Any]] | None:
     """Return worktree metadata, or ``None`` when git cannot list it."""
-    raw = _run(repo, ["worktree", "list", "--porcelain"])
-    return None if raw is None else parse_worktree_list(raw)
+    raw = _run(repo, ["worktree", "list", "--porcelain", "-z"])
+    if raw is None:
+        return None
+    worktrees = parse_worktree_list(raw)
+    # Git reports the external gitdir as the main worktree path for a
+    # ``--separate-git-dir`` repository.  That repository is not linked, so
+    # expose its actual checkout path to discovery and callers.
+    layout = scanner.repo_layout(repo)
+    if layout is not None and not layout.is_worktree:
+        common_git_dir = os.path.realpath(layout.common_git_dir)
+        repo_path = os.path.abspath(repo)
+        for item in worktrees:
+            if os.path.realpath(os.path.abspath(str(item.get("path", "")))) == common_git_dir:
+                item["path"] = repo_path
+    return worktrees
 
 
-def merged_branches(repo: str) -> set[str] | None:
-    """Return local branches already merged into ``HEAD``."""
-    raw = _run(repo, ["branch", "--merged", "HEAD", "--format=%(refname:short)"])
+def merged_branches(repo: str, base_commit: str) -> set[str] | None:
+    """Return local branches already merged into the main worktree commit."""
+    raw = _run(repo, ["branch", "--merged", base_commit, "--format=%(refname:short)"])
     if raw is None:
         return None
     return {line.strip() for line in raw.splitlines() if line.strip()}
@@ -281,6 +335,13 @@ def next_command(
         return {"command": "git switch -", "reason": "detached HEAD です"}
     if worktree_state == "prunable":
         return {"command": "git worktree prune", "reason": "prunable な worktree があります"}
+    if worktree_state == "locked" and merged and worktree:
+        # Git refuses to remove a locked worktree.  Unlocking is safe to
+        # present only after dirty/conflict checks above have passed.
+        return {
+            "command": shlex.join(["git", "worktree", "unlock", worktree]),
+            "reason": "マージ済みですが worktree がロックされています",
+        }
     if merged:
         if worktree:
             return {
@@ -378,9 +439,16 @@ def collect(
         common_git_dir = common_raw.strip()
         if not os.path.isabs(common_git_dir):
             common_git_dir = os.path.join(repo, common_git_dir)
-        common_root = os.path.dirname(os.path.realpath(common_git_dir))
-        resolved_common_dir = paths.to_host(common_root)
-        resolved_is_worktree = os.path.realpath(repo) != common_root
+        if layout is not None:
+            # scanner.repo_layout distinguishes a linked worktree from a
+            # normal repository using actual != common, including the
+            # separate-git-dir case where .git is a pointer file.
+            resolved_common_dir = paths.to_host(layout.common_root)
+            resolved_is_worktree = layout.is_worktree
+        else:
+            common_root = os.path.dirname(os.path.realpath(common_git_dir))
+            resolved_common_dir = paths.to_host(common_root)
+            resolved_is_worktree = os.path.realpath(repo) != common_root
 
     fetched_at: float | None = None
     if fetch and config.FETCH_ENABLED:

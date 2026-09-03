@@ -294,6 +294,8 @@ function BranchesPane({
   if (state === "idle") return null;
   const local = data?.local ?? [];
   const remote = data?.remotes ?? [];
+  // A merged branch checked out in another worktree remains active and must
+  // stay visible in the default view.
   const visibleLocal = showMerged
     ? local
     : local.filter(

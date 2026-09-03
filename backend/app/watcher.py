@@ -146,45 +146,70 @@ class Watcher:
                 except OSError:
                     pass
 
+    @staticmethod
+    def _group_for_repo(repo: str) -> str:
+        layout = scanner.repo_layout(repo)
+        if layout is None:
+            return os.path.realpath(repo)
+        return os.path.realpath(layout.common_root)
+
+    @staticmethod
+    def _shared_representative(repos: set[str]) -> str | None:
+        """Choose the normal repository for one shared-gitdir event."""
+        for repo in sorted(repos):
+            layout = scanner.repo_layout(repo)
+            if layout is not None and not layout.is_worktree:
+                return repo
+        return sorted(repos)[0] if repos else None
+
+    def _callbacks_for_events(self, events: list[object]) -> list[str]:
+        """Route private events individually and shared events once/group."""
+        private_repos: dict[str, set[str]] = {}
+        shared_repos: dict[str, set[str]] = {}
+        with self._lock:
+            for event in events:
+                name = getattr(event, "name", "")
+                if name.endswith(".lock"):
+                    # index.lock などのロックファイルは git 内部の一時
+                    # ファイルで、自分の git status を起こし続ける。
+                    continue
+                wd = getattr(event, "wd", None)
+                private_users = set(self._wd_private_users.get(wd, set()))
+                users = set(self._wd_users.get(wd, set()))
+                fallback = self._wd_to_repo.get(wd)
+                if not users and fallback:
+                    users.add(fallback)
+                # Multi-user watches are shared even when the main checkout
+                # originally registered that directory as a private target.
+                # Only a single-user watch identifies one concrete worktree.
+                event_private = private_users if len(users) <= 1 else set()
+                for repo in event_private:
+                    private_repos.setdefault(self._group_for_repo(repo), set()).add(repo)
+
+                # Users not owning the private directory observe this as a
+                # shared-gitdir event.  When there is no private owner, every
+                # user is shared.  Keep all candidates here, then collapse
+                # only the representative callback per common repository.
+                shared_users = users - event_private
+                if not event_private:
+                    shared_users = users
+                for repo in shared_users:
+                    shared_repos.setdefault(self._group_for_repo(repo), set()).update(users)
+
+        callbacks = sorted(repo for repos in private_repos.values() for repo in repos)
+        for group, repos in shared_repos.items():
+            if private_repos.get(group):
+                continue
+            representative = self._shared_representative(repos)
+            if representative is not None:
+                callbacks.append(representative)
+        return callbacks
+
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
                 events = self._inotify.read(timeout=1000)
             except OSError:
                 break
-            # A linked-worktree commit touches its private logs/HEAD and the
-            # shared refs/logs directories.  Collapse those events to one
-            # callback for the common repository, preferring the worktree
-            # that has the private HEAD event.
-            touched: dict[str, str] = {}
-            with self._lock:
-                for event in events:
-                    # index.lock などのロックファイルは git 内部の一時ファイル。
-                    # これを拾うと自分の git status が自分を起こし続ける
-                    if event.name.endswith(".lock"):
-                        continue
-                    private_users = self._wd_private_users.get(event.wd, set())
-                    repo = next(iter(private_users), self._wd_to_repo.get(event.wd))
-                    if repo:
-                        layout = scanner.repo_layout(repo)
-                        group = (
-                            os.path.realpath(layout.common_root)
-                            if layout is not None
-                            else os.path.realpath(repo)
-                        )
-                        previous = touched.get(group)
-                        if previous is None:
-                            touched[group] = repo
-                        else:
-                            previous_layout = scanner.repo_layout(previous)
-                            if (
-                                layout is not None
-                                and layout.is_worktree
-                                and (
-                                    previous_layout is None
-                                    or not previous_layout.is_worktree
-                                )
-                            ):
-                                touched[group] = repo
-            for repo in touched.values():
+            for repo in self._callbacks_for_events(events):
                 self._on_change(repo)
