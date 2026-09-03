@@ -237,7 +237,6 @@ def test_linked_separate_dot_git_does_not_expose_administration_directory(
     git(repo, "commit", "--allow-empty", "-qm", "initial")
     git(repo, "worktree", "add", "-q", "-b", "feature", str(linked))
 
-    monkeypatch.setattr(main.scanner, "find_repos", lambda: iter([str(linked)]))
     monkeypatch.setattr(main.config, "SCAN_ROOT", str(tmp_path))
     monkeypatch.setattr(main.config, "HOST_PREFIX", str(tmp_path))
     monkeypatch.setattr(main.config, "FETCH_ENABLED", False)
@@ -247,7 +246,9 @@ def test_linked_separate_dot_git_does_not_expose_administration_directory(
 
     asyncio.run(main._discover())
 
-    assert set(main.STATE) == {str(linked)}
+    assert set(main.STATE) == {str(repo), str(linked)}
+    assert str(admin) not in main.STATE
+    assert main.STATE[str(repo)]["is_worktree"] is False
     assert main.STATE[str(linked)]["is_worktree"] is True
     main.STATE.clear()
 

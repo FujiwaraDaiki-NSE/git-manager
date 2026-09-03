@@ -270,8 +270,12 @@ def list_worktrees(repo: str) -> list[dict[str, Any]] | None:
     if layout is not None and not layout.is_worktree:
         common_git_dir = os.path.realpath(layout.common_git_dir)
         repo_path = os.path.abspath(repo)
+        reported_admin_paths = {common_git_dir}
+        if os.path.basename(common_git_dir) == ".git":
+            reported_admin_paths.add(os.path.dirname(common_git_dir))
         for item in worktrees:
-            if os.path.realpath(os.path.abspath(str(item.get("path", "")))) == common_git_dir:
+            item_path = os.path.realpath(os.path.abspath(str(item.get("path", ""))))
+            if item_path in reported_admin_paths:
                 item["path"] = repo_path
     elif layout is not None:
         # From a linked checkout, the first record is indistinguishable from
