@@ -661,6 +661,51 @@ def test_watcher_emits_for_loose_branch_ref_changes_in_linked_projects(
         watcher.stop()
 
 
+def test_watcher_recursively_watches_existing_ref_namespaces(
+    repo_with_worktree: tuple[Path, Path],
+) -> None:
+    repo, worktree = repo_with_worktree
+    namespace = repo / ".git" / "refs" / "heads" / "codex" / "review"
+    namespace.mkdir(parents=True)
+    events: list[str] = []
+    changed = threading.Event()
+
+    def on_change(path: str) -> None:
+        events.append(path)
+        changed.set()
+
+    watcher = Watcher(on_change)
+    watcher.start()
+    if not watcher.available:
+        pytest.skip("inotify is unavailable")
+    try:
+        watcher.watch(str(worktree))
+        watcher.watch(str(repo))
+        layout = scanner.repo_layout(str(worktree))
+        assert layout is not None
+        common_heads = os.path.realpath(os.path.join(layout.common_git_dir, "refs", "heads"))
+        codex = os.path.realpath(os.path.join(common_heads, "codex"))
+        review = os.path.realpath(os.path.join(codex, "review"))
+        assert codex in watcher._dir_to_wd
+        assert review in watcher._dir_to_wd
+
+        changed.clear()
+        created_count = len(events)
+        git(repo, "branch", "codex/review/live")
+        assert changed.wait(2)
+        assert len(events) > created_count
+        assert all(path == str(repo) for path in events)
+
+        changed.clear()
+        deleted_count = len(events)
+        git(repo, "branch", "-D", "codex/review/live")
+        assert changed.wait(2)
+        assert len(events) > deleted_count
+        assert all(path == str(repo) for path in events)
+    finally:
+        watcher.stop()
+
+
 def test_fetch_round_fetches_once_per_common_repository(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

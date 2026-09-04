@@ -99,15 +99,57 @@ class Watcher:
 
             private_paths = {os.path.realpath(path) for path in private_targets}
             for candidate in targets:
+                target = os.path.realpath(candidate)
                 wd = self._add_watch_target(
-                    os.path.realpath(candidate),
+                    target,
                     {repo},
-                    {repo} if os.path.realpath(candidate) in private_paths else set(),
+                    {repo} if target in private_paths else set(),
                 )
                 if wd is not None:
                     wds.append(wd)
+                if self._is_heads_directory(target):
+                    wds.extend(
+                        self._add_existing_ref_directory_watches(
+                            target,
+                            {repo},
+                            {repo} if target in private_paths else set(),
+                        )
+                    )
             if wds:
                 self._repo_to_wds[repo] = list(dict.fromkeys(wds))
+
+    @staticmethod
+    def _is_heads_directory(path: str) -> bool:
+        return (
+            os.path.basename(path) == "heads"
+            and os.path.basename(os.path.dirname(path)) == "refs"
+        )
+
+    def _add_existing_ref_directory_watches(
+        self,
+        root: str,
+        users: set[str],
+        private_users: set[str],
+    ) -> list[int]:
+        """Watch namespace directories already present below refs/heads."""
+        if not os.path.isdir(root):
+            return []
+        watched: list[int] = []
+        for parent, directories, _files in os.walk(root, followlinks=False):
+            directories[:] = [
+                name
+                for name in directories
+                if not os.path.islink(os.path.join(parent, name))
+            ]
+            for name in directories:
+                wd = self._add_watch_target(
+                    os.path.realpath(os.path.join(parent, name)),
+                    users,
+                    private_users,
+                )
+                if wd is not None:
+                    watched.append(wd)
+        return watched
 
     def _add_watch_target(
         self,
@@ -249,11 +291,18 @@ class Watcher:
                 private_users = set(
                     self._wd_private_users.get(getattr(event, "wd", None), set())
                 )
+                target = os.path.realpath(os.path.join(parent, name))
                 self._add_watch_target(
-                    os.path.realpath(os.path.join(parent, name)),
+                    target,
                     users,
                     private_users,
                 )
+                if self._is_heads_directory(target):
+                    self._add_existing_ref_directory_watches(
+                        target,
+                        users,
+                        private_users,
+                    )
 
     def _loop(self) -> None:
         while not self._stop.is_set():
