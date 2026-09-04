@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { GraphView } from "./graph-view";
+import {
+  BranchRelationSummary,
+  GraphView,
+} from "./graph-view";
+import { buildBranchRelationSummary } from "./branch-relation.mjs";
 import { BranchesResponse, CommitDetail, GraphResponse, Repo } from "./types";
 import { codeColor, stateBadges, truncationLabel } from "./status";
 
@@ -522,6 +526,11 @@ export default function RepoDetail({
     };
   }, [graph, repo.branch_line, repo.counts, repo.entries]);
 
+  const branchRelationSummary = useMemo(
+    () => (graph ? buildBranchRelationSummary(graph) : null),
+    [graph],
+  );
+
   return (
     <div className="detail">
       <div className="detail-header">
@@ -629,6 +638,9 @@ export default function RepoDetail({
           )}
           {(graphState === "loading" || graphState === "ready") && graph && (
             <>
+              {branchRelationSummary && (
+                <BranchRelationSummary summary={branchRelationSummary} />
+              )}
               {graph.rows.length > 0 || virtualNode ? (
                 <GraphView
                   rows={graph.rows}

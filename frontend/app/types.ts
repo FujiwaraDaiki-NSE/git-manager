@@ -5,6 +5,7 @@ export type NextCommand = { command: string; reason: string };
 
 export type GraphRefKind = "head" | "branch" | "remote" | "tag";
 export type GraphRef = { name: string; kind: GraphRefKind };
+export type BranchHead = { name: string; hash: string };
 export type GraphRow = {
   hash: string;
   short: string;
@@ -24,8 +25,33 @@ export type GraphResponse = {
   rows: GraphRow[];
   max_lane: number;
   head_lane: number | null;
+  default_branch: string | null;
+  default_hash: string | null;
+  default_lane: number | null;
+  branch_heads: BranchHead[];
   truncated: boolean;
   command: string;
+};
+
+export type BranchRelation = {
+  names: string[];
+  headHash: string;
+  headRow: GraphRow;
+  commonAncestorHash: string | null;
+  commonAncestorRow: GraphRow | null;
+  branchPath: GraphRow[] | null;
+  defaultPath: GraphRow[] | null;
+};
+
+export type BranchRelationSummary = {
+  defaultBranch: string | null;
+  defaultLane: number | null;
+  branches: BranchRelation[];
+  rowIndex: Record<string, number>;
+  maxLane: number;
+  omittedGroups: number;
+  omittedBranches: number;
+  unavailableReason: string | null;
 };
 
 export type Numstat = {

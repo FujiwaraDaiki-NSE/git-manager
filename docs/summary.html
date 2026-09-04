@@ -562,10 +562,42 @@
               </tr>
               <tr>
                 <td><code>head_lane</code></td>
-                <td>integer</td>
+                <td>integer | null</td>
                 <td>
-                  最初に見つかったhead refのレーン。通常は0。head
-                  refが見つからない場合も0へフォールバックする。Git実行エラー時はAPIが502を返す。
+                  最初に見つかったhead refのレーン。head refが表示範囲にない場合は
+                  <code>null</code>。Git実行エラー時はAPIが502を返す。
+                </td>
+              </tr>
+              <tr>
+                <td><code>default_branch</code></td>
+                <td>string | null</td>
+                <td>
+                  <code>refs/remotes/origin/HEAD</code> が指す既定ブランチ名。
+                  symbolic refがない場合は名前を推測せず <code>null</code>。
+                </td>
+              </tr>
+              <tr>
+                <td><code>default_lane</code></td>
+                <td>integer | null</td>
+                <td>
+                  originの既定ブランチHEADが表示中のrowsにある場合のレーン番号。
+                  HEADが表示上限外などで行を特定できない場合は <code>null</code>。
+                </td>
+              </tr>
+              <tr>
+                <td><code>default_hash</code></td>
+                <td>string | null</td>
+                <td>
+                  originの既定ブランチHEADの完全ハッシュ。decorations設定に依存せず
+                  フロントエンドが既定HEADの行を特定するために使う。
+                </td>
+              </tr>
+              <tr>
+                <td><code>branch_heads</code></td>
+                <td>object[]</td>
+                <td>
+                  全local branchのHEAD。各要素は
+                  <code>{name: string, hash: string}</code>。表示範囲外のHEADも含む。
                 </td>
               </tr>
               <tr>

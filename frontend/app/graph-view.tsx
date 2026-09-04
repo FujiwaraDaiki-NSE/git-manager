@@ -2,7 +2,16 @@
 
 import { useEffect, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
-import type { GraphRef, GraphRow } from "./types";
+import {
+  COMMON_ANCESTOR_MARKER,
+  MAX_BRANCH_NAMES_PER_GROUP,
+  buildBranchRelationGeometry,
+} from "./branch-relation.mjs";
+import type {
+  BranchRelationSummary,
+  GraphRef,
+  GraphRow,
+} from "./types";
 
 export type GraphVirtualNode = {
   lane: number;
@@ -298,6 +307,243 @@ function GraphRowView({
         <div className="graph-row-meta">{meta}</div>
       </div>
     </div>
+  );
+}
+
+type BranchRelationSummaryProps = {
+  summary: BranchRelationSummary;
+};
+
+function relationPathLabel(path: GraphRow[] | null) {
+  if (!path || path.length === 0) return "表示範囲外のため算出できません";
+  const ancestor = path[0];
+  const head = path[path.length - 1];
+  const endpoint =
+    ancestor.hash === head.hash
+      ? ancestor.short
+      : `${ancestor.short} → ${head.short}`;
+  return `${endpoint}（${path.length - 1} コミット）`;
+}
+
+function BranchRelationDiagram({ summary }: BranchRelationSummaryProps) {
+  const geometry = buildBranchRelationGeometry(summary);
+  return (
+    <svg
+      aria-hidden="true"
+      className="branch-relation-svg"
+      height={geometry.height}
+      viewBox={`0 0 ${geometry.width} ${geometry.height}`}
+      width={geometry.width}
+    >
+      {geometry.relations.map(({
+        relation,
+        branchPoints,
+        defaultPoints,
+        headPoint,
+        branchHead,
+        samePath,
+        sharedHead,
+        hasPath,
+        branchLine,
+        defaultLine,
+        showCommonAncestor,
+      }) => {
+        const isDefault = relation.names.includes(summary.defaultBranch ?? "");
+        return (
+          <g key={relation.headHash}>
+            {defaultLine && (
+              <polyline
+                className="branch-relation-line branch-relation-line-default"
+                fill="none"
+                points={defaultPoints
+                  .map((point) => `${point.x},${point.y}`)
+                  .join(" ")}
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.5"
+              />
+            )}
+            {branchLine && (
+              <polyline
+                className={`branch-relation-line ${
+                  isDefault
+                    ? "branch-relation-line-default"
+                    : "branch-relation-line-branch"
+                }`}
+                fill="none"
+                points={branchPoints
+                  .map((point) => `${point.x},${point.y}`)
+                  .join(" ")}
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.5"
+              />
+            )}
+            {showCommonAncestor && (
+              <circle
+                className="branch-relation-common"
+                cx={branchPoints[0].x}
+                cy={branchPoints[0].y}
+                fill={COMMON_ANCESTOR_MARKER.fill}
+                r={COMMON_ANCESTOR_MARKER.radius}
+                stroke={COMMON_ANCESTOR_MARKER.stroke}
+                strokeWidth={COMMON_ANCESTOR_MARKER.strokeWidth}
+              />
+            )}
+            {hasPath &&
+              defaultPoints.slice(1, -1).map((point) => (
+                <circle
+                  className="branch-relation-node branch-relation-node-default"
+                  cx={point.x}
+                  cy={point.y}
+                  key={`default-${point.hash}`}
+                  r="2.5"
+                />
+              ))}
+            {hasPath &&
+              !samePath &&
+              branchPoints.slice(1, -1).map((point) => (
+                <circle
+                  className={`branch-relation-node ${
+                    isDefault
+                      ? "branch-relation-node-default"
+                      : "branch-relation-node-branch"
+                  }`}
+                  cx={point.x}
+                  cy={point.y}
+                  key={`branch-${point.hash}`}
+                  r="2.5"
+                />
+              ))}
+            {branchHead && (
+              <circle
+                className={
+                  isDefault || sharedHead
+                    ? "branch-relation-head branch-relation-head-default"
+                    : "branch-relation-head"
+                }
+                cx={branchHead.x}
+                cy={branchHead.y}
+                fill="currentColor"
+                r="4"
+              />
+            )}
+            {hasPath && !samePath && defaultPoints.length > 0 && (
+              <circle
+                className="branch-relation-head branch-relation-head-default"
+                cx={defaultPoints[defaultPoints.length - 1].x}
+                cy={defaultPoints[defaultPoints.length - 1].y}
+                fill="currentColor"
+                r="3"
+              />
+            )}
+            {!hasPath && headPoint && (
+              <circle
+                className="branch-relation-head branch-relation-head-unavailable"
+                cx={headPoint.x}
+                cy={headPoint.y}
+                fill="none"
+                r="4"
+                stroke="currentColor"
+                strokeDasharray="3 2"
+              />
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+export function BranchRelationSummary({
+  summary,
+}: BranchRelationSummaryProps) {
+  return (
+    <section
+      aria-labelledby="branch-relation-summary-title"
+      className="branch-relation-summary"
+    >
+      <div className="section-head">
+        <div>
+          <h3 id="branch-relation-summary-title">ブランチ関係</h3>
+          <div className="branch-relation-baseline">
+            ベースライン: {summary.defaultBranch ? (
+              <code>{summary.defaultBranch}</code>
+            ) : (
+              <span>特定できません</span>
+            )}
+          </div>
+        </div>
+        <span className="branch-relation-count">
+          {summary.branches.reduce((count, relation) => count + relation.names.length, 0)} ブランチ / {summary.branches.length} 組
+        </span>
+      </div>
+      {summary.unavailableReason && (
+        <div className="branch-relation-note" role="status">
+          {summary.unavailableReason}
+        </div>
+      )}
+      {summary.omittedGroups > 0 && (
+        <div className="branch-relation-note" role="status">
+          {summary.omittedGroups} 組（{summary.omittedBranches} ブランチ）を省略しています。
+        </div>
+      )}
+      <div className="branch-relation-diagram" aria-hidden="true">
+        <BranchRelationDiagram summary={summary} />
+        <div className="branch-relation-diagram-key">
+          <span>● ベースライン</span>
+          <span>● 各 HEAD</span>
+          <span>○ 共通祖先</span>
+        </div>
+      </div>
+      <ol className="branch-relation-list">
+        {summary.branches.map((relation) => {
+          const names = relation.names.slice(0, MAX_BRANCH_NAMES_PER_GROUP);
+          const omittedNames = relation.names.length - names.length;
+          const isDefault = relation.names.includes(summary.defaultBranch ?? "");
+          const branchLabel = names.join(", ");
+          const branchTitle = omittedNames
+            ? `${branchLabel}、他 ${omittedNames} ブランチ`
+            : branchLabel;
+          return (
+            <li className="branch-relation-item" key={relation.headHash}>
+              <div className="branch-relation-item-head">
+                <strong title={branchTitle}>{branchLabel}</strong>
+                {isDefault && (
+                  <span className="branch-relation-default">既定</span>
+                )}
+                {omittedNames > 0 && (
+                  <span className="branch-relation-group-count">
+                    他 {omittedNames} ブランチ
+                  </span>
+                )}
+                <code>{relation.headRow.short} HEAD</code>
+              </div>
+              {relation.commonAncestorRow ? (
+                <div className="branch-relation-detail">
+                  <span>
+                    共通祖先 <code>{relation.commonAncestorRow.short}</code>
+                  </span>
+                  <span>
+                    基準経路 <code>{relationPathLabel(relation.defaultPath)}</code>
+                  </span>
+                  <span>
+                    {branchLabel} の経路{" "}
+                    <code>{relationPathLabel(relation.branchPath)}</code>
+                  </span>
+                </div>
+              ) : (
+                <div className="branch-relation-detail">
+                  <span>共通祖先と経路は表示範囲内から算出できません。</span>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 
