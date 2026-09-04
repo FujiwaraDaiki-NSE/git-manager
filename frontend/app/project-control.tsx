@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { ancestryRows, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -18,6 +18,7 @@ type ControlTab = "flow" | "lanes" | "activity" | "info";
 type TimeRange = "current" | "24h" | "7d" | "all";
 type ActivityFilter = "all" | "commit" | "edit" | "test" | "review" | "input";
 type LoadState = "idle" | "loading" | "ready" | "error";
+type ProjectUrlChanges = Record<string, string | number | boolean | null | undefined>;
 
 const tabs: { id: ControlTab; label: string; short: string }[] = [
   { id: "flow", label: "フロー", short: "FLOW" },
@@ -68,30 +69,33 @@ function laneLabel(lane: ProjectLane) {
   return lane.branch || "detached HEAD";
 }
 
-function laneState(lane: ProjectLane) {
+function laneState(lane: ProjectLane, defaultBranch: string | null = null) {
   if (lane.conflict === true) return "conflict";
   if (lane.dirty === true) return "変更あり";
   if (lane.worktree_state === "prunable") return "prunable";
   if (lane.worktree_state === "locked") return "locked";
+  if (defaultBranch && lane.branch === defaultBranch) return "既定";
   if (lane.merged === true) return "merged";
   if (lane.detached === true) return "detached";
   if (lane.error) return "Git情報未取得";
   return "clean";
 }
 
-function laneStateClass(lane: ProjectLane) {
+function laneStateClass(lane: ProjectLane, defaultBranch: string | null = null) {
   if (lane.conflict === true) return "lane-state-danger";
   if (lane.dirty === true || lane.worktree_state === "prunable" || lane.worktree_state === "locked")
     return "lane-state-warn";
+  if (defaultBranch && lane.branch === defaultBranch) return "lane-state-ok";
   if (lane.merged === true) return "lane-state-muted";
   return "lane-state-ok";
 }
 
 function isFoldedMerged(lane: ProjectLane) {
   // A branch tip can be reachable from HEAD while its linked worktree still
-  // contains uncommitted/conflicting Git facts. Keep every checked-out lane
-  // visible as well: a currently selected branch is still a work lane even
-  // when its tip is reachable from the remote default branch.
+  // contains uncommitted/conflicting Git facts. Prunable worktrees are the
+  // exception: Git has explicitly reported that their checkout is gone, so
+  // they belong in the completed/default folded group even if is_worktree is
+  // still true in the stale snapshot.
   return shouldFoldMergedLane(lane);
 }
 
@@ -118,6 +122,7 @@ function projectFromSearch(search: string) {
     path: parsed.path,
     tab: parsed.tab as ControlTab,
     range: parsed.range as TimeRange,
+    merged: parsed.merged,
     event: parsed.event,
     lane: parsed.lane,
     at: parsed.at,
@@ -139,7 +144,7 @@ function useProjectUrl() {
     // the native history event so a Link always supplies its path on mount.
     setState(projectFromSearch(search));
   }, [search]);
-  const update = useCallback((changes: Partial<ReturnType<typeof projectFromUrl>>) => {
+  const update = useCallback((changes: ProjectUrlChanges) => {
     const nextHref = updateProjectUrl(window.location.href, changes);
     // Keep tab/range/selection navigable with browser back/forward. Slider
     // drags are the high-frequency exception and replace only the observation
@@ -156,6 +161,7 @@ type FlowEvent = {
   lane: ProjectLane;
   x: number;
   hitX: number;
+  timestampX: number;
   pointOffset: number;
   id: string;
 };
@@ -178,6 +184,7 @@ function FlowEventButton({
   onRegister,
   onPreview,
   onSelect,
+  trackWidth,
 }: {
   event: FlowEvent;
   selected: boolean;
@@ -187,11 +194,14 @@ function FlowEventButton({
   onRegister: (id: string, node: HTMLButtonElement | null) => void;
   onPreview: (id: string | null) => void;
   onSelect: (event: FlowEvent) => void;
+  trackWidth: number;
 }) {
   const touchPreviewRef = useRef(false);
   const touchPointerRef = useRef(false);
   const touchPreviewOpenRef = useRef(false);
   const xClass = event.x < 24 ? "flow-event-left" : event.x > 76 ? "flow-event-right" : "";
+  const leader = eventLeaderGeometry(event.timestampX, event.hitX, trackWidth);
+  const hasLeader = leader.width > 0.5;
   const select = () => {
     touchPreviewOpenRef.current = false;
     onPreview(null);
@@ -200,10 +210,12 @@ function FlowEventButton({
   return (
     <div
       className={`flow-event-hit ${xClass}`}
+      data-flow-event-key={event.id}
       style={{ left: `${event.hitX}%`, "--flow-point-offset": `${event.pointOffset}px` } as React.CSSProperties}
       onMouseEnter={() => onPreview(event.id)}
       onMouseLeave={() => { if (!touchPreviewOpenRef.current) onPreview(null); }}
     >
+      {hasLeader && <span className="flow-event-leader" aria-hidden="true" style={{ left: `calc(50% + ${leader.left}px)`, width: `${leader.width}px` }} />}
       <button
         aria-label={`${laneLabel(event.lane)} ${shortHash(event.row.hash)} ${event.row.subject}`}
         className={`flow-event-button${selected ? " is-selected" : ""}`}
@@ -296,6 +308,8 @@ function FlowMap({
   selectedKey,
   onTimelineChange,
   onSelect,
+  showMerged,
+  onShowMergedChange,
 }: {
   project: ProjectResponse;
   range: TimeRange;
@@ -303,9 +317,10 @@ function FlowMap({
   selectedKey: string | null;
   onTimelineChange: (value: number) => void;
   onSelect: (event: FlowEvent) => void;
+  showMerged: boolean;
+  onShowMergedChange: (value: boolean) => void;
 }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
-  const [showMerged, setShowMerged] = useState(false);
   const flowScrollRef = useRef<HTMLDivElement>(null);
   const firstLaneLabelRef = useRef<HTMLDivElement>(null);
   const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -445,7 +460,7 @@ function FlowMap({
         </div>
         <div className="flow-control-actions">
           {mergedCount > 0 && (
-            <button className="subtle-button" type="button" onClick={() => setShowMerged((value) => !value)}>
+            <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>
               {showMerged ? "merged を折り畳む" : `merged・完了を表示 (${mergedCount})`}
             </button>
           )}
@@ -531,7 +546,7 @@ function FlowMap({
                     {lane.branch === project.default_branch && <span className="baseline-tag">既定</span>}
                   </div>
                   <div className="flow-lane-meta">
-                    <span className={`lane-state ${laneStateClass(lane)}`}>{laneState(lane)}</span>
+                    <span className={`lane-state ${laneStateClass(lane, project.default_branch)}`}>{laneState(lane, project.default_branch)}</span>
                     <span>agent 状態不明</span>
                     <span title={lane.path ?? undefined}>{lane.path ?? "パス未取得"}</span>
                     <span className={mergeBase?.outside ? "flow-range-note" : undefined}>{!lane.merge_base ? "分岐点 未取得" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点 表示範囲外" : "分岐点 表示中"}</span>
@@ -550,6 +565,7 @@ function FlowMap({
                       popoverBelow={index < 2}
                       preview={previewId === event.id}
                       selected={selectedKey === event.id}
+                      trackWidth={trackWidth}
                     />
                   ))}
                   <span className="flow-lane-end" style={{ left: `${laneEvents.at(-1)?.x ?? 0}%` }} aria-hidden="true" />
@@ -572,12 +588,12 @@ function FlowMap({
   );
 }
 
-function LaneSummary({ lane }: { lane: ProjectLane }) {
+function LaneSummary({ lane, defaultBranch }: { lane: ProjectLane; defaultBranch: string | null }) {
   const ahead = lane.default_ahead;
   const behind = lane.default_behind;
   return (
     <>
-      <span className={`lane-state ${laneStateClass(lane)}`}>{laneState(lane)}</span>
+      <span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span>
       <span className="agent-unknown">agent 状態不明</span>
       <span className="lane-diff">
         {ahead === null || behind === null ? "既定差分 未取得" : `既定差分 +${ahead} / -${behind}`}
@@ -591,13 +607,16 @@ function WorkLanes({
   selectedLane,
   onSelectLane,
   onOpenGit,
+  showMerged,
+  onShowMergedChange,
 }: {
   project: ProjectResponse;
   selectedLane: string | null;
   onSelectLane: (lane: ProjectLane) => void;
   onOpenGit: (lane: ProjectLane) => void;
+  showMerged: boolean;
+  onShowMergedChange: (value: boolean) => void;
 }) {
-  const [showMerged, setShowMerged] = useState(false);
   const lanes = project.lanes.filter((lane) => showMerged || lane.branch === project.default_branch || !isFoldedMerged(lane));
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && isFoldedMerged(lane)).length;
   return (
@@ -608,7 +627,7 @@ function WorkLanes({
           <h3 id="lanes-title">作業一覧</h3>
           <p className="section-copy">Git の状態と既定ブランチとの差を一覧します。agent欄は Phase 1 では未取得です。</p>
         </div>
-        {mergedCount > 0 && <button className="subtle-button" type="button" onClick={() => setShowMerged((value) => !value)}>{showMerged ? "merged を折り畳む" : `merged・完了を表示 (${mergedCount})`}</button>}
+        {mergedCount > 0 && <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "merged を折り畳む" : `merged・完了を表示 (${mergedCount})`}</button>}
       </div>
       <div className="lane-table-wrap">
         <table className="lane-table">
@@ -625,7 +644,7 @@ function WorkLanes({
                     <span title={lane.path ?? undefined}>{lane.path ?? "パス未取得"}</span>
                   </button>
                 </td>
-                <td><LaneSummary lane={lane} /></td>
+                <td><LaneSummary defaultBranch={project.default_branch} lane={lane} /></td>
                 <td>
                   <time dateTime={lane.last_commit?.date ?? undefined} title={exactDate(lane.last_commit?.date)}>{relativeTime(lane.last_commit?.date)}</time>
                   <span className="table-subvalue">{exactDate(lane.last_commit?.date)}</span>
@@ -720,12 +739,12 @@ function InfoField({ label, value, code = false }: { label: string; value: strin
   return <div className="info-field"><span>{label}</span>{code ? <code title={valueOrUnknown(value)}>{valueOrUnknown(value)}</code> : <strong>{valueOrUnknown(value)}</strong>}</div>;
 }
 
-function LaneDetail({ lane, onOpenGit }: { lane: ProjectLane; onOpenGit: (lane: ProjectLane) => void }) {
+function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; defaultBranch: string | null; onOpenGit: (lane: ProjectLane) => void }) {
   return (
     <div className="selection-content">
       <div className="selection-kicker">作業レーン</div>
       <h3>{laneLabel(lane)}</h3>
-      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane)}`}>{laneState(lane)}</span><span className="agent-unknown">agent 状態不明</span></div>
+      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><span className="agent-unknown">agent 状態不明</span></div>
       <dl className="selection-list">
         <div><dt>作業先端</dt><dd><code>{lane.head ?? "未取得"}</code></dd></div>
         <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
@@ -871,7 +890,7 @@ function SelectionPane({
   return (
     <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal="true" role="dialog" tabIndex={-1}>
       <div className="selection-head"><span className="eyebrow">DETAIL</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
-      {selectedEvent && selectedHash ? <CommitDetail event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
+      {selectedEvent && selectedHash ? <CommitDetail event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail defaultBranch={project.default_branch} lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
     </aside>
   );
 }
@@ -931,6 +950,7 @@ export default function ProjectControl() {
   const [gitPath, setGitPath] = useState<string | null>(null);
   const [gitTab, setGitTab] = useState<DetailTab>("status");
   const [copied, setCopied] = useState<string | null>(null);
+  const setShowMerged = useCallback((value: boolean) => updateUrl({ merged: value ? true : null }), [updateUrl]);
 
   const projectSnapshotKey = useMemo(() => {
     if (!urlState.path) return "";
@@ -976,7 +996,7 @@ export default function ProjectControl() {
     if (!project || !selectedHash) return null;
     const lane = project.lanes.find((item) => item.id === selectedLane);
     const row = project.graph?.rows.find((item) => item.hash === selectedHash);
-    if (row && lane) return { row, lane, x: 0, hitX: 0, pointOffset: 0, id: flowEventKey(lane.id, row.hash) } as FlowEvent;
+    if (row && lane) return { row, lane, x: 0, hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(lane.id, row.hash) } as FlowEvent;
     return project.events.find((event) => event.commit_hash === selectedHash) ?? null;
   }, [project, selectedHash, selectedLane]);
   const copy = useCallback((value: string) => {
@@ -1025,8 +1045,8 @@ export default function ProjectControl() {
       {urlState.tab === "flow" && <div className="range-tabs" role="toolbar" aria-label="時間範囲">{ranges.map((range) => <button aria-pressed={urlState.range === range.id} className="range-tab" key={range.id} type="button" onClick={() => updateUrl({ range: range.id, at: 100 })}>{range.label}</button>)}</div>}
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main">
-          {urlState.tab === "flow" && <FlowMap onSelect={selectEvent} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} timeline={urlState.at} />}
-          {urlState.tab === "lanes" && <WorkLanes onOpenGit={openGit} onSelectLane={selectLane} project={project} selectedLane={selectedLane} />}
+          {urlState.tab === "flow" && <FlowMap onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
+          {urlState.tab === "lanes" && <WorkLanes onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView filter={activityFilter} onFilter={(filter) => { setActivityFilter(filter); updateUrl({ event: null }); }} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} />}
         </section>

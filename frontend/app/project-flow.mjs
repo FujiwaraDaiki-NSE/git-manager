@@ -15,6 +15,10 @@ export function parseProjectUrl(search) {
     path: params.get("path"),
     tab: CONTROL_TABS.has(tab) ? tab : "flow",
     range: TIME_RANGES.has(range) ? range : "current",
+    // The merged-lane filter is a project-level view preference. Keep it in
+    // the URL so switching tabs/ranges and browser history restore the same
+    // filter in both the flow and lane register views.
+    merged: params.get("merged") === "true",
     event: params.get("event"),
     lane: params.get("lane"),
     at: Number.isFinite(at) ? Math.min(100, Math.max(0, at)) : 100,
@@ -77,7 +81,13 @@ export function mobileEventAction({ isMobile, isTouch, previewAtPointerDown }) {
 }
 
 export function shouldFoldMergedLane({ merged, is_worktree, dirty, conflict, worktree_state }) {
-  const completed = merged === true || worktree_state === "prunable";
+  // A prunable worktree is no longer an operable checkout, even when the
+  // stale lane record still identifies it as a worktree. Dirty/conflicting
+  // facts always keep the lane visible so an operator can inspect them.
+  if (worktree_state === "prunable") {
+    return dirty !== true && conflict !== true;
+  }
+  const completed = merged === true;
   return completed && is_worktree !== true && dirty !== true && conflict !== true;
 }
 
@@ -113,8 +123,10 @@ function timestamp(event) {
 
 /**
  * Preserve chronological DOM order and reserve a distinct 44px pointer area
- * per event.  The visible point is offset back to its exact timestamp when
- * neighboring hit areas need to be projected apart.
+ * per event.  When neighboring events need to be projected apart, the
+ * interaction point moves with its hit area and the caller draws a leader
+ * back to ``timestampX``. This keeps the visible point and keyboard/pointer
+ * target centered on the same event.
  */
 export function layoutFlowEvents(events, trackWidth = 440) {
   const ordered = [...events].sort((a, b) => timestamp(a) - timestamp(b) || a.id.localeCompare(b.id));
@@ -124,7 +136,14 @@ export function layoutFlowEvents(events, trackWidth = 440) {
   // events here: that would make point offsets disagree with the map width.
   const width = Math.max(440, trackWidth);
   const gap = (44 / width) * 100;
-  const targetPositions = ordered.map((event) => Math.min(100, Math.max(0, event.x)));
+  // Keep the target center inside a full 44px control. Besides avoiding
+  // clipping at the track edge, this guarantees the required ±12px pointer
+  // checks still resolve to the same event on a narrow viewport.
+  const edge = (22 / width) * 100;
+  const minPosition = edge;
+  const maxPosition = 100 - edge;
+  const timestampPositions = ordered.map((event) => Math.min(100, Math.max(0, event.x)));
+  const targetPositions = timestampPositions.map((position) => Math.min(maxPosition, Math.max(minPosition, position)));
   const positions = [...targetPositions];
   for (let index = 1; index < positions.length; index += 1) {
     positions[index] = Math.max(positions[index], positions[index - 1] + gap);
@@ -132,10 +151,26 @@ export function layoutFlowEvents(events, trackWidth = 440) {
   for (let index = positions.length - 2; index >= 0; index -= 1) {
     positions[index] = Math.min(positions[index], positions[index + 1] - gap);
   }
-  const shift = positions[0] < 0 ? -positions[0] : positions.at(-1) > 100 ? 100 - positions.at(-1) : 0;
+  const shift = positions[0] < minPosition ? minPosition - positions[0] : positions.at(-1) > maxPosition ? maxPosition - positions.at(-1) : 0;
   return ordered.map((event, index) => ({
     ...event,
     hitX: positions[index] + shift,
-    pointOffset: ((targetPositions[index] - (positions[index] + shift)) / 100) * width,
+    timestampX: timestampPositions[index],
+    pointOffset: 0,
   }));
+}
+
+/**
+ * Geometry for the non-interactive leader connecting a collision-displaced
+ * point to its true timestamp. The result is lane-local and uses the same
+ * rendered track width as ``layoutFlowEvents``.
+ */
+export function eventLeaderGeometry(timestampX, hitX, trackWidth = 440) {
+  const width = Math.max(440, trackWidth);
+  const offset = ((timestampX - hitX) / 100) * width;
+  return {
+    offset,
+    left: Math.min(0, offset),
+    width: Math.abs(offset),
+  };
 }

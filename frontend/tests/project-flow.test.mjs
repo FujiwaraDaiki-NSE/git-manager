@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ancestryRows,
+  eventLeaderGeometry,
   flowEventKey,
   flowKeyboardAction,
   layoutFlowEvents,
@@ -52,6 +53,7 @@ test("URL state is restored and updated without dropping the project path", () =
     path: "/workspace/repo",
     tab: "activity",
     range: "7d",
+    merged: false,
     event: "abc",
     lane: "branch:feature",
     at: 35,
@@ -65,6 +67,7 @@ test("URL state is restored and updated without dropping the project path", () =
     "/project?path=%2Fworkspace%2Frepo&tab=activity&range=current&event=abc&lane=branch%3Afeature",
   );
   assert.equal(parseProjectUrl(next.split("?")[1] ? `?${next.split("?")[1]}` : "").path, "/workspace/repo");
+  assert.equal(parseProjectUrl("?merged=true").merged, true);
 });
 
 test("flow events are chronological, keyed by lane, and have distinct hit centers", () => {
@@ -78,7 +81,7 @@ test("flow events are chronological, keyed by lane, and have distinct hit center
   assert.notEqual(flowEventKey("branch:feature", "same"), flowEventKey("branch:other", "same"));
 });
 
-test("lane layout keeps the visible point centered on its timestamp at mobile width", () => {
+test("lane layout keeps the visible point centered on its 44px hit area", () => {
   const width = 440;
   const makeEvent = (lane, hash, x, date) => ({
     id: flowEventKey(lane, hash),
@@ -99,12 +102,29 @@ test("lane layout keeps the visible point centered on its timestamp at mobile wi
     assert.ok((laneEvents[1].hitX - laneEvents[0].hitX) * width / 100 >= 44);
     for (const event of laneEvents) {
       const pointCenter = event.hitX * width / 100 + event.pointOffset;
-      assert.ok(Math.abs(pointCenter - event.x * width / 100) < 0.001);
+      assert.ok(Math.abs(pointCenter - event.hitX * width / 100) < 0.001);
+      assert.equal(event.pointOffset, 0);
+      assert.equal(eventLeaderGeometry(event.timestampX, event.hitX, width).width, Math.abs((event.timestampX - event.hitX) * width / 100));
     }
   }
   // Equal timestamps in separate lanes may share an x coordinate; spacing is
   // an intra-lane hit-area constraint, not a global event-count displacement.
   assert.equal(laneA[0].hitX, laneB[0].hitX);
+});
+
+test("dense edge events move the interaction point inward and retain timestamp leader geometry", () => {
+  const positioned = layoutFlowEvents([
+    { id: flowEventKey("lane", "old"), x: 0, row: row("old", [], "2026-09-01T00:00:00+09:00") },
+    { id: flowEventKey("lane", "new"), x: 100, row: row("new", [], "2026-09-02T00:00:00+09:00") },
+  ], 440);
+  assert.ok(positioned[0].hitX >= 5);
+  assert.ok(positioned.at(-1).hitX <= 95);
+  for (const event of positioned) {
+    assert.equal(event.pointOffset, 0);
+    const leader = eventLeaderGeometry(event.timestampX, event.hitX, 440);
+    assert.equal(leader.offset, (event.timestampX - event.hitX) * 440 / 100);
+    assert.equal(leader.width, Math.abs(leader.offset));
+  }
 });
 
 test("merge-base remains anchored at the range edge when its commit is hidden", () => {
@@ -138,11 +158,12 @@ test("mobile touch activation keeps the first tap as preview and the second as s
   assert.equal(mobileEventAction({ isMobile: false, isTouch: true, previewAtPointerDown: false }), "select");
 });
 
-test("merged folding keeps checked-out lanes visible", () => {
+test("merged folding keeps active lanes visible but folds prunable worktrees", () => {
   assert.equal(shouldFoldMergedLane({ merged: true, is_worktree: true, dirty: false, conflict: false }), false);
   assert.equal(shouldFoldMergedLane({ merged: true, is_worktree: false, dirty: false, conflict: false }), true);
   assert.equal(shouldFoldMergedLane({ merged: null, is_worktree: false, dirty: false, conflict: false }), false);
   assert.equal(shouldFoldMergedLane({ merged: null, worktree_state: "prunable", is_worktree: false, dirty: false, conflict: false }), true);
-  assert.equal(shouldFoldMergedLane({ merged: null, worktree_state: "prunable", is_worktree: true, dirty: false, conflict: false }), false);
+  assert.equal(shouldFoldMergedLane({ merged: null, worktree_state: "prunable", is_worktree: true, dirty: false, conflict: false }), true);
+  assert.equal(shouldFoldMergedLane({ merged: null, worktree_state: "prunable", is_worktree: true, dirty: true, conflict: false }), false);
   assert.equal(shouldFoldMergedLane({ merged: null, worktree_state: "locked", is_worktree: false, dirty: false, conflict: false }), false);
 });

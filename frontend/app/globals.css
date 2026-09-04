@@ -2586,6 +2586,18 @@ body {
   z-index: 3;
 }
 
+/* Collision-displaced events keep the dot and its 44px target centered. The
+   leader is only a visual timestamp reference and never steals pointer or
+   keyboard interaction from the event target. */
+.flow-event-leader {
+  background: var(--control-muted);
+  height: 1px;
+  pointer-events: none;
+  position: absolute;
+  top: 36px;
+  z-index: 0;
+}
+
 .flow-event-button {
   align-items: center;
   background: transparent;
@@ -2646,7 +2658,7 @@ body {
   color: #fff;
   display: grid;
   gap: 5px;
-  left: calc(50% + var(--flow-point-offset, 0px));
+  left: 50%;
   min-width: 230px;
   padding: 12px;
   position: absolute;
@@ -2657,12 +2669,12 @@ body {
 
 .flow-event-right .flow-event-popover {
   left: auto;
-  right: calc(-4px - var(--flow-point-offset, 0px));
+  right: -4px;
   transform: none;
 }
 
 .flow-event-left .flow-event-popover {
-  left: calc(-4px + var(--flow-point-offset, 0px));
+  left: -4px;
   transform: none;
 }
 

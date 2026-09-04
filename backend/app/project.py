@@ -515,6 +515,7 @@ def build(
     graph_data = graph.build(repo, all_refs=True, limit=limit)
     observed_at = time.time()
     events: list[dict[str, Any]] = []
+    known_events: list[dict[str, Any]] = []
     latest_event: dict[str, Any] | None = None
     if graph_data is not None:
         parents_by_hash = {
@@ -583,8 +584,6 @@ def build(
             # commit endpoint remains the sole source of full patch data.
             hash_value = row.get("hash")
             row["stats"] = stats_by_hash.get(hash_value) if hash_value in visible_hashes else None
-            if not in_range(row):
-                continue
             names = [
                 lane["branch"]
                 for lane in lanes
@@ -593,10 +592,16 @@ def build(
             ]
             event = _event_from_row(row, names, observed_at)
             event["project_id"] = project_id
-            events.append(event)
+            # Keep the latest Git fact independent from the requested display
+            # range. The range limits event cards/map points, while the
+            # project header must retain the last known commit even when the
+            # selected window contains no events.
+            known_events.append(event)
+            if in_range(row):
+                events.append(event)
 
     latest_event = max(
-        (event for event in events if isinstance(event.get("occurred_at"), str)),
+        (event for event in known_events if isinstance(event.get("occurred_at"), str)),
         key=lambda event: event["occurred_at"],
         default=None,
     )

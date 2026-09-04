@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -219,3 +220,61 @@ def test_project_maintenance_excludes_the_default_branch_from_merged_count(tmp_p
     assert next(lane for lane in result["lanes"] if lane["branch"] == "main")["merged"] is True
     assert next(lane for lane in result["lanes"] if lane["branch"] == "topic")["merged"] is True
     assert result["maintenance"]["merged"] == 1
+
+
+def test_project_latest_git_event_survives_an_empty_display_range(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.com")
+    commit(repo, "known historical commit")
+    head = git(repo, "rev-parse", "HEAD").strip()
+
+    # The graph is a known Git snapshot, but its commit is intentionally
+    # outside the requested seven-day event window. This isolates the
+    # contract that the header's latest fact is not derived from filtered
+    # display events.
+    monkeypatch.setattr(
+        project.graph,
+        "build",
+        lambda *_args, **_kwargs: {
+            "rows": [{
+                "hash": head,
+                "parents": [],
+                "date": "2020-01-02T03:04:05+00:00",
+                "subject": "known historical commit",
+                "author": "Test",
+            }],
+            "truncated": False,
+        },
+    )
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}}, range_name="7d")
+
+    assert result is not None
+    assert result["events"] == []
+    assert result["latest_event"]["commit_hash"] == head
+    assert result["latest_event"]["occurred_at"] == "2020-01-02T03:04:05+00:00"
+
+
+def test_project_marks_a_prunable_linked_worktree_as_foldable_git_fact(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    linked = tmp_path / "linked"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.com")
+    commit(repo, "initial")
+    git(repo, "worktree", "add", "-q", "-b", "stale", str(linked), "HEAD")
+    # Removing the checkout directory leaves Git's explicit prunable marker;
+    # the project endpoint must preserve that fact for the UI fold decision.
+    shutil.rmtree(linked)
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    stale = next(lane for lane in result["lanes"] if lane["branch"] == "stale")
+    assert stale["is_worktree"] is True
+    assert stale["worktree_state"] == "prunable"
+    assert result["maintenance"]["prunable"] == 1
