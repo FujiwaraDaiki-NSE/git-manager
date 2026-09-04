@@ -170,18 +170,6 @@ def _merge_base(repo: str, base: str, branch: str) -> str | None:
     return value
 
 
-def _is_ancestor(repo: str, ancestor: str, descendant: str) -> bool:
-    status, _ = _git_result(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
-    if status == 0:
-        return True
-    if status == 1:
-        return False
-    command = shlex.join(
-        [gitinfo.GIT, "-C", repo, "merge-base", "--is-ancestor", ancestor, descendant]
-    )
-    raise GitCommandError(f"Git command failed ({status}): {command}")
-
-
 def _ahead_behind(repo: str, base: str, branch: str) -> tuple[int, int]:
     """Return branch ahead/behind from the left/right count unchanged.
 
@@ -224,20 +212,28 @@ def _merge_commit(
     branch: str,
     branch_hash: str,
     base: str,
+    base_hash: str,
 ) -> tuple[str | None, int | None, str | None]:
+    """Find the first base first-parent commit containing ``branch_hash``.
+
+    Git is invoked once per merged branch.  The branch-to-base difference
+    graph is collected in one pass so old local refs and indirect merges can
+    be resolved without starting one ``merge-base --is-ancestor`` process per
+    trunk commit.
+    """
     raw = _run_required(
         repo,
         [
             "rev-list",
-            "--first-parent",
             "--reverse",
             "--pretty=format:%H%x1f%ct%x1f%P",
             "--no-commit-header",
-            base,
+            f"{branch_hash}..{base}",
         ],
     )
     if not raw:
         return None, None, None
+    records: dict[str, tuple[int, list[str]]] = {}
     for line in raw.splitlines():
         fields = line.split(FIELD_SEPARATOR, 2)
         if len(fields) != 3 or not fields[0] or not fields[1]:
@@ -246,17 +242,45 @@ def _merge_commit(
             merged_at = int(fields[1])
         except ValueError as error:
             raise GitCommandError(f"Git returned an invalid merge timestamp for {branch}") from error
-        parents = fields[2].split()
-        if not _is_ancestor(repo, branch_hash, fields[0]):
+        records[fields[0]] = (merged_at, fields[2].split())
+
+    children: dict[str, list[str]] = {}
+    for commit_hash, (_timestamp, parents) in records.items():
+        for parent in parents:
+            children.setdefault(parent, []).append(commit_hash)
+    descendants = {branch_hash}
+    pending = [branch_hash]
+    while pending:
+        ancestor = pending.pop()
+        for child in children.get(ancestor, []):
+            if child in descendants:
+                continue
+            descendants.add(child)
+            pending.append(child)
+
+    first_parent_chain: list[str] = []
+    current = base_hash
+    while current:
+        if current not in records:
+            # ``branch_hash..base`` intentionally omits the first parent that
+            # is already reachable from the branch.  It is the end of the
+            # base first-parent portion relevant to this branch.
+            break
+        first_parent_chain.append(current)
+        parents = records[current][1]
+        current = parents[0] if parents else ""
+
+    for commit_hash in reversed(first_parent_chain):
+        if commit_hash not in descendants:
             continue
+        merged_at, parents = records[commit_hash]
         # The first base first-parent commit containing the branch tip is the
-        # only merge point we can attribute from Git facts.  Walking the whole
-        # base first-parent is intentional: ``branch..base`` cannot see a
-        # branch tip that is an ancestor of an indirect merge parent or an old
-        # local ref when first-parent traversal is enabled.
+        # only merge point we can attribute from Git facts.  An ordinary
+        # commit means fast-forward (or an already-on-trunk ref), so stop
+        # rather than inventing a later merge timestamp.
         if len(parents) < 2:
             break
-        return fields[0], merged_at, parents[0]
+        return commit_hash, merged_at, parents[0]
     # Fast-forward and squash histories have no attributable merge commit.
     return None, None, None
 
@@ -307,6 +331,7 @@ def build(repo: str, limit: int = TIMELINE_LIMIT) -> dict[str, Any]:
                 name,
                 branch["hash"],
                 base["ref"],
+                base["hash"],
             )
         fork_revision = merge_parent or base["ref"]
         merge_base = _merge_base(repo, fork_revision, name)

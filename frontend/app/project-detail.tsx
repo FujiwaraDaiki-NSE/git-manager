@@ -105,24 +105,6 @@ export default function ProjectDetail({
     () => new Map(repos.map((repo) => [repo.path, repo])),
     [repos],
   );
-  const timelineRevision = useMemo(
-    () => repos
-      .map((repo) => [
-        repo.path,
-        repo.common_dir,
-        repo.is_worktree,
-        repo.worktree_state,
-        repo.branch,
-        repo.last_commit?.hash,
-        repo.ahead,
-        repo.behind,
-        (repo.entries ?? []).map((entry) => `${entry.xy}:${entry.path}`).join("\x1e"),
-      ].join("\x1f"))
-      .sort()
-      .join("\x1d"),
-    [repos],
-  );
-
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Math.floor(Date.now() / 1000)), 60_000);
     return () => window.clearInterval(timer);
@@ -157,7 +139,7 @@ export default function ProjectDetail({
         setTimelineState("error");
       });
     return () => controller.abort();
-  }, [representative?.path, revision, timelineRetry, timelineRevision]);
+  }, [representative?.path, revision, timelineRetry]);
 
   const displayTimeline = useMemo(() => {
     if (!timeline) return null;

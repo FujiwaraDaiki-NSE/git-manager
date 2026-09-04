@@ -1691,6 +1691,8 @@ body {
     overflow: auto;
     background: var(--panel);
     padding: 16px;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    scroll-padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
     box-shadow: -12px 0 30px var(--shadow);
     z-index: 30;
   }

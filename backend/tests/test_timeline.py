@@ -162,6 +162,57 @@ def test_timeline_finds_indirect_merge_on_base_first_parent(
     assert [commit["subject"] for commit in feature["commits"]] == ["feature work"]
 
 
+def test_merge_point_lookup_uses_constant_git_processes_per_merged_branch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    origin = tmp_path / "origin.git"
+    repo.mkdir()
+    origin.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "Timeline Test")
+    git(repo, "config", "user.email", "timeline@example.com")
+    empty_commit(repo, "base")
+    git(origin, "init", "--bare", "-q", "-b", "main")
+    git(repo, "remote", "add", "origin", str(origin))
+    for index in range(250):
+        empty_commit(repo, f"trunk {index}")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "remote", "set-head", "origin", "main")
+    for index in range(8):
+        name = f"merged-{index}"
+        git(repo, "switch", "-q", "-c", name, "main")
+        empty_commit(repo, f"branch {index}")
+        git(repo, "switch", "-q", "main")
+        git(repo, "merge", "--no-ff", "-qm", f"merge {name}", name)
+    git(repo, "push", "-q", "origin", "main")
+
+    integration_scans: list[list[str]] = []
+    ancestor_checks: list[list[str]] = []
+    run_result = timeline.gitinfo._run_result
+
+    def track_git_calls(
+        command_repo: str,
+        args: list[str],
+        timeout: int | None = None,
+    ) -> tuple[int | None, str]:
+        if args[:2] == ["rev-list", "--reverse"]:
+            integration_scans.append(args)
+        if args[:2] == ["merge-base", "--is-ancestor"]:
+            ancestor_checks.append(args)
+        return run_result(command_repo, args, timeout)
+
+    monkeypatch.setattr(timeline.gitinfo, "_run_result", track_git_calls)
+    result = timeline.build(str(repo))
+
+    assert result is not None
+    assert len(result["branches"]) == 8
+    assert all(branch["merged"] and branch["merge_hash"] for branch in result["branches"])
+    assert len(integration_scans) == 8
+    assert ancestor_checks == []
+
+
 def test_timeline_propagates_git_command_failure(
     timeline_repo: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,

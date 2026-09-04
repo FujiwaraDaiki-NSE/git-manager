@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import ProjectDetail from "./project-detail";
+import {
+  bumpProjectRevisions,
+  revisionKeysForEvent,
+} from "./project-revision.mjs";
 import { hasConflict, isDirty, type Repo } from "./types";
 import { stateBadges } from "./status";
 
@@ -169,11 +173,36 @@ export default function Page() {
   const [scanning, setScanning] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [repoRevision, setRepoRevision] = useState(0);
+  const [projectRevisions, setProjectRevisions] = useState<Map<string, number>>(
+    new Map(),
+  );
   const [copied, setCopied] = useState<string | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const lastFocused = useRef<string | null>(null);
   const scanActive = useRef(false);
+  const reposRef = useRef<Map<string, Repo>>(new Map());
+  const selectionRef = useRef<Selection | null>(null);
+  const pendingRevisionKeys = useRef<Set<string>>(new Set());
+  const pendingScanRevisionKeys = useRef<Set<string>>(new Set());
+  const revisionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  reposRef.current = repos;
+  selectionRef.current = selection;
+  const queueProjectRevision = useCallback((keys: Iterable<string>) => {
+    for (const key of keys) {
+      if (scanActive.current) pendingScanRevisionKeys.current.add(key);
+      else pendingRevisionKeys.current.add(key);
+    }
+    if (scanActive.current) return;
+    if (!pendingRevisionKeys.current.size || revisionTimer.current) return;
+    revisionTimer.current = setTimeout(() => {
+      const changedKeys = [...pendingRevisionKeys.current];
+      pendingRevisionKeys.current.clear();
+      revisionTimer.current = null;
+      setProjectRevisions((previous) =>
+        bumpProjectRevisions(previous, changedKeys),
+      );
+    }, 80);
+  }, []);
   const upsert = useCallback(
     (repo: Repo) =>
       setRepos((prev) => {
@@ -189,18 +218,38 @@ export default function Page() {
     es.onerror = () => setConnected(false);
     es.addEventListener("snapshot", (event) => {
       const list: Repo[] = JSON.parse((event as MessageEvent).data);
-      setRepoRevision((value) => value + 1);
-      setRepos(new Map(list.map((repo) => [repo.path, repo])));
+      const next = new Map(list.map((repo) => [repo.path, repo]));
+      reposRef.current = next;
+      queueProjectRevision(
+        revisionKeysForEvent({ type: "snapshot" }, selectionRef.current, next),
+      );
+      setRepos(next);
     });
     es.addEventListener("repo", (event) => {
-      setRepoRevision((value) => value + 1);
-      upsert(JSON.parse((event as MessageEvent).data));
+      const repo: Repo = JSON.parse((event as MessageEvent).data);
+      const next = new Map(reposRef.current);
+      next.set(repo.path, { ...next.get(repo.path), ...repo });
+      reposRef.current = next;
+      queueProjectRevision(
+        revisionKeysForEvent({ type: "repo", repo }, selectionRef.current, next),
+      );
+      upsert(repo);
     });
     es.addEventListener("removed", (event) => {
-      setRepoRevision((value) => value + 1);
+      const removed: { path: string } = JSON.parse((event as MessageEvent).data);
+      const next = new Map(reposRef.current);
+      next.delete(removed.path);
+      queueProjectRevision(
+        revisionKeysForEvent(
+          { type: "removed", path: removed.path },
+          selectionRef.current,
+          reposRef.current,
+        ),
+      );
+      reposRef.current = next;
       setRepos((prev) => {
         const next = new Map(prev);
-        next.delete(JSON.parse((event as MessageEvent).data).path);
+        next.delete(removed.path);
         return next;
       });
     });
@@ -209,13 +258,28 @@ export default function Page() {
       const completed = scanActive.current && !active;
       scanActive.current = active;
       setScanning(active);
-      if (completed) setRepoRevision((value) => value + 1);
+      if (completed) {
+        const changedDuringScan = new Set(pendingScanRevisionKeys.current);
+        pendingScanRevisionKeys.current.clear();
+        for (const key of revisionKeysForEvent(
+          { type: "scan-complete" },
+          selectionRef.current,
+          reposRef.current,
+        )) changedDuringScan.add(key);
+        queueProjectRevision(changedDuringScan);
+      }
     });
     es.addEventListener("fetch", (event) =>
       setFetching(JSON.parse((event as MessageEvent).data).active),
     );
     return () => es.close();
-  }, [upsert]);
+  }, [queueProjectRevision, upsert]);
+  useEffect(() => () => {
+    if (revisionTimer.current) clearTimeout(revisionTimer.current);
+    revisionTimer.current = null;
+    pendingRevisionKeys.current.clear();
+    pendingScanRevisionKeys.current.clear();
+  }, []);
 
   const visible = useRef<Set<string>>(new Set());
   const observed = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -767,7 +831,7 @@ export default function Page() {
               <ProjectDetail
                 projectKey={selection.commonDir}
                 repos={selectedProject}
-                revision={repoRevision}
+                revision={projectRevisions.get(selection.commonDir) ?? 0}
                 copied={copied}
                 onCopy={copy}
                 onSelectRepo={selectRepo}

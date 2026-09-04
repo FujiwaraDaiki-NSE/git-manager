@@ -1,6 +1,7 @@
 import asyncio
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -612,6 +613,50 @@ def test_shared_gitdir_events_are_owned_by_main_even_if_linked_is_watched_first(
         assert layout is not None
         wd = watcher._dir_to_wd[layout.common_git_dir]
         assert watcher._wd_private_users[wd] == {str(repo)}
+    finally:
+        watcher.stop()
+
+
+def test_watcher_emits_for_loose_branch_ref_changes_in_linked_projects(
+    repo_with_worktree: tuple[Path, Path],
+) -> None:
+    repo, worktree = repo_with_worktree
+    events: list[str] = []
+    changed = threading.Event()
+
+    def on_change(path: str) -> None:
+        events.append(path)
+        changed.set()
+
+    watcher = Watcher(on_change)
+    watcher.start()
+    if not watcher.available:
+        pytest.skip("inotify is unavailable")
+    try:
+        watcher.watch(str(worktree))
+        watcher.watch(str(repo))
+        layout = scanner.repo_layout(str(worktree))
+        assert layout is not None
+        common_heads = os.path.realpath(os.path.join(layout.common_git_dir, "refs", "heads"))
+        assert common_heads in watcher._dir_to_wd
+        assert os.path.realpath(layout.common_git_dir) in watcher._dir_to_wd
+
+        changed.clear()
+        created_count = len(events)
+        git(repo, "branch", "live/live-ref")
+        assert changed.wait(2)
+        assert len(events) > created_count
+        changed.clear()
+        packed_count = len(events)
+        git(repo, "pack-refs", "--all", "--prune")
+        assert changed.wait(2)
+        assert len(events) > packed_count
+        changed.clear()
+        deleted_count = len(events)
+        git(repo, "branch", "-D", "live/live-ref")
+        assert changed.wait(2)
+        assert len(events) > deleted_count
+        assert all(path == str(repo) for path in events)
     finally:
         watcher.stop()
 
