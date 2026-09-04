@@ -1355,7 +1355,7 @@ body {
   --control-panel-soft: #f7f9fb;
   --control-border: #d9dee7;
   --control-border-strong: #b6c0cf;
-  --control-muted: #68758a;
+  --control-muted: #566274;
   --control-ink: #17202d;
   --control-green: #147a55;
   --control-green-soft: #e5f3ed;
@@ -1375,7 +1375,7 @@ body {
 
 html,
 body {
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .home-shell,
@@ -2360,7 +2360,8 @@ body {
   display: grid;
   font: 10px var(--control-mono);
   gap: 12px;
-  grid-template-columns: var(--control-label-width) minmax(0, 1fr);
+  grid-template-columns: var(--control-label-width) minmax(var(--flow-track-min-width, 440px), 1fr);
+  min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   padding: 14px 0 8px;
 }
 
@@ -2369,10 +2370,18 @@ body {
   justify-content: space-between;
 }
 
-.flow-rows {
-  min-width: 0;
+.flow-scroll {
+  max-width: 100%;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.flow-rows {
+  min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
+  overflow: visible;
+  padding-bottom: var(--flow-popover-space, 0px);
   position: relative;
 }
 
@@ -2419,9 +2428,9 @@ body {
 
 .flow-row {
   display: grid;
-  grid-template-columns: var(--control-label-width) minmax(440px, 1fr);
+  grid-template-columns: var(--control-label-width) minmax(var(--flow-track-min-width, 440px), 1fr);
   min-height: var(--flow-row-height);
-  min-width: calc(var(--control-label-width) + 440px);
+  min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   position: relative;
   z-index: 1;
 }
@@ -2485,7 +2494,7 @@ body {
 
 .flow-track {
   border-bottom: 1px solid var(--control-border);
-  min-width: 440px;
+  min-width: var(--flow-track-min-width, 440px);
   position: relative;
 }
 
@@ -2537,6 +2546,7 @@ body {
   display: block;
   height: 10px;
   width: 10px;
+  transform: translateX(var(--flow-point-offset, 0px));
 }
 
 .flow-event-point.is-head {
@@ -2551,7 +2561,7 @@ body {
   background: var(--control-purple);
   border-radius: 2px;
   box-shadow: 0 0 0 1px var(--control-purple);
-  transform: rotate(45deg);
+  transform: translateX(var(--flow-point-offset, 0px)) rotate(45deg);
 }
 
 .flow-event-button:focus-visible {
@@ -3116,18 +3126,19 @@ body {
 
   .flow-axis {
     --control-label-width: 170px;
-    grid-template-columns: var(--control-label-width) minmax(440px, 1fr);
-    min-width: calc(var(--control-label-width) + 440px);
+    grid-template-columns: var(--control-label-width) minmax(var(--flow-track-min-width, 440px), 1fr);
+    min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   }
 
   .flow-rows {
     --control-label-width: 170px;
+    min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   }
 
   .flow-row {
     --control-label-width: 170px;
-    grid-template-columns: var(--control-label-width) minmax(440px, 1fr);
-    min-width: calc(var(--control-label-width) + 440px);
+    grid-template-columns: var(--control-label-width) minmax(var(--flow-track-min-width, 440px), 1fr);
+    min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   }
 
   .flow-connections {

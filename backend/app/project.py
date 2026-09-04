@@ -7,13 +7,17 @@
 from __future__ import annotations
 
 import os
+import re
 import time
+from datetime import datetime
 from typing import Any, Mapping
 
 from app import detail, gitinfo, graph, paths, scanner
 
 MAX_PROJECT_COMMITS = 200
 README_MAX_CHARS = 280
+PROJECT_RANGES = {"current", "24h", "7d", "all"}
+_COMMIT_HASH_LINE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 def _key(path: str) -> str:
@@ -86,6 +90,61 @@ def _commit_stats(repo: str, commit_hash: str | None) -> dict[str, Any] | None:
         "deletions": None if unknown_deletions else deletions,
         "paths": paths,
     }
+
+
+def _commit_stats_many(repo: str, commit_hashes: list[str]) -> dict[str, dict[str, Any] | None]:
+    """Fetch numstat for the requested commits with one bounded Git process.
+
+    The project endpoint needs lightweight hover data, but it must not start a
+    separate ``git show`` process for every graph row.  A single multi-object
+    ``git show`` keeps the initial request bounded while retaining exact
+    per-commit facts.  Empty or failed output stays explicitly unavailable.
+    """
+    hashes = [value for value in dict.fromkeys(commit_hashes) if _COMMIT_HASH_LINE.fullmatch(value)]
+    result: dict[str, dict[str, Any] | None] = {value: None for value in hashes}
+    if not hashes:
+        return result
+    raw = gitinfo._run(
+        repo,
+        [
+            "show",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--numstat",
+            "--format=%H",
+            *hashes,
+        ],
+    )
+    if raw is None:
+        return result
+    current: str | None = None
+    by_hash: dict[str, dict[str, Any]] = {}
+    for line in raw.splitlines():
+        if _COMMIT_HASH_LINE.fullmatch(line) and line in result:
+            current = line
+            by_hash[current] = {"files": 0, "additions": 0, "deletions": 0, "paths": []}
+            continue
+        if current is None:
+            continue
+        fields = line.split("\t", 2)
+        if len(fields) != 3:
+            continue
+        added, deleted, path = fields
+        entry = by_hash[current]
+        entry["files"] += 1
+        if len(entry["paths"]) < 3:
+            entry["paths"].append(path)
+        if added.isdecimal() and entry["additions"] is not None:
+            entry["additions"] += int(added)
+        elif not added.isdecimal():
+            entry["additions"] = None
+        if deleted.isdecimal():
+            if entry["deletions"] is not None:
+                entry["deletions"] += int(deleted)
+        else:
+            entry["deletions"] = None
+    result.update(by_hash)
+    return result
 
 
 def _count_against_default(
@@ -244,12 +303,45 @@ def _lane_status(
     path = worktree.get("path") if worktree else branch.get("worktree")
     row = state_rows.get(str(path)) if isinstance(path, str) else None
     status = _repo_status(row)
+    # A local branch that is not checked out has no Repo snapshot.  Its
+    # upstream and tracking counts are nevertheless concrete facts from
+    # ``for-each-ref`` and must not disappear just because there is no
+    # worktree row to join.
+    branch_upstream = branch.get("upstream")
+    branch_track = branch.get("track")
+    if row is None:
+        status["upstream"] = branch_upstream
+        status["upstream_ahead"], status["upstream_behind"] = _parse_track(branch_track)
+    else:
+        status["upstream"] = status["upstream"] or branch_upstream
+        if status["upstream_ahead"] is None or status["upstream_behind"] is None:
+            tracked_ahead, tracked_behind = _parse_track(branch_track)
+            if tracked_ahead is not None and tracked_behind is not None:
+                status["upstream_ahead"] = tracked_ahead
+                status["upstream_behind"] = tracked_behind
     return {
         **status,
         "path": path,
         "worktree_state": worktree.get("state") if worktree else None,
         "worktree": path if worktree else None,
     }
+
+
+def _parse_track(track: str | None) -> tuple[int | None, int | None]:
+    """Parse Git's explicit ``[ahead N, behind M]`` tracking fact."""
+    if not track:
+        return None, None
+    if track.strip() == "[up to date]":
+        return 0, 0
+    ahead_match = re.search(r"ahead (\d+)", track)
+    behind_match = re.search(r"behind (\d+)", track)
+    if ahead_match is None and behind_match is None:
+        # ``[up to date]`` and ``[gone]`` do not expose counts.
+        return None, None
+    return (
+        int(ahead_match.group(1)) if ahead_match else 0,
+        int(behind_match.group(1)) if behind_match else 0,
+    )
 
 
 def _event_from_row(
@@ -283,8 +375,11 @@ def build(
     state_rows: Mapping[str, Mapping[str, Any]] | None = None,
     *,
     limit: int = MAX_PROJECT_COMMITS,
+    range_name: str = "current",
 ) -> dict[str, Any] | None:
     """Build the project control payload from one concrete Git checkout."""
+    if range_name not in PROJECT_RANGES:
+        raise ValueError(f"unknown project range: {range_name}")
     state_rows = state_rows or {}
     # State keys are host paths. Keep a normalized lookup for callers that
     # supplied equivalent path spellings.
@@ -415,6 +510,7 @@ def build(
     graph_data = graph.build(repo, all_refs=True, limit=limit)
     observed_at = time.time()
     events: list[dict[str, Any]] = []
+    latest_event: dict[str, Any] | None = None
     if graph_data is not None:
         parents_by_hash = {
             row.get("hash"): row.get("parents") or []
@@ -439,11 +535,51 @@ def build(
                     if isinstance(parent, str)
                 )
             lane_hashes[lane["id"]] = seen
-        for row in graph_data.get("rows", []):
+        graph_rows = graph_data.get("rows", [])
+        head_hashes = {
+            lane.get("head")
+            for lane in lanes
+            if isinstance(lane.get("head"), str) and lane.get("head")
+        }
+        range_cutoff = (
+            observed_at - 86_400
+            if range_name == "24h"
+            else observed_at - 604_800
+            if range_name == "7d"
+            else None
+        )
+
+        def in_range(row: Mapping[str, Any]) -> bool:
+            if range_name == "current":
+                return row.get("hash") in head_hashes
+            if range_cutoff is None:
+                return True
+            date = row.get("date")
+            if not isinstance(date, str):
+                return False
+            try:
+                occurred = datetime.fromisoformat(date).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                return False
+            return occurred >= range_cutoff
+
+        visible_hashes = {
+            row.get("hash")
+            for row in graph_rows
+            if isinstance(row.get("hash"), str) and in_range(row)
+        }
+        stats_by_hash = _commit_stats_many(
+            repo,
+            [str(row.get("hash")) for row in graph_rows if row.get("hash") in visible_hashes],
+        )
+        for row in graph_rows:
             # Graph rows are intentionally metadata-only; numstat is the
             # bounded summary needed by a hover card, while the existing
             # commit endpoint remains the sole source of full patch data.
-            row["stats"] = _commit_stats(repo, row.get("hash"))
+            hash_value = row.get("hash")
+            row["stats"] = stats_by_hash.get(hash_value) if hash_value in visible_hashes else None
+            if not in_range(row):
+                continue
             names = [
                 lane["branch"]
                 for lane in lanes
@@ -475,6 +611,7 @@ def build(
         "main_path": main_path,
         "fetched_at": fetched_at,
         "observed_at": observed_at,
+        "range": range_name,
         "graph": graph_data,
         "lanes": lanes,
         "events": events,
@@ -561,9 +698,14 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
         )
         prunable = sum(1 for row in rows if row.get("worktree_state") == "prunable")
         locked = sum(1 for row in rows if row.get("worktree_state") == "locked")
+        lane_count: int | None = None
+        checkout = main.get("path") if isinstance(main.get("path"), str) else None
+        if checkout:
+            branch_data = detail.get_branches(paths.to_container(checkout))
+            if branch_data is not None:
+                lane_count = len(branch_data.get("local") or [])
         largest_difference_lane: str | None = None
         largest_difference = -1
-        checkout = main.get("path") if isinstance(main.get("path"), str) else None
         if checkout:
             repo = paths.to_container(checkout)
             default_branch = gitinfo.default_branch(repo)
@@ -591,7 +733,10 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
                 "name": os.path.basename(project_id.rstrip("/")) or project_id,
                 "remote": main.get("remote"),
                 "main_path": main.get("path"),
-                "lane_count": len(rows),
+                # A worktree is a checkout, not a branch lane. Match the
+                # project endpoint's local-branch lane count instead of
+                # counting snapshot rows.
+                "lane_count": lane_count,
                 "worktree_count": sum(1 for row in rows if row.get("is_worktree")),
                 "git": {
                     "dirty": dirty,

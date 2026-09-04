@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
+import { ancestryRows, flowEventKey, layoutFlowEvents, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -87,9 +89,10 @@ function laneStateClass(lane: ProjectLane) {
 
 function isFoldedMerged(lane: ProjectLane) {
   // A branch tip can be reachable from HEAD while its linked worktree still
-  // contains uncommitted/conflicting Git facts. Keep that lane visible so the
-  // current work is not hidden by the merged fold.
-  return lane.merged === true && lane.dirty !== true && lane.conflict !== true;
+  // contains uncommitted/conflicting Git facts. Keep every checked-out lane
+  // visible as well: a currently selected branch is still a work lane even
+  // when its tip is reachable from the remote default branch.
+  return shouldFoldMergedLane(lane);
 }
 
 function upstreamLabel(lane: ProjectLane) {
@@ -106,40 +109,44 @@ function valueOrUnknown(value: string | number | null | undefined) {
 }
 
 function projectFromUrl() {
-  if (typeof window === "undefined") return { path: null, tab: "flow" as ControlTab, range: "current" as TimeRange, event: null, lane: null, at: 100 };
-  const params = new URLSearchParams(window.location.search);
-  const tabValue = params.get("tab");
-  const rangeValue = params.get("range");
-  const atValue = Number(params.get("at") ?? "100");
+  return projectFromSearch(typeof window === "undefined" ? "" : window.location.search);
+}
+
+function projectFromSearch(search: string) {
+  const parsed = parseProjectUrl(search);
   return {
-    path: params.get("path"),
-    tab: tabs.some((item) => item.id === tabValue) ? (tabValue as ControlTab) : "flow",
-    range: ranges.some((item) => item.id === rangeValue) ? (rangeValue as TimeRange) : "current",
-    event: params.get("event"),
-    lane: params.get("lane"),
-    at: Number.isFinite(atValue) ? Math.min(100, Math.max(0, atValue)) : 100,
+    path: parsed.path,
+    tab: parsed.tab as ControlTab,
+    range: parsed.range as TimeRange,
+    event: parsed.event,
+    lane: parsed.lane,
+    at: parsed.at,
   };
 }
 
 function useProjectUrl() {
+  const searchParams = useSearchParams();
+  const search = searchParams.toString();
   const [state, setState] = useState(projectFromUrl);
   useEffect(() => {
     const sync = () => setState(projectFromUrl());
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
+  useEffect(() => {
+    // Next's soft navigation updates searchParams without dispatching a
+    // browser popstate event.  Subscribe to the router-owned URL as well as
+    // the native history event so a Link always supplies its path on mount.
+    setState(projectFromSearch(search));
+  }, [search]);
   const update = useCallback((changes: Partial<ReturnType<typeof projectFromUrl>>) => {
-    const url = new URL(window.location.href);
-    for (const [key, value] of Object.entries(changes)) {
-      if (value === null || value === undefined || value === "") url.searchParams.delete(key);
-      else url.searchParams.set(key, String(value));
-    }
+    const nextHref = updateProjectUrl(window.location.href, changes);
     // Keep tab/range/selection navigable with browser back/forward. Slider
     // drags are the high-frequency exception and replace only the observation
     // point until the user chooses another URL-level control.
     const replace = Object.keys(changes).length === 1 && Object.prototype.hasOwnProperty.call(changes, "at");
-    window.history[replace ? "replaceState" : "pushState"]({}, "", url);
-    setState(projectFromUrl());
+    window.history[replace ? "replaceState" : "pushState"]({}, "", nextHref);
+    setState(projectFromSearch(new URL(nextHref, window.location.origin).search));
   }, []);
   return { state, update };
 }
@@ -148,30 +155,18 @@ type FlowEvent = {
   row: GraphRow;
   lane: ProjectLane;
   x: number;
+  hitX: number;
+  pointOffset: number;
   id: string;
 };
-
-function ancestryRows(graphRows: GraphRow[], head: string | null) {
-  if (!head) return [];
-  const byHash = new Map(graphRows.map((row) => [row.hash, row]));
-  const pending = [head];
-  const seen = new Set<string>();
-  const result: GraphRow[] = [];
-  while (pending.length > 0) {
-    const hash = pending.shift();
-    if (!hash || seen.has(hash)) continue;
-    seen.add(hash);
-    const row = byHash.get(hash);
-    if (!row) continue;
-    result.push(row);
-    for (const parent of row.parents) pending.push(parent);
-  }
-  return result;
-}
 
 function eventDate(row: GraphRow) {
   const value = new Date(row.date).getTime();
   return Number.isNaN(value) ? null : value;
+}
+
+function eventsByLaneCount(events: { lane: ProjectLane }[], laneId: string) {
+  return events.reduce((count, event) => count + (event.lane.id === laneId ? 1 : 0), 0);
 }
 
 function FlowEventButton({
@@ -191,26 +186,50 @@ function FlowEventButton({
   onPreview: (id: string | null) => void;
   onSelect: (event: FlowEvent) => void;
 }) {
+  const touchPreviewRef = useRef(false);
+  const touchPointerRef = useRef(false);
+  const touchPreviewOpenRef = useRef(false);
   const xClass = event.x < 24 ? "flow-event-left" : event.x > 76 ? "flow-event-right" : "";
+  const select = () => {
+    touchPreviewOpenRef.current = false;
+    onPreview(null);
+    onSelect(event);
+  };
   return (
     <div
       className={`flow-event-hit ${xClass}`}
-      style={{ left: `${event.x}%` }}
+      style={{ left: `${event.hitX}%`, "--flow-point-offset": `${event.pointOffset}px` } as React.CSSProperties}
       onMouseEnter={() => onPreview(event.id)}
-      onMouseLeave={() => onPreview(null)}
+      onMouseLeave={() => { if (!touchPreviewOpenRef.current) onPreview(null); }}
     >
       <button
         aria-label={`${laneLabel(event.lane)} ${shortHash(event.row.hash)} ${event.row.subject}`}
         className={`flow-event-button${selected ? " is-selected" : ""}`}
+        onPointerDown={(pointerEvent) => {
+          if (pointerEvent.pointerType !== "touch") return;
+          touchPointerRef.current = true;
+          touchPreviewRef.current = preview;
+          touchPreviewOpenRef.current = preview;
+        }}
         onClick={() => {
           // On a narrow viewport the first tap exposes the same lightweight
           // summary as hover/focus; the popover's explicit action opens the
           // full commit detail drawer.
-          if (typeof window !== "undefined" && window.matchMedia("(max-width: 1199px)").matches && !preview) {
+          const wasTouch = touchPointerRef.current;
+          const wasPreview = touchPreviewRef.current;
+          touchPointerRef.current = false;
+          touchPreviewRef.current = false;
+          const action = mobileEventAction({
+            isMobile: typeof window !== "undefined" && window.matchMedia("(max-width: 1199px)").matches,
+            isTouch: wasTouch,
+            previewAtPointerDown: wasPreview,
+          });
+          if (action === "preview") {
+            touchPreviewOpenRef.current = true;
             onPreview(event.id);
             return;
           }
-          onSelect(event);
+          select();
         }}
         onKeyDown={(keyboardEvent) => {
           if (keyboardEvent.key === "ArrowLeft" || keyboardEvent.key === "ArrowRight" || keyboardEvent.key === "ArrowUp" || keyboardEvent.key === "ArrowDown") {
@@ -219,7 +238,11 @@ function FlowEventButton({
           }
         }}
         onFocus={() => onPreview(event.id)}
-        onBlur={() => onPreview(null)}
+        onBlur={(focusEvent) => {
+          if (touchPreviewOpenRef.current) return;
+          const next = focusEvent.relatedTarget;
+          if (!(next instanceof Node) || !focusEvent.currentTarget.parentElement?.contains(next)) onPreview(null);
+        }}
         type="button"
       >
         <span
@@ -249,7 +272,7 @@ function FlowEventButton({
             {upstreamLabel(event.lane)}
           </span>
           {event.row.is_merge && <span>親 {event.row.parents.length ? event.row.parents.map(shortHash).join(", ") : "未取得"}</span>}
-          <button type="button" onClick={() => onSelect(event)}>詳細を開く</button>
+          <button type="button" onClick={select}>詳細を開く</button>
         </div>
       )}
     </div>
@@ -260,14 +283,14 @@ function FlowMap({
   project,
   range,
   timeline,
-  selectedHash,
+  selectedKey,
   onTimelineChange,
   onSelect,
 }: {
   project: ProjectResponse;
   range: TimeRange;
   timeline: number;
-  selectedHash: string | null;
+  selectedKey: string | null;
   onTimelineChange: (value: number) => void;
   onSelect: (event: FlowEvent) => void;
 }) {
@@ -290,16 +313,24 @@ function FlowMap({
   }, [project.default_branch, project.lanes, showMerged]);
 
   const laneRows = useMemo(
-    () => new Map(lanes.map((lane) => [lane.id, ancestryRows(graphRows, lane.head)])),
+    () => new Map(lanes.map((lane) => [lane.id, ancestryRows(graphRows, lane.head, lane.merge_base)])),
     [graphRows, lanes],
+  );
+  const visibleEventHashes = useMemo(
+    () => new Set(project.events.filter((event) => event.type === "commit" && event.commit_hash).map((event) => event.commit_hash as string)),
+    [project.events],
   );
   const allEvents = useMemo(() => {
     const events: { row: GraphRow; lane: ProjectLane }[] = [];
     for (const lane of lanes) {
-      for (const row of laneRows.get(lane.id) ?? []) events.push({ row, lane });
+      for (const row of laneRows.get(lane.id) ?? []) {
+        // The API supplies graph rows needed to draw the merge-base route, but
+        // only events inside the requested range receive hover stats/points.
+        if (visibleEventHashes.has(row.hash)) events.push({ row, lane });
+      }
     }
     return events;
-  }, [laneRows, lanes]);
+  }, [laneRows, lanes, visibleEventHashes]);
   const allTimes = allEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
   const now = Date.now();
   const rangeCutoff = range === "24h" ? now - 86_400_000 : range === "7d" ? now - 604_800_000 : null;
@@ -315,7 +346,7 @@ function FlowMap({
   const maxCandidate = Math.max(...(rangeTimes.length ? rangeTimes : [now]));
   const maxTime = Math.max(minTime + 3_600_000, maxCandidate);
   const observationTime = minTime + ((maxTime - minTime) * timeline) / 100;
-  const events = rangeEvents
+  const positionedEvents = rangeEvents
     .filter(({ row }) => {
       const value = eventDate(row);
       return value !== null && value <= observationTime;
@@ -324,14 +355,18 @@ function FlowMap({
       row,
       lane,
       x: Math.min(100, Math.max(0, ((eventDate(row)! - minTime) / (maxTime - minTime)) * 100)),
-      id: `${lane.id}:${row.hash}`,
+      hitX: 0,
+      pointOffset: 0,
+      id: flowEventKey(lane.id, row.hash),
     }));
+  const trackWidth = Math.max(440, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
+  const events = layoutFlowEvents(positionedEvents, trackWidth);
   const eventsByLane = new Map<string, FlowEvent[]>();
   for (const event of events) eventsByLane.set(event.lane.id, [...(eventsByLane.get(event.lane.id) ?? []), event]);
   const navigateEvent = useCallback((current: FlowEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => {
     const laneIndex = lanes.findIndex((lane) => lane.id === current.lane.id);
     if (laneIndex < 0) return;
-    const laneEvents = [...(eventsByLane.get(current.lane.id) ?? [])].sort((a, b) => a.x - b.x);
+    const laneEvents = [...(eventsByLane.get(current.lane.id) ?? [])].sort((a, b) => a.x - b.x || a.id.localeCompare(b.id));
     let target: FlowEvent | undefined;
     if (key === "ArrowLeft" || key === "ArrowRight") {
       const currentIndex = laneEvents.findIndex((item) => item.row.hash === current.row.hash);
@@ -387,18 +422,25 @@ function FlowMap({
         <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
         <span><i className="legend-dot legend-dot-unknown" aria-hidden="true" /> agent 状態不明</span>
       </div>
-      <div className="flow-axis" aria-hidden="true">
-        <span>分岐関係 / 作業先端</span>
-        <div className="flow-axis-track">
-          <span>{new Date(minTime).toLocaleDateString("ja-JP")}</span>
-          <span>{new Date(minTime + (maxTime - minTime) / 2).toLocaleDateString("ja-JP")}</span>
-          <span>{new Date(maxTime).toLocaleDateString("ja-JP")}</span>
-        </div>
-      </div>
       {lanes.length === 0 ? (
         <div className="empty-flow">表示できる作業レーンはありません。merged・完了を表示すると確認できます。</div>
       ) : (
-        <div className="flow-rows" style={{ "--flow-row-height": `${rowHeight}px`, "--flow-lanes": lanes.length } as React.CSSProperties}>
+        <div
+          className="flow-scroll"
+          role="region"
+          aria-label="Gitフローマップ（横スクロール可能）"
+          style={{ "--flow-popover-space": previewId ? "360px" : "0px" } as React.CSSProperties}
+          tabIndex={0}
+        >
+          <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px` } as React.CSSProperties}>
+            <span>分岐関係 / 作業先端</span>
+            <div className="flow-axis-track">
+              <span>{new Date(minTime).toLocaleDateString("ja-JP")}</span>
+              <span>{new Date(minTime + (maxTime - minTime) / 2).toLocaleDateString("ja-JP")}</span>
+              <span>{new Date(maxTime).toLocaleDateString("ja-JP")}</span>
+            </div>
+          </div>
+          <div className="flow-rows" style={{ "--flow-row-height": `${rowHeight}px`, "--flow-lanes": lanes.length, "--flow-track-min-width": `${trackWidth}px` } as React.CSSProperties}>
           <svg
             aria-hidden="true"
             className="flow-connections"
@@ -452,7 +494,7 @@ function FlowMap({
                       onSelect={onSelect}
                       popoverBelow={index < 2}
                       preview={previewId === event.id}
-                      selected={selectedHash === event.row.hash}
+                      selected={selectedKey === event.id}
                     />
                   ))}
                   <span className="flow-lane-end" style={{ left: `${laneEvents.at(-1)?.x ?? 0}%` }} aria-hidden="true" />
@@ -463,9 +505,10 @@ function FlowMap({
           <div className="flow-current-label" style={{ left: `calc(${nowX}% + 220px)` }} aria-hidden="true">
             {timeline === 100 ? "現在" : "観測時点"}
           </div>
+          </div>
         </div>
       )}
-      {project.graph?.truncated && <div className="inline-note">コミットグラフは 200 件までです。表示範囲外の履歴は未取得です。</div>}
+      {project.graph?.truncated && <div className="inline-note">全履歴の取得上限は 200 件です。表示範囲外の履歴は未取得です。</div>}
     </section>
   );
 }
@@ -687,6 +730,53 @@ function CommitDetail({
   );
 }
 
+function dialogFocusables(root: HTMLElement) {
+  return Array.from(root.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  ));
+}
+
+function useDialogKeyboard(
+  rootRef: React.RefObject<HTMLElement>,
+  closeRef: React.RefObject<HTMLElement>,
+  onClose: () => void,
+) {
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !rootRef.current) return;
+      const focusables = dialogFocusables(rootRef.current);
+      if (!focusables.length) {
+        event.preventDefault();
+        closeRef.current?.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown, true);
+      if (previous?.isConnected && !rootRef.current?.contains(previous)) previous.focus();
+    };
+  }, [closeRef, onClose, rootRef]);
+}
+
 function SelectionPane({
   project,
   selectedHash,
@@ -702,12 +792,60 @@ function SelectionPane({
   onClose: () => void;
   onOpenGit: (lane: ProjectLane) => void;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useDialogKeyboard(panelRef, closeRef, onClose);
   const lane = project.lanes.find((item) => item.id === selectedLane) ?? (selectedEvent && "lane" in selectedEvent ? selectedEvent.lane : null);
   return (
-    <aside className="control-selection" aria-label="選択詳細">
-      <div className="selection-head"><span className="eyebrow">DETAIL</span><button className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
+    <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal="true" role="dialog" tabIndex={-1}>
+      <div className="selection-head"><span className="eyebrow">DETAIL</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
       {selectedEvent && selectedHash ? <CommitDetail event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
     </aside>
+  );
+}
+
+function LegacyGitModal({
+  repo,
+  tab,
+  copied,
+  onClose,
+  onCopy,
+  onTabChange,
+}: {
+  repo: Repo;
+  tab: DetailTab;
+  copied: string | null;
+  onClose: () => void;
+  onCopy: (value: string) => void;
+  onTabChange: (tab: DetailTab) => void;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useDialogKeyboard(panelRef, closeRef, onClose);
+  return (
+    <div className="legacy-overlay">
+      <div ref={panelRef} className="legacy-panel" role="dialog" aria-modal="true" aria-label="既存Git詳細" tabIndex={-1}>
+        <div className="legacy-panel-head">
+          <div><span className="eyebrow">EXISTING GIT DETAIL</span><strong>{repo.branch ?? repo.name}</strong></div>
+          <button ref={closeRef} className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={onClose}>×</button>
+        </div>
+        <RepoDetail activeTab={tab} copied={copied} onCopy={onCopy} onTabChange={onTabChange} repo={repo} />
+      </div>
+    </div>
+  );
+}
+
+function LegacyUnavailableModal({ onClose }: { onClose: () => void }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useDialogKeyboard(panelRef, closeRef, onClose);
+  return (
+    <div className="legacy-overlay">
+      <div ref={panelRef} className="legacy-panel legacy-unavailable" role="dialog" aria-modal="true" aria-label="既存Git詳細" tabIndex={-1}>
+        <button ref={closeRef} className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={onClose}>×</button>
+        <p>この Git checkout の状態は未取得です。</p>
+      </div>
+    </div>
   );
 }
 
@@ -722,6 +860,17 @@ export default function ProjectControl() {
   const [gitTab, setGitTab] = useState<DetailTab>("status");
   const [copied, setCopied] = useState<string | null>(null);
 
+  const projectSnapshotKey = useMemo(() => {
+    if (!urlState.path) return "";
+    const selected = repos.get(urlState.path);
+    const common = selected?.common_dir;
+    return [...repos.values()]
+      .filter((repo) => repo.path === urlState.path || (common && repo.common_dir === common))
+      .map((repo) => `${repo.path}:${repo.checked_at ?? repo.activity ?? 0}:${repo.branch ?? ""}:${repo.worktree_state ?? ""}`)
+      .sort()
+      .join("|");
+  }, [repos, urlState.path]);
+
   useEffect(() => {
     if (!urlState.path) {
       setProject(null);
@@ -732,12 +881,12 @@ export default function ProjectControl() {
     const controller = new AbortController();
     setProjectState("loading");
     setProjectError(null);
-    void fetch(`/api/project?path=${encodeURIComponent(urlState.path)}`, { cache: "no-store", signal: controller.signal })
+    void fetch(`/api/project?path=${encodeURIComponent(urlState.path)}&range=${encodeURIComponent(urlState.range)}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return (await response.json()) as ProjectResponse; })
       .then((value) => { setProject(value); setProjectState("ready"); })
       .catch((reason: unknown) => { if (reason instanceof DOMException && reason.name === "AbortError") return; setProjectState("error"); setProjectError(reason instanceof Error ? reason.message : "unknown error"); });
     return () => controller.abort();
-  }, [urlState.path]);
+  }, [projectSnapshotKey, scanning, urlState.path, urlState.range]);
 
   const selectedHash = urlState.event;
   const selectedLane = urlState.lane;
@@ -755,7 +904,7 @@ export default function ProjectControl() {
     if (!project || !selectedHash) return null;
     const lane = project.lanes.find((item) => item.id === selectedLane);
     const row = project.graph?.rows.find((item) => item.hash === selectedHash);
-    if (row && lane) return { row, lane, x: 0, id: `${lane.id}:${row.hash}` } as FlowEvent;
+    if (row && lane) return { row, lane, x: 0, hitX: 0, pointOffset: 0, id: flowEventKey(lane.id, row.hash) } as FlowEvent;
     return project.events.find((event) => event.commit_hash === selectedHash) ?? null;
   }, [project, selectedHash, selectedLane]);
   const copy = useCallback((value: string) => {
@@ -774,6 +923,9 @@ export default function ProjectControl() {
     if (lane.path) setGitPath(lane.path);
     else if (project?.main_path) setGitPath(project.main_path);
   }, [project?.main_path]);
+  const closeGit = useCallback(() => setGitPath(null), []);
+  const closeSelection = useCallback(() => updateUrl({ event: null, lane: null }), [updateUrl]);
+  const selectedKey = selectedHash && selectedLane ? flowEventKey(selectedLane, selectedHash) : null;
 
   if (projectState === "loading" || !project) {
     return (
@@ -801,15 +953,15 @@ export default function ProjectControl() {
       {urlState.tab === "flow" && <div className="range-tabs" role="toolbar" aria-label="時間範囲">{ranges.map((range) => <button aria-pressed={urlState.range === range.id} className="range-tab" key={range.id} type="button" onClick={() => updateUrl({ range: range.id, at: 100 })}>{range.label}</button>)}</div>}
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main">
-          {urlState.tab === "flow" && <FlowMap onSelect={selectEvent} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedHash={selectedHash} timeline={urlState.at} />}
+          {urlState.tab === "flow" && <FlowMap onSelect={selectEvent} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} timeline={urlState.at} />}
           {urlState.tab === "lanes" && <WorkLanes onOpenGit={openGit} onSelectLane={selectLane} project={project} selectedLane={selectedLane} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView filter={activityFilter} onFilter={(filter) => { setActivityFilter(filter); updateUrl({ event: null }); }} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} />}
         </section>
-        {(selectedEvent || selectedLane) && <SelectionPane onClose={() => updateUrl({ event: null, lane: null })} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}
+        {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}
       </div>
-      {gitPath && legacyRepo && <div className="legacy-overlay"><div className="legacy-panel" role="dialog" aria-modal="true" aria-label="既存Git詳細"><div className="legacy-panel-head"><div><span className="eyebrow">EXISTING GIT DETAIL</span><strong>{legacyRepo.branch ?? legacyRepo.name}</strong></div><button className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={() => setGitPath(null)}>×</button></div><RepoDetail activeTab={gitTab} copied={copied} onCopy={copy} onTabChange={setGitTab} repo={legacyRepo} /></div></div>}
-      {gitPath && !legacyRepo && <div className="legacy-overlay"><div className="legacy-panel legacy-unavailable" role="dialog" aria-modal="true" aria-label="既存Git詳細"><button className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={() => setGitPath(null)}>×</button><p>この Git checkout の状態は未取得です。</p></div></div>}
+      {gitPath && legacyRepo && <LegacyGitModal copied={copied} onClose={closeGit} onCopy={copy} onTabChange={setGitTab} repo={legacyRepo} tab={gitTab} />}
+      {gitPath && !legacyRepo && <LegacyUnavailableModal onClose={closeGit} />}
     </main>
   );
 }

@@ -132,10 +132,11 @@ def _get_project_sync(
     repo: str,
     project_id: str,
     state_rows: dict[str, dict[str, Any]],
+    range_name: str,
 ) -> dict[str, Any] | None:
     """Build one project payload while sharing the repository Git lock."""
     with _repo_lock(host_path):
-        return project.build(repo, project_id, state_rows)
+        return project.build(repo, project_id, state_rows, range_name=range_name)
 
 
 def _upsert(repo: dict[str, Any]) -> None:
@@ -974,8 +975,10 @@ async def get_projects() -> dict[str, Any]:
 
 
 @app.get("/api/project")
-async def get_project(path: str) -> dict[str, Any]:
+async def get_project(path: str, range: str = "current") -> dict[str, Any]:
     """Return one project control payload composed from Git observations."""
+    if range not in project.PROJECT_RANGES:
+        raise HTTPException(status_code=422, detail="range は current、24h、7d、all のいずれかで指定してください")
     with STATE_LOCK:
         selected = STATE.get(path)
         if selected is None:
@@ -1005,6 +1008,7 @@ async def get_project(path: str) -> dict[str, Any]:
         repo,
         project_id,
         siblings,
+        range,
     )
     if result is None:
         raise HTTPException(status_code=502, detail="プロジェクトの Git 情報を取得できませんでした")

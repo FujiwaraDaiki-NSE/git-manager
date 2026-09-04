@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from app import project
+from app import detail, project
 
 
 def git(repo: Path, *args: str) -> str:
@@ -100,3 +100,67 @@ def test_build_does_not_guess_default_branch_without_origin_head(tmp_path: Path)
     assert result["default_hash"] is None
     assert all(lane["merge_base"] is None for lane in result["lanes"])
     assert all(lane["default_ahead"] is None and lane["default_behind"] is None for lane in result["lanes"])
+
+
+def test_branch_merge_and_summary_lane_count_use_project_git_facts(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    origin = tmp_path / "origin.git"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.com")
+    (repo / "README.md").write_text("facts\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    commit(repo, "base")
+    origin.mkdir()
+    git(origin, "init", "--bare", "-q", "-b", "main")
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "remote", "set-head", "origin", "main")
+
+    git(repo, "switch", "-q", "-c", "feature")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    git(repo, "add", "feature.txt")
+    commit(repo, "feature")
+    git(repo, "push", "-q", "-u", "origin", "feature")
+    git(repo, "switch", "-q", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge feature")
+    branches = detail.get_branches(str(repo))
+
+    assert branches is not None
+    feature_branch = next(branch for branch in branches["local"] if branch["name"] == "feature")
+    # The feature is merged into the local HEAD, but origin/HEAD still points
+    # at the pre-feature default commit. It must not be folded as completed.
+    assert feature_branch["merged"] is False
+    assert next(branch for branch in branches["local"] if branch["name"] == "main")["merged"] is False
+
+    state = {
+        str(repo): {
+            "path": str(repo),
+            "common_dir": str(repo),
+            "is_worktree": False,
+            "entries": [],
+            "remote": str(origin),
+        }
+    }
+    result = project.build(str(repo), str(repo), state, range_name="current")
+    assert result is not None
+    feature = next(lane for lane in result["lanes"] if lane["branch"] == "feature")
+    assert feature["upstream"] == "origin/feature"
+    assert feature["upstream_ahead"] is None
+    assert feature["upstream_behind"] is None
+    assert result["range"] == "current"
+    assert all(event["commit_hash"] in {lane["head"] for lane in result["lanes"]} for event in result["events"])
+    assert all(
+        row["stats"] is None
+        for row in result["graph"]["rows"]
+        if row["hash"] not in {lane["head"] for lane in result["lanes"]}
+    )
+
+    summaries = project.summary_rows(state)
+    assert len(summaries) == 1
+    assert summaries[0]["lane_count"] == 2
+
+    all_history = project.build(str(repo), str(repo), state, range_name="all")
+    assert all_history is not None
+    assert len(all_history["events"]) > len(result["events"])

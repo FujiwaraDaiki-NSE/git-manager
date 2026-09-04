@@ -86,7 +86,7 @@ export type Branch = {
   track: string | null;
   date: string;
   current: boolean;
-  merged: boolean;
+  merged: boolean | null;
   worktree: string | null;
 };
 export type BranchesResponse = {
@@ -177,7 +177,7 @@ export type ProjectSummary = {
   name: string;
   remote: string | null;
   main_path: string | null;
-  lane_count: number;
+  lane_count: number | null;
   worktree_count: number;
   git: ProjectGitCounts;
   latest_event: Commit | null;
@@ -199,6 +199,7 @@ export type ProjectResponse = {
   main_path: string;
   fetched_at: number | null;
   observed_at: number;
+  range: "current" | "24h" | "7d" | "all";
   graph: GraphResponse | null;
   lanes: ProjectLane[];
   events: ProjectEvent[];

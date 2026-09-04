@@ -61,7 +61,7 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
           {hasAttention ? "要確認" : "観測済み"}
         </span>
         <span className="project-lane-count">
-          {project.lane_count} レーン
+          {project.lane_count === null ? "レーン数 未取得" : `${project.lane_count} レーン`}
         </span>
       </div>
       <div className="project-card-heading">
@@ -170,7 +170,9 @@ export default function Page() {
     () => ({
       conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0),
       dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0),
-      lanes: projects.reduce((sum, item) => sum + item.lane_count, 0),
+      lanes: projects.every((item) => item.lane_count !== null)
+        ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0)
+        : null,
     }),
     [projects],
   );
@@ -204,7 +206,7 @@ export default function Page() {
         </div>
         <div className="home-summary" aria-label="Git観測サマリー">
           <div><strong>{projects.length}</strong><span>プロジェクト</span></div>
-          <div><strong>{totals.lanes}</strong><span>Gitレーン</span></div>
+          <div><strong>{totals.lanes ?? "?"}</strong><span>Gitレーン</span></div>
           <div><strong>{totals.conflicts + totals.dirty}</strong><span>要確認</span></div>
         </div>
       </section>
