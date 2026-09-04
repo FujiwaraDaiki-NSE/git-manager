@@ -1035,7 +1035,10 @@ async def get_repo_timeline(path: str) -> dict[str, Any]:
         )
         repo = paths.to_container(checkout)
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(pool, _get_timeline_sync, checkout, repo)
+    try:
+        result = await loop.run_in_executor(pool, _get_timeline_sync, checkout, repo)
+    except timeline.GitCommandError as error:
+        raise HTTPException(status_code=502, detail="タイムライン用の Git コマンドに失敗しました") from error
     if result is None:
         raise HTTPException(status_code=502, detail="タイムラインを取得できませんでした")
     return result

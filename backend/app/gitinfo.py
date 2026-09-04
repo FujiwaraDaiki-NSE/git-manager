@@ -28,7 +28,14 @@ NON_INTERACTIVE_ENV = {
 }
 
 
-def _run(repo: str, args: list[str], timeout: int | None = None) -> str | None:
+def _run_result(repo: str, args: list[str], timeout: int | None = None) -> tuple[int | None, str]:
+    """Run Git and retain its exit status for callers with expected failures.
+
+    ``_run`` intentionally keeps its historical success-or-``None`` contract
+    for the existing read paths.  Timeline needs to distinguish an absent
+    ref (a valid Git result) from a failed plumbing command, so it uses this
+    status-preserving variant.
+    """
     try:
         proc = subprocess.run(
             [GIT, "-C", repo, *args],
@@ -40,8 +47,13 @@ def _run(repo: str, args: list[str], timeout: int | None = None) -> str | None:
             env={**os.environ, **NON_INTERACTIVE_ENV},
         )
     except (subprocess.TimeoutExpired, OSError):
-        return None
-    return proc.stdout if proc.returncode == 0 else None
+        return None, ""
+    return proc.returncode, proc.stdout
+
+
+def _run(repo: str, args: list[str], timeout: int | None = None) -> str | None:
+    status, output = _run_result(repo, args, timeout)
+    return output if status == 0 else None
 
 
 def _run_limited(

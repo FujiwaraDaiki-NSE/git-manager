@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  baseDirtyCount,
   buildTimelineGeometry,
   classifyBranch,
   relativeTime,
@@ -40,6 +41,12 @@ test("classifyBranch follows merged, working, behind, ready, synced priority", (
   assert.equal(classifyBranch({ merged: false, ahead: 0, behind: 0, commits: [] }, 2_000).key, "synced");
 });
 
+test("recent work becomes ready when the 30-minute window expires", () => {
+  const branch = { merged: false, ahead: 1, behind: 0, commits: [commit("recent", 1_000)] };
+  assert.equal(classifyBranch(branch, 2_800).key, "working");
+  assert.equal(classifyBranch(branch, 2_801).key, "ready");
+});
+
 test("dirty worktree wins over a stale branch and is exposed on the lane", () => {
   const branch = {
     name: "topic",
@@ -62,7 +69,20 @@ test("dirty worktree wins over a stale branch and is exposed on the lane", () =>
   assert.equal(geometry.lanes[0].status.key, "working");
   assert.equal(geometry.lanes[0].dirtyCount, 1);
   assert.equal(geometry.lanes[0].points.find((point) => point.isHead).marker, "dirty-head");
+  assert.equal(geometry.lanes[0].points.find((point) => point.isHead).branchName, "topic");
   assert.ok(geometry.lanes[0].route.length >= 3);
+});
+
+test("the base checkout contributes its dirty count to the trunk head", () => {
+  const dirtyMain = { is_worktree: false, branch: "main", entries: [{ path: "README.md" }, { path: "app.ts" }] };
+  const geometry = buildTimelineGeometry(
+    baseData,
+    { range: "all", width: 600, dirtyWorktrees: new Map([["/tmp/main", dirtyMain]]) },
+  );
+  assert.equal(baseDirtyCount(baseData, new Map([["/tmp/main", dirtyMain]])), 2);
+  const head = geometry.trunk.points.find((point) => point.isBaseHead);
+  assert.equal(head.marker, "dirty-head");
+  assert.equal(head.dirtyCount, 2);
 });
 
 test("merged lane returns to the trunk at merged_at", () => {

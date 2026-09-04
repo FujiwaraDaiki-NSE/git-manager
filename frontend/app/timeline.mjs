@@ -67,13 +67,26 @@ function dirtyRecord(dirtyWorktrees, worktree) {
   return null;
 }
 
-export function dirtyCount(dirtyWorktrees, worktree) {
-  const record = dirtyRecord(dirtyWorktrees, worktree);
+function dirtyCountRecord(record) {
   if (!record) return 0;
   if (record === true) return 1;
   if (Array.isArray(record.entries)) return record.entries.length;
   if (Array.isArray(record.counts)) {
     return record.counts.reduce((sum, count) => sum + (Number(count.count) || 0), 0);
+  }
+  return 0;
+}
+
+export function dirtyCount(dirtyWorktrees, worktree) {
+  return dirtyCountRecord(dirtyRecord(dirtyWorktrees, worktree));
+}
+
+export function baseDirtyCount(data, dirtyWorktrees) {
+  if (!data?.base || !(dirtyWorktrees instanceof Map)) return 0;
+  for (const record of dirtyWorktrees.values()) {
+    if (record && record.is_worktree === false && record.branch === data.base.name) {
+      return dirtyCountRecord(record);
+    }
   }
   return 0;
 }
@@ -162,6 +175,7 @@ export function buildTimelineGeometry(data, options = {}) {
   const range = options.range ?? "all";
   const width = options.width ?? 960;
   const dirtyWorktrees = options.dirtyWorktrees ?? null;
+  const baseDirty = baseDirtyCount(data, dirtyWorktrees);
   const window = timelineWindow(data, range);
   const branches = data.branches ?? [];
   const trunkPoints = [];
@@ -171,7 +185,10 @@ export function buildTimelineGeometry(data, options = {}) {
     if (!inWindow(timestamp, window)) continue;
     const point = pointFromCommit(commit, timeToX(timestamp, window, width), TRUNK_Y, {
       lane: "trunk",
+      branchName: data.base?.name,
       isBaseHead: data.base?.hash === commit.hash,
+      marker: data.base?.hash === commit.hash ? (baseDirty > 0 ? "dirty-head" : "head") : "commit",
+      dirtyCount: baseDirty,
     });
     trunkPoints.push(point);
     allPoints.push(point);
@@ -191,6 +208,7 @@ export function buildTimelineGeometry(data, options = {}) {
         kind: "fork",
         hash: branch.merge_base,
         lane: branch.name,
+        branchName: branch.name,
         x: forkX,
         y,
         timestamp: forkTimestamp,
@@ -206,6 +224,7 @@ export function buildTimelineGeometry(data, options = {}) {
       if (!inWindow(timestamp, window)) continue;
       const point = pointFromCommit(commit, timeToX(timestamp, window, width), y, {
         lane: branch.name,
+        branchName: branch.name,
         branch,
         isHead: commit.hash === branch.hash,
         marker: commit.hash === branch.hash ? (dirty ? "dirty-head" : status.key === "merged" ? "merged-head" : "head") : "commit",
@@ -223,6 +242,7 @@ export function buildTimelineGeometry(data, options = {}) {
           kind: "merge",
           hash: branch.merge_hash,
           lane: branch.name,
+          branchName: branch.name,
           x: mergeX,
           y,
           timestamp: mergeTimestamp,

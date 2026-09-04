@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CommitPane, useCommitDetail, type LoadState } from "./commit-pane";
 import TimelineView, { type TimelineRange } from "./timeline-view";
-import { classifyBranch } from "./timeline.mjs";
+import { baseDirtyCount, classifyBranch } from "./timeline.mjs";
 import type { Repo, TimelineResponse } from "./types";
 import { stateBadges } from "./status";
 
@@ -97,11 +97,34 @@ export default function ProjectDetail({
   const [timelineRetry, setTimelineRetry] = useState(0);
   const [range, setRange] = useState<TimelineRange>("7d");
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
+  const [clock, setClock] = useState(() => Math.floor(Date.now() / 1000));
   const commit = useCommitDetail(representative?.path ?? null, selectedHash, timelineState === "ready");
   const dirtyWorktrees = useMemo(
-    () => new Map(repos.filter((repo) => repo.is_worktree).map((repo) => [repo.path, repo])),
+    () => new Map(repos.map((repo) => [repo.path, repo])),
     [repos],
   );
+  const timelineRevision = useMemo(
+    () => repos
+      .map((repo) => [
+        repo.path,
+        repo.common_dir,
+        repo.is_worktree,
+        repo.worktree_state,
+        repo.branch,
+        repo.last_commit?.hash,
+        repo.ahead,
+        repo.behind,
+        (repo.entries ?? []).map((entry) => `${entry.xy}:${entry.path}`).join("\x1e"),
+      ].join("\x1f"))
+      .sort()
+      .join("\x1d"),
+    [repos],
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Math.floor(Date.now() / 1000)), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setTimeline(null);
@@ -132,18 +155,25 @@ export default function ProjectDetail({
         setTimelineState("error");
       });
     return () => controller.abort();
-  }, [representative?.path, timelineRetry]);
+  }, [representative?.path, timelineRetry, timelineRevision]);
+
+  const displayTimeline = useMemo(() => {
+    if (!timeline) return null;
+    const now = Math.max(timeline.now, clock);
+    return now === timeline.now ? timeline : { ...timeline, now };
+  }, [clock, timeline]);
 
   const metrics = useMemo(() => {
-    const statuses = timeline?.branches.map((branch) => classifyBranch(branch, timeline.now, dirtyWorktrees)) ?? [];
+    const statuses = displayTimeline?.branches.map((branch) => classifyBranch(branch, displayTimeline.now, dirtyWorktrees)) ?? [];
+    const baseWorking = displayTimeline ? baseDirtyCount(displayTimeline, dirtyWorktrees) > 0 : false;
     return {
       worktrees: repos.filter((repo) => repo.is_worktree).length,
-      working: statuses.filter((status) => status.key === "working").length,
+      working: statuses.filter((status) => status.key === "working").length + (baseWorking ? 1 : 0),
       ready: statuses.filter((status) => status.key === "ready").length,
       behind: statuses.filter((status) => status.key === "behind").length,
       merged: statuses.filter((status) => status.key === "merged").length,
     };
-  }, [dirtyWorktrees, repos, timeline]);
+  }, [dirtyWorktrees, displayTimeline, repos]);
 
   const remote = remoteRepository(representative?.remote);
   const sortedMembers = useMemo(
@@ -164,7 +194,7 @@ export default function ProjectDetail({
         <div className="project-detail-meta">
           <span><strong>remote</strong> {remote}</span>
           <span><strong>common_dir</strong> <code title={projectKey}>{projectKey}</code></span>
-          <span><strong>base</strong> {timeline?.base?.name ?? "ベース未設定"}</span>
+          <span><strong>base</strong> {displayTimeline?.base?.name ?? "ベース未設定"}</span>
         </div>
       </header>
 
@@ -180,7 +210,7 @@ export default function ProjectDetail({
         <div className="section-head">
           <div>
             <h3 id="project-timeline-title">ブランチタイムライン</h3>
-            {timeline && <code className="cmdhint">{timeline.command}</code>}
+            {displayTimeline && <code className="cmdhint">{displayTimeline.command}</code>}
           </div>
         </div>
         {timelineState === "loading" && <div className="loading" role="status">タイムラインを取得中…</div>}
@@ -191,9 +221,9 @@ export default function ProjectDetail({
             {timelineError && <span className="sr-only">{timelineError}</span>}
           </div>
         )}
-        {timelineState === "ready" && timeline && timeline.base && (
+        {timelineState === "ready" && displayTimeline && displayTimeline.base && (
           <TimelineView
-            data={timeline}
+            data={displayTimeline}
             dirtyWorktrees={dirtyWorktrees}
             onRangeChange={setRange}
             onSelect={setSelectedHash}
@@ -201,7 +231,7 @@ export default function ProjectDetail({
             selectedHash={selectedHash}
           />
         )}
-        {timelineState === "ready" && timeline && !timeline.base && (
+        {timelineState === "ready" && displayTimeline && !displayTimeline.base && (
           <div className="project-base-missing" role="status">
             <strong>ベース未設定</strong>
             <span>origin/HEAD がないため、ブランチタイムラインを表示できません。</span>

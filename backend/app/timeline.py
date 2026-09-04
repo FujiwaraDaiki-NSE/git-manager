@@ -14,11 +14,35 @@ TIMELINE_LIMIT = 200
 FIELD_SEPARATOR = "\x1f"
 
 
+class GitCommandError(RuntimeError):
+    """Raised when a timeline plumbing command cannot produce its result."""
+
+
+def _git_result(repo: str, args: list[str]) -> tuple[int, str]:
+    status, output = gitinfo._run_result(repo, args)
+    if status is None:
+        command = shlex.join([gitinfo.GIT, "-C", repo, *args])
+        raise GitCommandError(f"Git command did not complete: {command}")
+    return status, output
+
+
+def _run_required(repo: str, args: list[str]) -> str:
+    status, output = _git_result(repo, args)
+    if status != 0:
+        command = shlex.join([gitinfo.GIT, "-C", repo, *args])
+        raise GitCommandError(f"Git command failed ({status}): {command}")
+    return output
+
+
 def _origin_base(repo: str) -> dict[str, str] | None:
     """Return the remote base named by origin/HEAD, without guessing."""
-    raw = gitinfo._run(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"])
-    if not raw:
+    symbolic_args = ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]
+    status, raw = _git_result(repo, symbolic_args)
+    if status == 1:
         return None
+    if status != 0:
+        command = shlex.join([gitinfo.GIT, "-C", repo, *symbolic_args])
+        raise GitCommandError(f"Git command failed ({status}): {command}")
     symbolic = raw.strip()
     prefix = "refs/remotes/origin/"
     if not symbolic.startswith(prefix):
@@ -27,19 +51,35 @@ def _origin_base(repo: str) -> dict[str, str] | None:
     if not name:
         return None
     ref = f"origin/{name}"
-    commit_hash = gitinfo._run(
+    status, commit_hash = _git_result(
         repo,
         ["rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{name}"],
     )
-    if not commit_hash:
+    if status == 1:
         # A dangling origin/HEAD is not a usable base.  Do not fall back to a
         # local branch with a familiar name.
         return None
-    return {"name": name, "ref": ref, "hash": commit_hash.strip()}
+    if status != 0:
+        command = shlex.join(
+            [
+                gitinfo.GIT,
+                "-C",
+                repo,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"refs/remotes/origin/{name}",
+            ]
+        )
+        raise GitCommandError(f"Git command failed ({status}): {command}")
+    value = commit_hash.strip()
+    if not value:
+        raise GitCommandError("Git returned an empty origin/HEAD target")
+    return {"name": name, "ref": ref, "hash": value}
 
 
-def _local_branches(repo: str) -> list[dict[str, str]] | None:
-    raw = gitinfo._run(
+def _local_branches(repo: str) -> list[dict[str, str]]:
+    raw = _run_required(
         repo,
         [
             "for-each-ref",
@@ -47,8 +87,6 @@ def _local_branches(repo: str) -> list[dict[str, str]] | None:
             "refs/heads",
         ],
     )
-    if raw is None:
-        return None
     branches: list[dict[str, str]] = []
     for line in raw.splitlines():
         name, separator, commit_hash = line.partition(FIELD_SEPARATOR)
@@ -100,7 +138,7 @@ def _log_commits(
     if first_parent:
         args.insert(1, "--first-parent")
     args.append(revision)
-    commits = _parse_commits(gitinfo._run(repo, args))
+    commits = _parse_commits(_run_required(repo, args))
     truncated = len(commits) > limit
     if truncated:
         commits = commits[:limit]
@@ -108,19 +146,28 @@ def _log_commits(
     return commits, truncated
 
 
-def _commit_time(repo: str, commit_hash: str) -> int | None:
-    raw = gitinfo._run(repo, ["show", "-s", "--format=%ct", commit_hash])
-    if not raw:
-        return None
+def _commit_time(repo: str, commit_hash: str) -> int:
+    raw = _run_required(repo, ["show", "-s", "--format=%ct", commit_hash])
+    if not raw.strip():
+        raise GitCommandError(f"Git returned no committer time for {commit_hash}")
     try:
         return int(raw.strip())
-    except ValueError:
-        return None
+    except ValueError as error:
+        raise GitCommandError(f"Git returned an invalid committer time for {commit_hash}") from error
 
 
 def _merge_base(repo: str, base: str, branch: str) -> str | None:
-    raw = gitinfo._run(repo, ["merge-base", base, branch])
-    return raw.strip() if raw else None
+    status, raw = _git_result(repo, ["merge-base", base, branch])
+    if status == 1:
+        # Git uses status 1 to report two valid, unrelated histories.
+        return None
+    if status != 0:
+        command = shlex.join([gitinfo.GIT, "-C", repo, "merge-base", base, branch])
+        raise GitCommandError(f"Git command failed ({status}): {command}")
+    value = raw.strip()
+    if not value:
+        raise GitCommandError(f"Git returned no merge base for {base} and {branch}")
+    return value
 
 
 def _ahead_behind(repo: str, base: str, branch: str) -> tuple[int, int]:
@@ -130,22 +177,22 @@ def _ahead_behind(repo: str, base: str, branch: str) -> tuple[int, int]:
     commits on the right.  They are directly assigned to behind/ahead; no
     graph-side approximation is used.
     """
-    raw = gitinfo._run(repo, ["rev-list", "--left-right", "--count", f"{base}...{branch}"])
-    if not raw:
-        return 0, 0
+    raw = _run_required(repo, ["rev-list", "--left-right", "--count", f"{base}...{branch}"])
     fields = raw.split()
     if len(fields) != 2:
-        return 0, 0
+        raise GitCommandError(f"Git returned an invalid ahead/behind count for {base} and {branch}")
     try:
         behind = int(fields[0])
         ahead = int(fields[1])
-    except ValueError:
-        return 0, 0
+    except ValueError as error:
+        raise GitCommandError(f"Git returned an invalid ahead/behind count for {base} and {branch}") from error
     return ahead, behind
 
 
 def _worktree_paths(repo: str) -> dict[str, str]:
-    records = gitinfo.list_worktrees(repo) or []
+    records = gitinfo.list_worktrees(repo)
+    if records is None:
+        raise GitCommandError("Git could not list worktrees")
     result: dict[str, str] = {}
     for record in records:
         branch = record.get("branch")
@@ -156,14 +203,17 @@ def _worktree_paths(repo: str) -> dict[str, str]:
 
 
 def _merged_names(repo: str, base: str) -> set[str]:
-    raw = gitinfo._run(repo, ["branch", "--merged", base, "--format=%(refname:short)"])
-    if raw is None:
-        return set()
+    raw = _run_required(repo, ["branch", "--merged", base, "--format=%(refname:short)"])
     return {line.strip() for line in raw.splitlines() if line.strip()}
 
 
-def _merge_commit(repo: str, branch: str, base: str) -> tuple[str | None, int | None]:
-    raw = gitinfo._run(
+def _merge_commit(
+    repo: str,
+    branch: str,
+    branch_hash: str,
+    base: str,
+) -> tuple[str | None, int | None, str | None]:
+    raw = _run_required(
         repo,
         [
             "log",
@@ -171,19 +221,25 @@ def _merge_commit(repo: str, branch: str, base: str) -> tuple[str | None, int | 
             "--ancestry-path",
             f"{branch}..{base}",
             "--reverse",
-            "-1",
-            "--format=%H%x1f%ct",
+            "--format=%H%x1f%ct%x1f%P",
         ],
     )
     if not raw:
-        return None, None
-    fields = raw.strip().split(FIELD_SEPARATOR)
-    if len(fields) != 2 or not fields[0]:
-        return None, None
-    try:
-        return fields[0], int(fields[1])
-    except ValueError:
-        return fields[0], None
+        return None, None, None
+    for line in raw.splitlines():
+        fields = line.split(FIELD_SEPARATOR, 2)
+        if len(fields) != 3 or not fields[0] or not fields[1]:
+            raise GitCommandError(f"Git returned an invalid merge record for {branch}")
+        try:
+            merged_at = int(fields[1])
+        except ValueError as error:
+            raise GitCommandError(f"Git returned an invalid merge timestamp for {branch}") from error
+        parents = fields[2].split()
+        if len(parents) >= 2 and branch_hash in parents[1:]:
+            return fields[0], merged_at, parents[0]
+    # A fast-forward merge has no merge commit.  Keep this fact explicit
+    # rather than deriving a synthetic timestamp or hash.
+    return None, None, None
 
 
 def _oldest_fork_index(trunk: list[dict[str, Any]], fork_times: list[int]) -> int:
@@ -196,15 +252,13 @@ def _oldest_fork_index(trunk: list[dict[str, Any]], fork_times: list[int]) -> in
     return max(len(trunk) - 1, 0)
 
 
-def build(repo: str, limit: int = TIMELINE_LIMIT) -> dict[str, Any] | None:
+def build(repo: str, limit: int = TIMELINE_LIMIT) -> dict[str, Any]:
     """Build a stable project timeline from read-only Git plumbing commands."""
     if limit < 1:
         raise ValueError("limit must be positive")
 
     base = _origin_base(repo)
     branches = _local_branches(repo)
-    if branches is None:
-        return None
 
     now = time.time()
     if base is None:
@@ -224,7 +278,19 @@ def build(repo: str, limit: int = TIMELINE_LIMIT) -> dict[str, Any] | None:
         name = branch["name"]
         if name == base["name"]:
             continue
-        merge_base = _merge_base(repo, base["ref"], name)
+        merged = name in merged_names
+        merge_hash: str | None = None
+        merged_at: int | None = None
+        merge_parent: str | None = None
+        if merged:
+            merge_hash, merged_at, merge_parent = _merge_commit(
+                repo,
+                name,
+                branch["hash"],
+                base["ref"],
+            )
+        fork_revision = merge_parent or base["ref"]
+        merge_base = _merge_base(repo, fork_revision, name)
         fork_time = _commit_time(repo, merge_base) if merge_base else None
         if fork_time is not None:
             fork_times.append(fork_time)
@@ -234,11 +300,6 @@ def build(repo: str, limit: int = TIMELINE_LIMIT) -> dict[str, Any] | None:
             f"{merge_base}..{name}" if merge_base else name,
             limit=limit,
         )
-        merged = name in merged_names
-        merge_hash: str | None = None
-        merged_at: int | None = None
-        if merged:
-            merge_hash, merged_at = _merge_commit(repo, name, base["ref"])
         branch_results.append(
             {
                 "name": name,

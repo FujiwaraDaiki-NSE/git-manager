@@ -1394,7 +1394,7 @@ body {
 .timeline-visual {
   position: relative;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--rule);
   background: var(--panel);
 }
@@ -1782,16 +1782,31 @@ body {
     width: 100%;
   }
   .timeline-lane-label {
-    max-width: 32%;
+    left: 4px;
+    max-width: 31%;
+    padding: 0 3px;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+  .timeline-lane-label:not(.timeline-lane-label-trunk) span {
+    display: none;
+  }
+  .timeline-lane-label strong {
+    display: block;
+    max-width: 100%;
   }
   .timeline-status-layer {
-    width: 64%;
+    width: 65%;
   }
   .timeline-status {
     gap: 3px;
     right: 4px;
+    min-width: 0;
   }
   .timeline-ahead-behind {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-size: 10px;
   }
   .project-member {

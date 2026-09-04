@@ -15,6 +15,7 @@ type TimelinePoint = {
   kind: "commit" | "fork" | "merge";
   hash: string | null;
   lane?: string;
+  branchName?: string;
   x: number;
   y: number;
   timestamp: number | null;
@@ -24,6 +25,7 @@ type TimelinePoint = {
     author: string;
   };
   marker?: string;
+  dirtyCount?: number;
   isHead?: boolean;
   behind?: number;
   branch?: TimelineBranch;
@@ -70,14 +72,15 @@ function shortHash(hash: string | null | undefined) {
 }
 
 function pointLabel(point: TimelinePoint, now: number, dirtyCount: number) {
+  const laneName = point.branchName ?? point.branch?.name ?? point.lane ?? "branch";
   if (point.kind === "fork") {
-    return `ここから分岐 · ベースより ${point.behind ?? 0} コミット後方`;
+    return `${laneName} · ここから分岐 · ベースより ${point.behind ?? 0} コミット後方`;
   }
   if (point.kind === "merge") {
-    return `マージコミット ${shortHash(point.hash)} · ${relativeTime(point.timestamp, now)}`;
+    return `${laneName} · マージコミット ${shortHash(point.hash)} · ${relativeTime(point.timestamp, now)}`;
   }
   const commit = point.commit;
-  const summary = `${shortHash(point.hash)} · ${commit?.subject ?? "コミット"} · ${commit?.author ?? "作者不明"} · ${relativeTime(point.timestamp, now)}`;
+  const summary = `${laneName} · ${shortHash(point.hash)} · ${commit?.subject ?? "コミット"} · ${commit?.author ?? "作者不明"} · ${relativeTime(point.timestamp, now)}`;
   if (point.marker === "dirty-head") return `${summary} · git status ${dirtyCount} 件`;
   if (point.marker === "merged-head") return `${summary} · merged`;
   return summary;
@@ -201,7 +204,9 @@ export default function TimelineView({
 
   const hovered = hoveredId ? geometry.points.find((point) => point.id === hoveredId) ?? null : null;
   const hoveredLane = hovered?.branch;
-  const hoveredDirtyCount = hoveredLane ? geometry.lanes.find((lane) => lane.branch.name === hoveredLane.name)?.dirtyCount ?? 0 : 0;
+  const hoveredDirtyCount = hovered
+    ? hovered.dirtyCount ?? (hoveredLane ? geometry.lanes.find((lane) => lane.branch.name === hoveredLane.name)?.dirtyCount ?? 0 : 0)
+    : 0;
 
   return (
     <div className="timeline-view">
@@ -254,7 +259,7 @@ export default function TimelineView({
           ))}
           {geometry.points.map((point) => {
             const lane = point.branch ? geometry.lanes.find((item) => item.branch.name === point.branch?.name) : null;
-            const count = lane?.dirtyCount ?? 0;
+            const count = point.dirtyCount ?? lane?.dirtyCount ?? 0;
             const label = pointLabel(point, data.now, count);
             const interactive = Boolean(point.hash && onSelect);
             return (
