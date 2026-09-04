@@ -115,6 +115,53 @@ def test_timeline_keeps_merged_branch_commits_after_trunk_advances(
     ]
 
 
+def test_timeline_finds_merge_for_an_old_local_branch_ref(
+    timeline_repo: tuple[Path, Path],
+) -> None:
+    repo, _ = timeline_repo
+    old_branch_tip = git(repo, "rev-parse", "feature").strip()
+    git(repo, "switch", "-q", "feature")
+    empty_commit(repo, "feature work after stale ref")
+    actual_merge_parent = git(repo, "rev-parse", "feature").strip()
+    git(repo, "switch", "-q", "main")
+    git(repo, "merge", "--no-ff", "-qm", "merge feature after stale ref", "feature")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "branch", "-f", "feature", old_branch_tip)
+    git(repo, "push", "-q", "origin", "main")
+
+    result = timeline.build(str(repo))
+
+    assert result is not None
+    feature = next(branch for branch in result["branches"] if branch["name"] == "feature")
+    assert feature["merged"] is True
+    assert feature["merge_hash"] == merge_hash
+    assert feature["merge_base"] == git(repo, "merge-base", "main^", old_branch_tip).strip()
+    assert [commit["subject"] for commit in feature["commits"]] == ["feature work"]
+    assert actual_merge_parent != old_branch_tip
+
+
+def test_timeline_finds_indirect_merge_on_base_first_parent(
+    timeline_repo: tuple[Path, Path],
+) -> None:
+    repo, _ = timeline_repo
+    git(repo, "switch", "-q", "-c", "integration", "main")
+    git(repo, "merge", "--no-ff", "-qm", "integrate feature", "feature")
+    git(repo, "switch", "-q", "main")
+    git(repo, "merge", "--no-ff", "-qm", "merge integration", "integration")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "branch", "-D", "-q", "integration")
+    git(repo, "push", "-q", "origin", "main")
+
+    result = timeline.build(str(repo))
+
+    assert result is not None
+    feature = next(branch for branch in result["branches"] if branch["name"] == "feature")
+    assert feature["merged"] is True
+    assert feature["merge_hash"] == merge_hash
+    assert feature["merge_base"] == git(repo, "merge-base", "main^^", "feature").strip()
+    assert [commit["subject"] for commit in feature["commits"]] == ["feature work"]
+
+
 def test_timeline_propagates_git_command_failure(
     timeline_repo: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -156,6 +203,7 @@ def test_timeline_does_not_invent_merge_for_fast_forward(
     empty_commit(repo, "fast-forward work")
     git(repo, "switch", "-q", "main")
     git(repo, "merge", "--ff-only", "-q", "ff-feature")
+    git(repo, "commit", "--allow-empty", "-qm", "trunk after fast-forward")
     git(repo, "push", "-q", "origin", "main")
 
     result = timeline.build(str(repo))

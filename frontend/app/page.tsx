@@ -169,9 +169,11 @@ export default function Page() {
   const [scanning, setScanning] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [repoRevision, setRepoRevision] = useState(0);
   const [copied, setCopied] = useState<string | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const lastFocused = useRef<string | null>(null);
+  const scanActive = useRef(false);
   const upsert = useCallback(
     (repo: Repo) =>
       setRepos((prev) => {
@@ -187,21 +189,28 @@ export default function Page() {
     es.onerror = () => setConnected(false);
     es.addEventListener("snapshot", (event) => {
       const list: Repo[] = JSON.parse((event as MessageEvent).data);
+      setRepoRevision((value) => value + 1);
       setRepos(new Map(list.map((repo) => [repo.path, repo])));
     });
-    es.addEventListener("repo", (event) =>
-      upsert(JSON.parse((event as MessageEvent).data)),
-    );
-    es.addEventListener("removed", (event) =>
+    es.addEventListener("repo", (event) => {
+      setRepoRevision((value) => value + 1);
+      upsert(JSON.parse((event as MessageEvent).data));
+    });
+    es.addEventListener("removed", (event) => {
+      setRepoRevision((value) => value + 1);
       setRepos((prev) => {
         const next = new Map(prev);
         next.delete(JSON.parse((event as MessageEvent).data).path);
         return next;
-      }),
-    );
-    es.addEventListener("scan", (event) =>
-      setScanning(JSON.parse((event as MessageEvent).data).active),
-    );
+      });
+    });
+    es.addEventListener("scan", (event) => {
+      const active = Boolean(JSON.parse((event as MessageEvent).data).active);
+      const completed = scanActive.current && !active;
+      scanActive.current = active;
+      setScanning(active);
+      if (completed) setRepoRevision((value) => value + 1);
+    });
     es.addEventListener("fetch", (event) =>
       setFetching(JSON.parse((event as MessageEvent).data).active),
     );
@@ -758,6 +767,7 @@ export default function Page() {
               <ProjectDetail
                 projectKey={selection.commonDir}
                 repos={selectedProject}
+                revision={repoRevision}
                 copied={copied}
                 onCopy={copy}
                 onSelectRepo={selectRepo}

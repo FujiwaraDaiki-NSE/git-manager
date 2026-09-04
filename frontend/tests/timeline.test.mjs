@@ -68,8 +68,9 @@ test("dirty worktree wins over a stale branch and is exposed on the lane", () =>
   );
   assert.equal(geometry.lanes[0].status.key, "working");
   assert.equal(geometry.lanes[0].dirtyCount, 1);
-  assert.equal(geometry.lanes[0].points.find((point) => point.isHead).marker, "dirty-head");
-  assert.equal(geometry.lanes[0].points.find((point) => point.isHead).branchName, "topic");
+  const dirtyHead = geometry.lanes[0].points.find((point) => point.marker === "dirty-head");
+  assert.equal(dirtyHead.isHead, true);
+  assert.equal(dirtyHead.branchName, "topic");
   assert.ok(geometry.lanes[0].route.length >= 3);
 });
 
@@ -80,9 +81,50 @@ test("the base checkout contributes its dirty count to the trunk head", () => {
     { range: "all", width: 600, dirtyWorktrees: new Map([["/tmp/main", dirtyMain]]) },
   );
   assert.equal(baseDirtyCount(baseData, new Map([["/tmp/main", dirtyMain]])), 2);
-  const head = geometry.trunk.points.find((point) => point.isBaseHead);
+  const head = geometry.trunk.points.find((point) => point.marker === "dirty-head");
+  assert.equal(head.isBaseHead, true);
   assert.equal(head.marker, "dirty-head");
   assert.equal(head.dirtyCount, 2);
+});
+
+test("dirty heads stay visible at now when the selected range excludes the commit", () => {
+  const branch = {
+    name: "topic",
+    hash: "topic1",
+    worktree: "/tmp/topic",
+    merge_base: "base1",
+    fork_time: 900,
+    ahead: 1,
+    behind: 0,
+    commits: [commit("topic1", 1_000)],
+    commits_truncated: false,
+    merged: false,
+    merge_hash: null,
+    merged_at: null,
+  };
+  const data = {
+    ...baseData,
+    now: 100_000,
+    trunk: [commit("base2", 1_000)],
+    branches: [branch],
+  };
+  const dirtyWorktrees = new Map([
+    ["/tmp/main", { is_worktree: false, branch: "main", entries: [{ path: "README.md" }] }],
+    ["/tmp/topic", { entries: [{ path: "app.ts" }] }],
+  ]);
+  const compact = buildTimelineGeometry(data, { range: "24h", width: 600, dirtyWorktrees });
+  const dirtyTrunk = compact.trunk.points.find((point) => point.marker === "dirty-head");
+  const dirtyBranch = compact.lanes[0].points.find((point) => point.marker === "dirty-head");
+  assert.equal(compact.trunk.points.some((point) => point.hash === "base2" && point.marker === "head"), false);
+  assert.equal(compact.lanes[0].points.some((point) => point.hash === "topic1" && point.marker === "head"), false);
+  assert.equal(dirtyTrunk.timestamp, data.now);
+  assert.equal(dirtyTrunk.x, 600);
+  assert.equal(dirtyBranch.timestamp, data.now);
+  assert.equal(dirtyBranch.x, 600);
+
+  const expanded = buildTimelineGeometry(data, { range: "all", width: 600, dirtyWorktrees });
+  assert.equal(expanded.trunk.points.filter((point) => point.hash === "base2").length, 2);
+  assert.equal(expanded.lanes[0].points.filter((point) => point.hash === "topic1").length, 2);
 });
 
 test("merged lane returns to the trunk at merged_at", () => {

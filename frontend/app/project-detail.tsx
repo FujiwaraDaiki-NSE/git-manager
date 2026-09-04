@@ -10,6 +10,7 @@ import { stateBadges } from "./status";
 type ProjectDetailProps = {
   projectKey: string;
   repos: Repo[];
+  revision: number;
   copied: string | null;
   onCopy: (value: string) => void;
   onSelectRepo: (path: string) => void;
@@ -86,6 +87,7 @@ function Metric({ label, value, token }: { label: string; value: number | string
 export default function ProjectDetail({
   projectKey,
   repos,
+  revision,
   copied,
   onCopy,
   onSelectRepo,
@@ -155,7 +157,7 @@ export default function ProjectDetail({
         setTimelineState("error");
       });
     return () => controller.abort();
-  }, [representative?.path, timelineRetry, timelineRevision]);
+  }, [representative?.path, revision, timelineRetry, timelineRevision]);
 
   const displayTimeline = useMemo(() => {
     if (!timeline) return null;

@@ -170,6 +170,18 @@ def _merge_base(repo: str, base: str, branch: str) -> str | None:
     return value
 
 
+def _is_ancestor(repo: str, ancestor: str, descendant: str) -> bool:
+    status, _ = _git_result(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
+    if status == 0:
+        return True
+    if status == 1:
+        return False
+    command = shlex.join(
+        [gitinfo.GIT, "-C", repo, "merge-base", "--is-ancestor", ancestor, descendant]
+    )
+    raise GitCommandError(f"Git command failed ({status}): {command}")
+
+
 def _ahead_behind(repo: str, base: str, branch: str) -> tuple[int, int]:
     """Return branch ahead/behind from the left/right count unchanged.
 
@@ -216,12 +228,12 @@ def _merge_commit(
     raw = _run_required(
         repo,
         [
-            "log",
+            "rev-list",
             "--first-parent",
-            "--ancestry-path",
-            f"{branch}..{base}",
             "--reverse",
-            "--format=%H%x1f%ct%x1f%P",
+            "--pretty=format:%H%x1f%ct%x1f%P",
+            "--no-commit-header",
+            base,
         ],
     )
     if not raw:
@@ -235,10 +247,17 @@ def _merge_commit(
         except ValueError as error:
             raise GitCommandError(f"Git returned an invalid merge timestamp for {branch}") from error
         parents = fields[2].split()
-        if len(parents) >= 2 and branch_hash in parents[1:]:
-            return fields[0], merged_at, parents[0]
-    # A fast-forward merge has no merge commit.  Keep this fact explicit
-    # rather than deriving a synthetic timestamp or hash.
+        if not _is_ancestor(repo, branch_hash, fields[0]):
+            continue
+        # The first base first-parent commit containing the branch tip is the
+        # only merge point we can attribute from Git facts.  Walking the whole
+        # base first-parent is intentional: ``branch..base`` cannot see a
+        # branch tip that is an ancestor of an indirect merge parent or an old
+        # local ref when first-parent traversal is enabled.
+        if len(parents) < 2:
+            break
+        return fields[0], merged_at, parents[0]
+    # Fast-forward and squash histories have no attributable merge commit.
     return None, None, None
 
 
