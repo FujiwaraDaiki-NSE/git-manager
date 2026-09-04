@@ -36,11 +36,12 @@ frontend のルートハンドラ経由でしか到達できない。
 | worktree 一覧と状態                                    | `git worktree list --porcelain`      |
 | stash 数                                               | `git stash list`                     |
 | リモート URL                                           | `git config --get remote.origin.url` |
+| プロジェクト詳細・ブランチタイムライン                 | `origin/HEAD`、`git merge-base`、`git rev-list` など |
 
 一覧には `git status -sb` の 1 行目をそのまま出す。
 
 リポジトリは本体と linked worktree を同じ「プロジェクト」にまとめ、本体、活動順の
-worktree の順で表示する。worktree がないリポジトリは単独行のまま表示する。
+worktree の順で表示する。プロジェクト見出しは worktree がない場合も表示し、詳細へ移動できる。
 `worktree`、`merged`、`prunable` などのフィルタでは、一致した行と所属プロジェクトを
 残す。上部の集計カードからも対応するフィルタへ移動できる。
 
@@ -50,6 +51,12 @@ worktree の順で表示する。worktree がないリポジトリは単独行�
 共通祖先からの経路を小さなサマリーグラフでも確認できる。
 選択中のリポジトリとタブは URL に同期されるため、そのまま共有・再読込できる。
 一覧では上下キーで行を移動し、Enter で選択、Escape で詳細を閉じられる。
+
+プロジェクト見出しの名前を選ぶと、本体と linked worktree をまとめたプロジェクト詳細を
+表示する。`origin/HEAD` をベースに、24時間、7日、30日、すべての実時間範囲で
+ブランチの分岐、コミット、マージ、ahead / behind をスイムレーンとして確認できる。
+点を選ぶと既存のコミット詳細が開き、レーン内は左右キー、レーン間は上下キーで移動する。
+`origin/HEAD` がないプロジェクトはベース未設定として表示し、ブランチを推測しない。
 
 ```
 ## feat/search...origin/feat/search [ahead 2, behind 4]

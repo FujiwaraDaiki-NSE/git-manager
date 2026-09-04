@@ -6,8 +6,9 @@ import {
   GraphView,
 } from "./graph-view";
 import { buildBranchRelationSummary } from "./branch-relation.mjs";
-import { BranchesResponse, CommitDetail, GraphResponse, Repo } from "./types";
-import { codeColor, stateBadges, truncationLabel } from "./status";
+import { BranchesResponse, GraphResponse, Repo } from "./types";
+import { codeColor, stateBadges } from "./status";
+import { CommitPane, useCommitDetail, type LoadState } from "./commit-pane";
 
 export type DetailTab = "status" | "graph" | "branches";
 
@@ -15,14 +16,12 @@ type RepoDetailProps = {
   repo: Repo;
   copied: string | null;
   onCopy: (command: string) => void;
+  onProjectSelect: () => void;
   activeTab: DetailTab;
   onTabChange: (tab: DetailTab) => void;
 };
 
-type LoadState = "idle" | "loading" | "ready" | "error";
-
 const GRAPH_LIMIT = 200;
-const COMMIT_FETCH_DEBOUNCE_MS = 150;
 
 function shellQuote(value: string) {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -129,96 +128,6 @@ function StatusPane({ repo }: { repo: Repo }) {
           <div className="muted-line">変更ファイルはありません</div>
         )}
       </div>
-    </section>
-  );
-}
-
-function CommitPane({
-  detail,
-  state,
-  error,
-  onRetry,
-  onCopy,
-}: {
-  detail: CommitDetail | null;
-  state: LoadState;
-  error: string | null;
-  onRetry: () => void;
-  onCopy: (command: string) => void;
-}) {
-  if (state === "idle") return null;
-  return (
-    <section
-      aria-busy={state === "loading"}
-      aria-labelledby="commit-pane-title"
-      className="commit-pane"
-    >
-      <div className="section-head">
-        <div>
-          <h3 id="commit-pane-title">コミット詳細</h3>
-          {detail && <code className="cmdhint">{detail.command}</code>}
-        </div>
-        {detail && (
-          <button
-            className="copy"
-            type="button"
-            onClick={() => onCopy(detail.command)}
-          >
-            コマンドをコピー
-          </button>
-        )}
-      </div>
-      {state === "loading" && (
-        <div className="loading" role="status">
-          コミット詳細を取得中…
-        </div>
-      )}
-      {state === "error" && (
-        <div className="inline-error" role="alert">
-          コミット詳細を取得できませんでした。
-          <button className="copy" type="button" onClick={onRetry}>
-            再取得
-          </button>
-          {error && <span className="sr-only">{error}</span>}
-        </div>
-      )}
-      {state === "ready" && detail && (
-        <>
-          <div className="commit-meta">
-            <strong>{detail.subject || "(no subject)"}</strong>
-            <span>{detail.author}</span>
-            <span>{detail.date}</span>
-          </div>
-          <div className="numstat" aria-label="変更ファイルの集計">
-            <div className="numstat-head">
-              <span>追加</span>
-              <span>削除</span>
-              <span>パス</span>
-            </div>
-            {detail.files.map((file) => (
-              <div className="numstat-row" key={file.path}>
-                <span className="additions">{file.additions}</span>
-                <span className="deletions">{file.deletions}</span>
-                <span className="file-path">
-                  {file.path}
-                  {file.binary && <span className="binary"> (binary)</span>}
-                </span>
-              </div>
-            ))}
-            {detail.files.length === 0 && (
-              <div className="muted-line">変更ファイルはありません</div>
-            )}
-          </div>
-          <pre className="patch" aria-label="コミットの diff">
-            {detail.patch}
-          </pre>
-          {detail.patch_truncated && (
-            <div className="truncated" role="status">
-              {truncationLabel(200)}
-            </div>
-          )}
-        </>
-      )}
     </section>
   );
 }
@@ -374,6 +283,7 @@ export default function RepoDetail({
   repo,
   copied,
   onCopy,
+  onProjectSelect,
   activeTab,
   onTabChange,
 }: RepoDetailProps) {
@@ -383,10 +293,7 @@ export default function RepoDetail({
   const [graphError, setGraphError] = useState<string | null>(null);
   const [graphRetry, setGraphRetry] = useState(0);
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
-  const [commit, setCommit] = useState<CommitDetail | null>(null);
-  const [commitState, setCommitState] = useState<LoadState>("idle");
-  const [commitError, setCommitError] = useState<string | null>(null);
-  const [commitRetry, setCommitRetry] = useState(0);
+  const commitLoad = useCommitDetail(repo.path, selectedHash, activeTab === "graph");
   const [branches, setBranches] = useState<BranchesResponse | null>(null);
   const [branchesState, setBranchesState] = useState<LoadState>("idle");
   const [branchesError, setBranchesError] = useState<string | null>(null);
@@ -395,9 +302,6 @@ export default function RepoDetail({
 
   useEffect(() => {
     setSelectedHash(null);
-    setCommit(null);
-    setCommitState("idle");
-    setCommitError(null);
     setShowMerged(false);
   }, [repo.path]);
 
@@ -470,45 +374,6 @@ export default function RepoDetail({
     repo.path,
   ]);
 
-  useEffect(() => {
-    if (activeTab !== "graph") {
-      setCommit(null);
-      setCommitState("idle");
-      return;
-    }
-    if (!selectedHash) {
-      setCommit(null);
-      setCommitState("idle");
-      return;
-    }
-    const controller = new AbortController();
-    setCommit(null);
-    setCommitState("loading");
-    setCommitError(null);
-    const timer = window.setTimeout(() => {
-      void getJson<CommitDetail>(
-        `/api/repo/commit?${apiQuery(repo.path, { hash: selectedHash })}`,
-        controller.signal,
-      )
-        .then((value) => {
-          setCommit(value);
-          setCommitState("ready");
-        })
-        .catch((reason: unknown) => {
-          if (reason instanceof DOMException && reason.name === "AbortError")
-            return;
-          setCommitError(
-            reason instanceof Error ? reason.message : "unknown error",
-          );
-          setCommitState("error");
-        });
-    }, COMMIT_FETCH_DEBOUNCE_MS);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [activeTab, repo.path, selectedHash, commitRetry]);
-
   const virtualNode = useMemo(() => {
     if (
       !graph ||
@@ -535,7 +400,10 @@ export default function RepoDetail({
     <div className="detail">
       <div className="detail-header">
         <div className="detail-breadcrumb">
-          {projectName(repo)} <span>›</span>{" "}
+          <button className="breadcrumb-project" type="button" onClick={onProjectSelect}>
+            {projectName(repo)}
+          </button>
+          <span>›</span>{" "}
           {repo.branch || (repo.detached ? "detached HEAD" : "本体")}
         </div>
         <div className="detail-path-row">
@@ -664,10 +532,10 @@ export default function RepoDetail({
 
       {activeTab === "graph" && (
         <CommitPane
-          detail={commit}
-          state={commitState}
-          error={commitError}
-          onRetry={() => setCommitRetry((value) => value + 1)}
+          detail={commitLoad.detail}
+          state={commitLoad.state}
+          error={commitLoad.error}
+          onRetry={commitLoad.retry}
           onCopy={onCopy}
         />
       )}

@@ -1,6 +1,33 @@
 export type Entry = { xy: string; path: string };
 export type Count = { xy: string; count: number };
 export type Commit = { hash: string; subject: string; author: string; date: string };
+export type TimelineCommit = Commit & {
+  short: string;
+  timestamp: number;
+};
+export type TimelineBase = { name: string; ref: string; hash: string };
+export type TimelineBranch = {
+  name: string;
+  hash: string;
+  worktree: string | null;
+  merge_base: string | null;
+  fork_time: number | null;
+  ahead: number;
+  behind: number;
+  commits: TimelineCommit[];
+  commits_truncated: boolean;
+  merged: boolean;
+  merge_hash: string | null;
+  merged_at: number | null;
+};
+export type TimelineResponse = {
+  base: TimelineBase | null;
+  now: number;
+  trunk: TimelineCommit[];
+  branches: TimelineBranch[];
+  command: string;
+  trunk_truncated?: boolean;
+};
 export type NextCommand = { command: string; reason: string };
 
 export type GraphRefKind = "head" | "branch" | "remote" | "tag";
