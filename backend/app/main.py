@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app import config, detail, gitinfo, graph, paths, scanner, store
+from app import config, detail, gitinfo, graph, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
 
@@ -125,6 +125,17 @@ def _get_commit_sync(host_path: str, repo: str, commit_hash: str) -> dict[str, A
 def _get_branches_sync(host_path: str, repo: str) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return detail.get_branches(repo)
+
+
+def _get_project_sync(
+    host_path: str,
+    repo: str,
+    project_id: str,
+    state_rows: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Build one project payload while sharing the repository Git lock."""
+    with _repo_lock(host_path):
+        return project.build(repo, project_id, state_rows)
 
 
 def _upsert(repo: dict[str, Any]) -> None:
@@ -947,6 +958,57 @@ async def get_repos() -> dict[str, Any]:
             "log": "git log --oneline --graph --all",
         },
     }
+
+
+@app.get("/api/projects")
+async def get_projects() -> dict[str, Any]:
+    """Return lightweight project cards without loading graph/diff data."""
+    with STATE_LOCK:
+        snapshot = {path: dict(repo) for path, repo in STATE.items()}
+    projects = project.summary_rows(snapshot)
+    return {
+        "count": len(projects),
+        "scanning": scanning["active"],
+        "projects": projects,
+    }
+
+
+@app.get("/api/project")
+async def get_project(path: str) -> dict[str, Any]:
+    """Return one project control payload composed from Git observations."""
+    with STATE_LOCK:
+        selected = STATE.get(path)
+        if selected is None:
+            raise HTTPException(status_code=404, detail="リポジトリが見つかりません")
+        project_id = selected.get("common_dir")
+        project_id = project_id if isinstance(project_id, str) and project_id else path
+        siblings = {
+            sibling_path: dict(row)
+            for sibling_path, row in STATE.items()
+            if row.get("common_dir") == project_id
+            or sibling_path == project_id
+        }
+        representative = next(
+            (
+                sibling_path
+                for sibling_path, row in siblings.items()
+                if row.get("is_worktree") is False
+            ),
+            path,
+        )
+    repo = paths.to_container(representative)
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        pool,
+        _get_project_sync,
+        representative,
+        repo,
+        project_id,
+        siblings,
+    )
+    if result is None:
+        raise HTTPException(status_code=502, detail="プロジェクトの Git 情報を取得できませんでした")
+    return result
 
 
 @app.get("/api/repo/graph")
