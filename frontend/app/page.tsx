@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
+import ProjectDetail from "./project-detail";
 import { hasConflict, isDirty, type Repo } from "./types";
 import { stateBadges } from "./status";
 
@@ -15,6 +16,9 @@ type Filter =
   | "prunable"
   | "active";
 type Grouping = "project" | "none" | "parent" | "remote";
+type Selection =
+  | { type: "repo"; path: string }
+  | { type: "project"; commonDir: string };
 
 function since(iso?: string) {
   if (!iso) return { text: "—", stale: false };
@@ -158,7 +162,7 @@ export default function Page() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [grouping, setGrouping] = useState<Grouping>("project");
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("graph");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
@@ -319,7 +323,10 @@ export default function Page() {
       )
       .filter((group) => group.repos.length > 0);
   }, [all, filter, grouping, projectRemotes, query]);
-  const projectKeys = new Set(all.map((repo) => repo.common_dir));
+  const projectKeys = useMemo(
+    () => new Set([...repos.values()].map((repo) => repo.common_dir)),
+    [repos],
+  );
   const stats = {
     projects: new Set(all.map((repo) => repo.common_dir)).size,
     worktrees: all.length,
@@ -332,21 +339,33 @@ export default function Page() {
     ),
     prunable: all.filter((repo) => repo.worktree_state === "prunable").length,
   };
+  const selectedPath = selection?.type === "repo" ? selection.path : null;
   const selected = selectedPath ? (repos.get(selectedPath) ?? null) : null;
+  const selectedProject =
+    selection?.type === "project"
+      ? all.filter((repo) => repo.common_dir === selection.commonDir)
+      : [];
+  const hasSelection = Boolean(selected) || selectedProject.length > 0;
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const path = params.get("repo");
+    const project = params.get("project");
     const tab = params.get("tab");
-    if (path && repos.has(path)) setSelectedPath(path);
+    if (project && projectKeys.has(project))
+      setSelection({ type: "project", commonDir: project });
+    else if (path && repos.has(path)) setSelection({ type: "repo", path });
     if (tab === "status" || tab === "graph" || tab === "branches")
       setActiveTab(tab);
-  }, [repos]);
+  }, [projectKeys, repos]);
   const updateUrl = useCallback(
-    (path: string | null, tab: DetailTab | null) => {
+    (nextSelection: Selection | null, tab: DetailTab | null) => {
       const url = new URL(window.location.href);
-      if (path) url.searchParams.set("repo", path);
-      else url.searchParams.delete("repo");
-      if (path && tab) url.searchParams.set("tab", tab);
+      url.searchParams.delete("repo");
+      url.searchParams.delete("project");
+      if (nextSelection?.type === "repo") url.searchParams.set("repo", nextSelection.path);
+      if (nextSelection?.type === "project")
+        url.searchParams.set("project", nextSelection.commonDir);
+      if (nextSelection?.type === "repo" && tab) url.searchParams.set("tab", tab);
       else url.searchParams.delete("tab");
       window.history.replaceState({}, "", url);
     },
@@ -355,14 +374,23 @@ export default function Page() {
   const selectRepo = useCallback(
     (path: string) => {
       lastFocused.current = path;
-      setSelectedPath(path);
+      const nextSelection: Selection = { type: "repo", path };
+      setSelection(nextSelection);
       setActiveTab("graph");
-      updateUrl(path, "graph");
+      updateUrl(nextSelection, "graph");
+    },
+    [updateUrl],
+  );
+  const selectProject = useCallback(
+    (commonDir: string) => {
+      const nextSelection: Selection = { type: "project", commonDir };
+      setSelection(nextSelection);
+      updateUrl(nextSelection, null);
     },
     [updateUrl],
   );
   const closeDetail = useCallback(() => {
-    setSelectedPath(null);
+    setSelection(null);
     updateUrl(null, null);
     window.setTimeout(() => {
       if (lastFocused.current)
@@ -372,20 +400,20 @@ export default function Page() {
   const changeTab = useCallback(
     (tab: DetailTab) => {
       setActiveTab(tab);
-      if (selectedPath) updateUrl(selectedPath, tab);
+      if (selection?.type === "repo") updateUrl(selection, tab);
     },
-    [selectedPath, updateUrl],
+    [selection, updateUrl],
   );
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && selectedPath) {
+      if (event.key === "Escape" && selection) {
         event.preventDefault();
         closeDetail();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeDetail, selectedPath]);
+  }, [closeDetail, selection]);
   const copy = (value: string) =>
     navigator.clipboard?.writeText(value).then(() => {
       setCopied(value);
@@ -526,14 +554,14 @@ export default function Page() {
         </button>
       </div>
       <div className="cmdhint">git status -sb</div>
-      <div className={`board-layout${selected ? " has-selection" : ""}`}>
+      <div className={`board-layout${hasSelection ? " has-selection" : ""}`}>
         <section className="repo-group" aria-label="リポジトリ一覧">
           {groups.flatMap((group) => {
             const isProject = grouping === "project";
             const hasWorktree = group.allRepos.some((repo) => repo.is_worktree);
             const showHeader =
               Boolean(group.label) &&
-              (!isProject || hasWorktree || group.repos.length > 1);
+              (isProject || hasWorktree || group.repos.length > 1);
             const isOpen = !isProject || !expanded.has(group.key);
             const children = isOpen ? group.repos : group.repos.slice(0, 1);
             const worktrees = children.filter((repo) => repo.is_worktree);
@@ -547,28 +575,37 @@ export default function Page() {
               showHeader ? (
                 isProject ? (
                   <div
-                    className="group-heading project-heading"
+                    className={`group-heading project-heading${selection?.type === "project" && selection.commonDir === group.key ? " project-heading-selected" : ""}`}
                     key={`heading-${group.key}`}
                   >
-                    <button
-                      type="button"
-                      className="project-toggle"
-                      aria-expanded={isOpen}
-                      onClick={() =>
-                        setExpanded((current) => {
-                          const next = new Set(current);
-                          if (next.has(group.key)) next.delete(group.key);
-                          else next.add(group.key);
-                          return next;
-                        })
-                      }
-                    >
-                      <span aria-hidden="true">{isOpen ? "▼" : "▶"}</span>
-                      <span className="project-primary">
-                        <strong title={group.key}>{project.name}</strong>
-                        <span title={project.remote}>{project.remote}</span>
-                      </span>
-                    </button>
+                    <div className="project-primary-actions">
+                      <button
+                        type="button"
+                        className="project-collapse"
+                        aria-label={`${project.name} を${isOpen ? "折りたたむ" : "展開する"}`}
+                        aria-expanded={isOpen}
+                        onClick={() =>
+                          setExpanded((current) => {
+                            const next = new Set(current);
+                            if (next.has(group.key)) next.delete(group.key);
+                            else next.add(group.key);
+                            return next;
+                          })
+                        }
+                      >
+                        <span aria-hidden="true">{isOpen ? "▼" : "▶"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="project-toggle"
+                        onClick={() => selectProject(group.key)}
+                      >
+                        <span className="project-primary">
+                          <strong title={group.key}>{project.name}</strong>
+                          <span title={project.remote}>{project.remote}</span>
+                        </span>
+                      </button>
+                    </div>
                     <span className="project-empty">—</span>
                     <span className="project-summary">
                       {project.worktrees} worktree · merged {project.merged} ·
@@ -703,15 +740,29 @@ export default function Page() {
             ];
           })}
         </section>
-        {selected && (
-          <aside className="detail-pane" aria-label="リポジトリ詳細">
-            <RepoDetail
-              repo={selected}
-              copied={copied}
-              onCopy={copy}
-              activeTab={activeTab}
-              onTabChange={changeTab}
-            />
+        {hasSelection && selection && (
+          <aside
+            className="detail-pane"
+            aria-label={selection.type === "project" ? "プロジェクト詳細" : "リポジトリ詳細"}
+          >
+            {selection.type === "repo" && selected ? (
+              <RepoDetail
+                repo={selected}
+                copied={copied}
+                onCopy={copy}
+                onProjectSelect={() => selectProject(selected.common_dir)}
+                activeTab={activeTab}
+                onTabChange={changeTab}
+              />
+            ) : selection.type === "project" ? (
+              <ProjectDetail
+                projectKey={selection.commonDir}
+                repos={selectedProject}
+                copied={copied}
+                onCopy={copy}
+                onSelectRepo={selectRepo}
+              />
+            ) : null}
             <button
               className="detail-close"
               type="button"
@@ -723,7 +774,7 @@ export default function Page() {
           </aside>
         )}
       </div>
-      {selected && (
+      {hasSelection && (
         <div
           className="detail-scrim"
           aria-hidden="true"

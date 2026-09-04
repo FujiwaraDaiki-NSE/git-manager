@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app import config, detail, gitinfo, graph, paths, scanner, store
+from app import config, detail, gitinfo, graph, paths, scanner, store, timeline
 from app.bus import bus
 from app.watcher import Watcher
 
@@ -125,6 +125,11 @@ def _get_commit_sync(host_path: str, repo: str, commit_hash: str) -> dict[str, A
 def _get_branches_sync(host_path: str, repo: str) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return detail.get_branches(repo)
+
+
+def _get_timeline_sync(host_path: str, repo: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return timeline.build(repo)
 
 
 def _upsert(repo: dict[str, Any]) -> None:
@@ -996,6 +1001,43 @@ async def get_repo_branches(path: str) -> dict[str, Any]:
     result = await loop.run_in_executor(pool, _get_branches_sync, path, repo)
     if result is None:
         raise HTTPException(status_code=502, detail="ブランチ一覧を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/timeline")
+async def get_repo_timeline(path: str) -> dict[str, Any]:
+    """Return the project timeline for any known checkout in the project."""
+    try:
+        checkout = path
+        repo = _known_repo(checkout)
+    except HTTPException as error:
+        if error.status_code != 404:
+            raise
+        # A project URL uses common_dir as its identity.  The main checkout
+        # path is preferred, but a linked checkout is sufficient for all Git
+        # plumbing used by timeline.build.
+        with STATE_LOCK:
+            candidates = [
+                (candidate_path, candidate)
+                for candidate_path, candidate in STATE.items()
+                if isinstance(candidate.get("common_dir"), str)
+                and _path_key(candidate["common_dir"]) == _path_key(path)
+            ]
+        if not candidates:
+            raise
+        checkout, _candidate = next(
+            (
+                item
+                for item in candidates
+                if item[1].get("is_worktree") is False
+            ),
+            candidates[0],
+        )
+        repo = paths.to_container(checkout)
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(pool, _get_timeline_sync, checkout, repo)
+    if result is None:
+        raise HTTPException(status_code=502, detail="タイムラインを取得できませんでした")
     return result
 
 
