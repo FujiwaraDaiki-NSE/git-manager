@@ -398,9 +398,14 @@ def build(
     worktrees, worktree_by_branch, main_path = _worktree_rows(repo, common_host, exact_rows)
     branch_data = detail.get_branches(repo)
     if branch_data is None:
-        branch_data = {"local": [], "remotes": [], "command": "git branch -vv"}
-    local = branch_data.get("local") or []
-    remotes = branch_data.get("remotes") or []
+        # Branch facts are required to build a trustworthy lane register. Do
+        # not turn an acquisition failure into an empty project (or a false
+        # zero-lane result); let the API surface the unavailable project.
+        return None
+    local = branch_data.get("local")
+    remotes = branch_data.get("remotes")
+    if not isinstance(local, list) or not isinstance(remotes, list):
+        return None
 
     default_branch = gitinfo.default_branch(repo)
     default_ref = f"refs/remotes/origin/{default_branch}" if default_branch else None
@@ -595,7 +600,12 @@ def build(
         key=lambda event: event["occurred_at"],
         default=None,
     )
-    merged_count = sum(1 for lane in lanes if lane.get("merged") is True)
+    merged_count = sum(
+        1
+        for lane in lanes
+        if lane.get("merged") is True
+        and (default_branch is None or lane.get("branch") != default_branch)
+    )
     prunable_count = sum(1 for item in worktrees if item.get("state") == "prunable")
     locked_count = sum(1 for item in worktrees if item.get("state") == "locked")
     main_row = exact_rows.get(main_path) or normalized_state.get(_key(main_path))
@@ -703,7 +713,9 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
         if checkout:
             branch_data = detail.get_branches(paths.to_container(checkout))
             if branch_data is not None:
-                lane_count = len(branch_data.get("local") or [])
+                local_branches = branch_data.get("local")
+                if isinstance(local_branches, list):
+                    lane_count = len(local_branches)
         largest_difference_lane: str | None = None
         largest_difference = -1
         if checkout:

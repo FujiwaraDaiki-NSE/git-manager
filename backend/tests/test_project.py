@@ -102,6 +102,29 @@ def test_build_does_not_guess_default_branch_without_origin_head(tmp_path: Path)
     assert all(lane["default_ahead"] is None and lane["default_behind"] is None for lane in result["lanes"])
 
 
+def test_branch_fact_failure_is_unavailable_instead_of_zero_lanes(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.com")
+    commit(repo, "initial")
+    state = {
+        str(repo): {
+            "path": str(repo),
+            "common_dir": str(repo),
+            "is_worktree": False,
+            "entries": [],
+        }
+    }
+    monkeypatch.setattr(detail, "get_branches", lambda _repo: None)
+
+    assert project.build(str(repo), str(repo), state) is None
+    summary = project.summary_rows(state)
+    assert len(summary) == 1
+    assert summary[0]["lane_count"] is None
+
+
 def test_branch_merge_and_summary_lane_count_use_project_git_facts(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     origin = tmp_path / "origin.git"
@@ -164,3 +187,35 @@ def test_branch_merge_and_summary_lane_count_use_project_git_facts(tmp_path: Pat
     all_history = project.build(str(repo), str(repo), state, range_name="all")
     assert all_history is not None
     assert len(all_history["events"]) > len(result["events"])
+
+
+def test_project_maintenance_excludes_the_default_branch_from_merged_count(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    origin = tmp_path / "origin.git"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.com")
+    commit(repo, "initial")
+    origin.mkdir()
+    git(origin, "init", "--bare", "-q", "-b", "main")
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "remote", "set-head", "origin", "main")
+    git(repo, "branch", "topic")
+
+    state = {
+        str(repo): {
+            "path": str(repo),
+            "common_dir": str(repo),
+            "is_worktree": False,
+            "entries": [],
+            "remote": str(origin),
+        }
+    }
+    result = project.build(str(repo), str(repo), state)
+
+    assert result is not None
+    assert next(lane for lane in result["lanes"] if lane["branch"] == "main")["merged"] is True
+    assert next(lane for lane in result["lanes"] if lane["branch"] == "topic")["merged"] is True
+    assert result["maintenance"]["merged"] == 1

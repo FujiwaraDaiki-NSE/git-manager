@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { ancestryRows, flowEventKey, layoutFlowEvents, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -175,6 +175,7 @@ function FlowEventButton({
   preview,
   popoverBelow,
   onNavigate,
+  onRegister,
   onPreview,
   onSelect,
 }: {
@@ -183,6 +184,7 @@ function FlowEventButton({
   preview: boolean;
   popoverBelow: boolean;
   onNavigate: (event: FlowEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => void;
+  onRegister: (id: string, node: HTMLButtonElement | null) => void;
   onPreview: (id: string | null) => void;
   onSelect: (event: FlowEvent) => void;
 }) {
@@ -205,6 +207,8 @@ function FlowEventButton({
       <button
         aria-label={`${laneLabel(event.lane)} ${shortHash(event.row.hash)} ${event.row.subject}`}
         className={`flow-event-button${selected ? " is-selected" : ""}`}
+        data-flow-event-key={event.id}
+        ref={(node) => onRegister(event.id, node)}
         onPointerDown={(pointerEvent) => {
           if (pointerEvent.pointerType !== "touch") return;
           touchPointerRef.current = true;
@@ -232,9 +236,15 @@ function FlowEventButton({
           select();
         }}
         onKeyDown={(keyboardEvent) => {
-          if (keyboardEvent.key === "ArrowLeft" || keyboardEvent.key === "ArrowRight" || keyboardEvent.key === "ArrowUp" || keyboardEvent.key === "ArrowDown") {
+          const action = flowKeyboardAction(keyboardEvent.key);
+          if (action === "move") {
             keyboardEvent.preventDefault();
-            onNavigate(event, keyboardEvent.key);
+            onNavigate(event, keyboardEvent.key as "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown");
+            return;
+          }
+          if (action === "select") {
+            keyboardEvent.preventDefault();
+            select();
           }
         }}
         onFocus={() => onPreview(event.id)}
@@ -296,6 +306,11 @@ function FlowMap({
 }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [showMerged, setShowMerged] = useState(false);
+  const flowScrollRef = useRef<HTMLDivElement>(null);
+  const firstLaneLabelRef = useRef<HTMLDivElement>(null);
+  const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
+  const [renderedLabelWidth, setRenderedLabelWidth] = useState(220);
   const graphRows = project.graph?.rows ?? [];
   const lanes = useMemo(() => {
     const source = project.lanes.filter((lane) => showMerged || lane.branch === project.default_branch || !isFoldedMerged(lane));
@@ -331,6 +346,23 @@ function FlowMap({
     }
     return events;
   }, [laneRows, lanes, visibleEventHashes]);
+  useEffect(() => {
+    const scroll = flowScrollRef.current;
+    const label = firstLaneLabelRef.current;
+    if (!scroll || !label) return;
+    const updateWidth = () => {
+      const labelWidth = Math.round(label.getBoundingClientRect().width);
+      setRenderedLabelWidth((current) => current === labelWidth ? current : labelWidth);
+      const next = Math.max(0, Math.round(scroll.clientWidth - labelWidth));
+      setAvailableTrackWidth((current) => current === next ? current : next);
+    };
+    updateWidth();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(scroll);
+    observer.observe(label);
+    return () => observer.disconnect();
+  }, [lanes.length]);
   const allTimes = allEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
   const now = Date.now();
   const rangeCutoff = range === "24h" ? now - 86_400_000 : range === "7d" ? now - 604_800_000 : null;
@@ -359,10 +391,29 @@ function FlowMap({
       pointOffset: 0,
       id: flowEventKey(lane.id, row.hash),
     }));
-  const trackWidth = Math.max(440, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
-  const events = layoutFlowEvents(positionedEvents, trackWidth);
+  const minimumTrackWidth = Math.max(440, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
+  // A track grows to the available viewport width when it fits, and becomes
+  // horizontally scrollable when 44px hit areas need more room.  The same
+  // resolved width is passed to the per-lane layout and rendered as the
+  // explicit track width, keeping point/offset/popover geometry aligned.
+  const trackWidth = Math.max(minimumTrackWidth, availableTrackWidth);
+  const events = lanes.flatMap((lane) => layoutFlowEvents(
+    positionedEvents.filter((event) => event.lane.id === lane.id),
+    trackWidth,
+  ));
   const eventsByLane = new Map<string, FlowEvent[]>();
   for (const event of events) eventsByLane.set(event.lane.id, [...(eventsByLane.get(event.lane.id) ?? []), event]);
+  const mergeBasePositions = new Map(lanes.map((lane) => {
+    const mergeBaseRow = lane.merge_base ? graphRows.find((row) => row.hash === lane.merge_base) : undefined;
+    return [lane.id, {
+      ...mergeBasePosition(mergeBaseRow?.date ?? null, minTime, maxTime),
+      date: mergeBaseRow?.date ?? null,
+    }];
+  }));
+  const registerEventButton = useCallback((id: string, node: HTMLButtonElement | null) => {
+    if (node) eventButtonRefs.current.set(id, node);
+    else eventButtonRefs.current.delete(id);
+  }, []);
   const navigateEvent = useCallback((current: FlowEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => {
     const laneIndex = lanes.findIndex((lane) => lane.id === current.lane.id);
     if (laneIndex < 0) return;
@@ -377,8 +428,8 @@ function FlowMap({
       const candidates = nextLane ? [...(eventsByLane.get(nextLane.id) ?? [])] : [];
       target = candidates.sort((a, b) => Math.abs(a.x - current.x) - Math.abs(b.x - current.x))[0];
     }
-    if (target) onSelect(target);
-  }, [eventsByLane, lanes, onSelect]);
+    if (target) eventButtonRefs.current.get(target.id)?.focus();
+  }, [eventsByLane, lanes]);
   const defaultIndex = lanes.findIndex((lane) => lane.branch === project.default_branch);
   const rowHeight = 72;
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && isFoldedMerged(lane)).length;
@@ -429,10 +480,11 @@ function FlowMap({
           className="flow-scroll"
           role="region"
           aria-label="Gitフローマップ（横スクロール可能）"
+          ref={flowScrollRef}
           style={{ "--flow-popover-space": previewId ? "360px" : "0px" } as React.CSSProperties}
           tabIndex={0}
         >
-          <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px` } as React.CSSProperties}>
+          <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
             <span>分岐関係 / 作業先端</span>
             <div className="flow-axis-track">
               <span>{new Date(minTime).toLocaleDateString("ja-JP")}</span>
@@ -440,7 +492,7 @@ function FlowMap({
               <span>{new Date(maxTime).toLocaleDateString("ja-JP")}</span>
             </div>
           </div>
-          <div className="flow-rows" style={{ "--flow-row-height": `${rowHeight}px`, "--flow-lanes": lanes.length, "--flow-track-min-width": `${trackWidth}px` } as React.CSSProperties}>
+          <div className="flow-rows" style={{ "--flow-row-height": `${rowHeight}px`, "--flow-lanes": lanes.length, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
           <svg
             aria-hidden="true"
             className="flow-connections"
@@ -450,11 +502,11 @@ function FlowMap({
             <line className="flow-now-line" x1={nowX * 10} x2={nowX * 10} y1="0" y2={lanes.length * rowHeight} />
             {lanes.map((lane, index) => {
               const laneEvents = eventsByLane.get(lane.id) ?? [];
-              const first = laneEvents[0];
               const last = laneEvents.at(-1);
               const baseline = defaultIndex >= 0 ? defaultIndex * rowHeight + rowHeight / 2 : null;
               const y = index * rowHeight + rowHeight / 2;
-              const startX = lane.merge_base && first ? first.x * 10 : 0;
+              const mergeBase = mergeBasePositions.get(lane.id);
+              const startX = mergeBase?.available ? mergeBase.x * 10 : 0;
               const endX = last ? last.x * 10 : startX;
               const isDefault = lane.branch === project.default_branch;
               return (
@@ -469,9 +521,10 @@ function FlowMap({
           </svg>
           {lanes.map((lane, index) => {
             const laneEvents = eventsByLane.get(lane.id) ?? [];
+            const mergeBase = mergeBasePositions.get(lane.id);
             return (
               <div className="flow-row" key={lane.id}>
-                <div className="flow-lane-label">
+                <div className="flow-lane-label" ref={index === 0 ? firstLaneLabelRef : undefined}>
                   <div className="flow-lane-title">
                     <span className="lane-shape" aria-hidden="true" />
                     <strong title={laneLabel(lane)}>{laneLabel(lane)}</strong>
@@ -481,6 +534,7 @@ function FlowMap({
                     <span className={`lane-state ${laneStateClass(lane)}`}>{laneState(lane)}</span>
                     <span>agent 状態不明</span>
                     <span title={lane.path ?? undefined}>{lane.path ?? "パス未取得"}</span>
+                    <span className={mergeBase?.outside ? "flow-range-note" : undefined}>{!lane.merge_base ? "分岐点 未取得" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点 表示範囲外" : "分岐点 表示中"}</span>
                   </div>
                 </div>
                 <div className="flow-track">
@@ -490,6 +544,7 @@ function FlowMap({
                       event={event}
                       key={event.id}
                       onPreview={setPreviewId}
+                      onRegister={registerEventButton}
                       onNavigate={navigateEvent}
                       onSelect={onSelect}
                       popoverBelow={index < 2}
@@ -498,11 +553,15 @@ function FlowMap({
                     />
                   ))}
                   <span className="flow-lane-end" style={{ left: `${laneEvents.at(-1)?.x ?? 0}%` }} aria-hidden="true" />
+                  <span className={`flow-lane-end-label${(laneEvents.at(-1)?.x ?? 0) < 24 ? " flow-lane-end-label-left" : (laneEvents.at(-1)?.x ?? 0) > 76 ? " flow-lane-end-label-right" : ""}`} style={(laneEvents.at(-1)?.x ?? 0) >= 24 && (laneEvents.at(-1)?.x ?? 0) <= 76 ? { left: `${laneEvents.at(-1)?.x ?? 0}%` } : undefined}>
+                    <span>Git 最終</span>
+                    <time dateTime={lane.last_commit?.date ?? undefined}>{relativeTime(lane.last_commit?.date)} · {exactDate(lane.last_commit?.date)}</time>
+                  </span>
                 </div>
               </div>
             );
           })}
-          <div className="flow-current-label" style={{ left: `calc(${nowX}% + 220px)` }} aria-hidden="true">
+          <div className="flow-current-label" style={{ left: `${renderedLabelWidth + (nowX * trackWidth) / 100}px` }} aria-hidden="true">
             {timeline === 100 ? "現在" : "観測時点"}
           </div>
           </div>
@@ -736,18 +795,29 @@ function dialogFocusables(root: HTMLElement) {
   ));
 }
 
+type DialogEntry = { root: HTMLElement; onClose: () => void };
+const dialogStack: DialogEntry[] = [];
+
 function useDialogKeyboard(
   rootRef: React.RefObject<HTMLElement>,
   closeRef: React.RefObject<HTMLElement>,
   onClose: () => void,
 ) {
   useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
+    const entry: DialogEntry = { root, onClose };
+    dialogStack.push(entry);
     const onKeyDown = (event: KeyboardEvent) => {
+      // Nested Git details share the document listener. Only the topmost
+      // dialog may consume Escape or trap Tab; lower selection state and its
+      // URL remain intact until the nested dialog is closed.
+      if (dialogStack.at(-1) !== entry) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         onClose();
         return;
       }
@@ -772,6 +842,8 @@ function useDialogKeyboard(
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown, true);
+      const index = dialogStack.indexOf(entry);
+      if (index >= 0) dialogStack.splice(index, 1);
       if (previous?.isConnected && !rootRef.current?.contains(previous)) previous.focus();
     };
   }, [closeRef, onClose, rootRef]);
@@ -944,7 +1016,7 @@ export default function ProjectControl() {
         <button className="rescan-button" disabled={scanning} type="button" onClick={() => void fetch("/api/rescan", { method: "POST" })}>{scanning ? "走査中…" : "再走査"}</button>
       </header>
       <section className="control-hero" aria-labelledby="project-title">
-        <div className="control-hero-main"><p className="eyebrow">PROJECT CONTROL / GIT FACTS</p><h1 id="project-title">{project.name}</h1><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div></div>
+        <div className="control-hero-main"><p className="eyebrow">PROJECT CONTROL / GIT FACTS</p><h1 id="project-title">{project.name}</h1><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">LATEST GIT FACT</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div></div>
         <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div><div><strong>{project.maintenance.merged}</strong><span>merged</span></div><div><strong>{project.maintenance.prunable + project.maintenance.locked}</strong><span>保守対象</span></div><div className="metric-unknown"><strong>?</strong><span>agent状態</span></div></div>
       </section>
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">

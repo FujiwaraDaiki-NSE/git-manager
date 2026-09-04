@@ -76,8 +76,34 @@ export function mobileEventAction({ isMobile, isTouch, previewAtPointerDown }) {
   return isMobile && isTouch && !previewAtPointerDown ? "preview" : "select";
 }
 
-export function shouldFoldMergedLane({ merged, is_worktree, dirty, conflict }) {
-  return merged === true && is_worktree !== true && dirty !== true && conflict !== true;
+export function shouldFoldMergedLane({ merged, is_worktree, dirty, conflict, worktree_state }) {
+  const completed = merged === true || worktree_state === "prunable";
+  return completed && is_worktree !== true && dirty !== true && conflict !== true;
+}
+
+/**
+ * Return the x position of a merge-base in the currently displayed time
+ * window.  The commit can be outside the window, but its real position is
+ * still used before clamping to the left/right edge so a line never starts at
+ * the first visible event by accident.
+ */
+export function mergeBasePosition(mergeBaseDate, minTime, maxTime) {
+  const base = new Date(mergeBaseDate || "").getTime();
+  if (!Number.isFinite(base) || !Number.isFinite(minTime) || !Number.isFinite(maxTime) || maxTime <= minTime) {
+    return { x: 0, outside: false, available: false };
+  }
+  const raw = ((base - minTime) / (maxTime - minTime)) * 100;
+  return {
+    x: Math.min(100, Math.max(0, raw)),
+    outside: raw < 0 || raw > 100,
+    available: true,
+  };
+}
+
+export function flowKeyboardAction(key) {
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) return "move";
+  if (key === "Enter" || key === " " || key === "Spacebar") return "select";
+  return "none";
 }
 
 function timestamp(event) {
@@ -93,9 +119,13 @@ function timestamp(event) {
 export function layoutFlowEvents(events, trackWidth = 440) {
   const ordered = [...events].sort((a, b) => timestamp(a) - timestamp(b) || a.id.localeCompare(b.id));
   if (!ordered.length) return [];
-  const width = Math.max(440, trackWidth, ordered.length * 44);
+  // The caller lays out each lane independently and passes the same width
+  // used by the rendered track.  Do not inflate the width from the number of
+  // events here: that would make point offsets disagree with the map width.
+  const width = Math.max(440, trackWidth);
   const gap = (44 / width) * 100;
-  const positions = ordered.map((event) => Math.min(100, Math.max(0, event.x)));
+  const targetPositions = ordered.map((event) => Math.min(100, Math.max(0, event.x)));
+  const positions = [...targetPositions];
   for (let index = 1; index < positions.length; index += 1) {
     positions[index] = Math.max(positions[index], positions[index - 1] + gap);
   }
@@ -106,6 +136,6 @@ export function layoutFlowEvents(events, trackWidth = 440) {
   return ordered.map((event, index) => ({
     ...event,
     hitX: positions[index] + shift,
-    pointOffset: ((event.x - (positions[index] + shift)) / 100) * width,
+    pointOffset: ((targetPositions[index] - (positions[index] + shift)) / 100) * width,
   }));
 }

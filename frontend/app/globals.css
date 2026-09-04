@@ -1902,6 +1902,26 @@ body {
   font-weight: 600;
 }
 
+.control-latest-git {
+  border-left: 2px solid var(--control-green);
+  display: grid;
+  gap: 4px;
+  margin-top: 20px;
+  max-width: min(100%, 520px);
+  padding-left: 12px;
+}
+
+.control-latest-git strong {
+  font: 600 12px/1.4 var(--control-sans);
+  overflow-wrap: anywhere;
+}
+
+.control-latest-git time,
+.control-latest-git > span:last-child {
+  color: var(--control-muted);
+  font: 10px var(--control-mono);
+}
+
 .control-metrics {
   display: grid;
   gap: 12px 28px;
@@ -2360,7 +2380,7 @@ body {
   display: grid;
   font: 10px var(--control-mono);
   gap: 12px;
-  grid-template-columns: var(--control-label-width) minmax(var(--flow-track-min-width, 440px), 1fr);
+  grid-template-columns: var(--control-label-width) var(--flow-track-width, var(--flow-track-min-width, 440px));
   min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   padding: 14px 0 8px;
 }
@@ -2428,7 +2448,7 @@ body {
 
 .flow-row {
   display: grid;
-  grid-template-columns: var(--control-label-width) minmax(var(--flow-track-min-width, 440px), 1fr);
+  grid-template-columns: var(--control-label-width) var(--flow-track-width, var(--flow-track-min-width, 440px));
   min-height: var(--flow-row-height);
   min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   position: relative;
@@ -2492,10 +2512,51 @@ body {
   white-space: nowrap;
 }
 
+.flow-lane-meta .flow-range-note {
+  color: var(--control-amber);
+  font-weight: 700;
+}
+
 .flow-track {
   border-bottom: 1px solid var(--control-border);
   min-width: var(--flow-track-min-width, 440px);
   position: relative;
+  width: var(--flow-track-width, var(--flow-track-min-width, 440px));
+}
+
+.flow-lane-end-label {
+  color: var(--control-muted);
+  display: grid;
+  font: 9px/1.25 var(--control-mono);
+  gap: 1px;
+  max-width: 190px;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  text-align: center;
+  text-overflow: ellipsis;
+  top: 5px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.flow-lane-end-label time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flow-lane-end-label-left {
+  left: 0;
+  text-align: left;
+  transform: none;
+}
+
+.flow-lane-end-label-right {
+  left: auto;
+  right: 0;
+  text-align: right;
+  transform: none;
 }
 
 .flow-track-empty {
@@ -2565,8 +2626,12 @@ body {
 }
 
 .flow-event-button:focus-visible {
+  outline: 0;
+}
+
+.flow-event-button:focus-visible .flow-event-point {
   outline: 2px solid var(--control-blue);
-  outline-offset: 2px;
+  outline-offset: 4px;
 }
 
 .flow-event-button.is-selected .flow-event-point {
@@ -2581,7 +2646,7 @@ body {
   color: #fff;
   display: grid;
   gap: 5px;
-  left: 50%;
+  left: calc(50% + var(--flow-point-offset, 0px));
   min-width: 230px;
   padding: 12px;
   position: absolute;
@@ -2592,12 +2657,12 @@ body {
 
 .flow-event-right .flow-event-popover {
   left: auto;
-  right: -4px;
+  right: calc(-4px - var(--flow-point-offset, 0px));
   transform: none;
 }
 
 .flow-event-left .flow-event-popover {
-  left: -4px;
+  left: calc(-4px + var(--flow-point-offset, 0px));
   transform: none;
 }
 
@@ -3126,7 +3191,7 @@ body {
 
   .flow-axis {
     --control-label-width: 170px;
-    grid-template-columns: var(--control-label-width) minmax(var(--flow-track-min-width, 440px), 1fr);
+    grid-template-columns: var(--control-label-width) var(--flow-track-width, var(--flow-track-min-width, 440px));
     min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   }
 
@@ -3137,7 +3202,7 @@ body {
 
   .flow-row {
     --control-label-width: 170px;
-    grid-template-columns: var(--control-label-width) minmax(var(--flow-track-min-width, 440px), 1fr);
+    grid-template-columns: var(--control-label-width) var(--flow-track-width, var(--flow-track-min-width, 440px));
     min-width: calc(var(--control-label-width) + var(--flow-track-min-width, 440px));
   }
 
