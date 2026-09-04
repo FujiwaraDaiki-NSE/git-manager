@@ -129,7 +129,13 @@ function timestamp(event) {
  * target centered on the same event.
  */
 export function layoutFlowEvents(events, trackWidth = 440) {
-  const ordered = [...events].sort((a, b) => timestamp(a) - timestamp(b) || a.id.localeCompare(b.id));
+  // Graph rows already carry the display/ancestry order (parent before child).
+  // Keep that input index as the only equal-time tie-breaker; hashes are
+  // identifiers, not a visual or keyboard ordering contract.
+  const ordered = events
+    .map((event, inputIndex) => ({ event, inputIndex }))
+    .sort((a, b) => timestamp(a.event) - timestamp(b.event) || a.inputIndex - b.inputIndex)
+    .map(({ event }) => event);
   if (!ordered.length) return [];
   // The caller lays out each lane independently and passes the same width
   // used by the rendered track.  Do not inflate the width from the number of
@@ -158,6 +164,27 @@ export function layoutFlowEvents(events, trackWidth = 440) {
     timestampX: timestampPositions[index],
     pointOffset: 0,
   }));
+}
+
+/**
+ * Clamp a popover around its post-collision interaction point to the visible
+ * horizontal scroll viewport. The returned offset is relative to the event
+ * hit center, so the arrow can still identify the event after clamping.
+ */
+export function popoverPlacement({
+  pointX,
+  viewportLeft,
+  viewportRight,
+  preferredWidth = 290,
+  margin = 8,
+}) {
+  const viewportWidth = Math.max(0, viewportRight - viewportLeft);
+  const width = Math.min(preferredWidth, Math.max(0, viewportWidth - margin * 2));
+  if (width <= 0) return { width: 0, center: pointX, offset: 0 };
+  const minCenter = viewportLeft + margin + width / 2;
+  const maxCenter = viewportRight - margin - width / 2;
+  const center = Math.min(maxCenter, Math.max(minCenter, pointX));
+  return { width, center, offset: center - pointX };
 }
 
 /**

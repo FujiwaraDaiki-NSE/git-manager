@@ -10,6 +10,7 @@ import {
   mergeBasePosition,
   mobileEventAction,
   parseProjectUrl,
+  popoverPlacement,
   shouldFoldMergedLane,
   updateProjectUrl,
 } from "../app/project-flow.mjs";
@@ -81,6 +82,17 @@ test("flow events are chronological, keyed by lane, and have distinct hit center
   assert.notEqual(flowEventKey("branch:feature", "same"), flowEventKey("branch:other", "same"));
 });
 
+test("equal-time graph rows keep parent-to-child display order instead of hash order", () => {
+  const sameTime = "2026-09-03T00:00:00+09:00";
+  const positioned = layoutFlowEvents([
+    { id: flowEventKey("branch:feature", "z-parent"), x: 50, row: row("z-parent", [], sameTime) },
+    { id: flowEventKey("branch:feature", "a-child"), x: 50, row: row("a-child", ["z-parent"], sameTime) },
+  ], 440);
+
+  assert.deepEqual(positioned.map((item) => item.row.hash), ["z-parent", "a-child"]);
+  assert.ok(positioned[1].hitX > positioned[0].hitX);
+});
+
 test("lane layout keeps the visible point centered on its 44px hit area", () => {
   const width = 440;
   const makeEvent = (lane, hash, x, date) => ({
@@ -124,6 +136,18 @@ test("dense edge events move the interaction point inward and retain timestamp l
     const leader = eventLeaderGeometry(event.timestampX, event.hitX, 440);
     assert.equal(leader.offset, (event.timestampX - event.hitX) * 440 / 100);
     assert.equal(leader.width, Math.abs(leader.offset));
+  }
+});
+
+test("popover placement keeps dense points inside the horizontal scroll viewport", () => {
+  const viewportLeft = 14;
+  const viewportRight = 361;
+  const centers = Array.from({ length: 10 }, (_, index) => 14 + index * 44);
+  for (const pointX of centers) {
+    const placement = popoverPlacement({ pointX, viewportLeft, viewportRight });
+    assert.equal(placement.width, 290);
+    assert.ok(placement.center - placement.width / 2 >= viewportLeft + 8);
+    assert.ok(placement.center + placement.width / 2 <= viewportRight - 8);
   }
 });
 

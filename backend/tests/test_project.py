@@ -229,6 +229,8 @@ def test_project_latest_git_event_survives_an_empty_display_range(tmp_path: Path
     git(repo, "config", "user.name", "Test")
     git(repo, "config", "user.email", "test@example.com")
     commit(repo, "known historical commit")
+    parent = git(repo, "rev-parse", "HEAD").strip()
+    commit(repo, "known historical commit with a later absolute time")
     head = git(repo, "rev-parse", "HEAD").strip()
 
     # The graph is a known Git snapshot, but its commit is intentionally
@@ -241,8 +243,18 @@ def test_project_latest_git_event_survives_an_empty_display_range(tmp_path: Path
         lambda *_args, **_kwargs: {
             "rows": [{
                 "hash": head,
+                "parents": [parent],
+                # 02:00 at UTC+02:00 is 00:00 UTC. A string max would
+                # incorrectly choose this over the parent below.
+                "date": "2026-01-01T02:00:00+02:00",
+                "subject": "known historical commit with a later absolute time",
+                "author": "Test",
+            }, {
+                "hash": parent,
                 "parents": [],
-                "date": "2020-01-02T03:04:05+00:00",
+                # 01:30 UTC is the latest absolute instant despite the
+                # lexicographically smaller local-hour representation.
+                "date": "2026-01-01T01:30:00+00:00",
                 "subject": "known historical commit",
                 "author": "Test",
             }],
@@ -254,8 +266,8 @@ def test_project_latest_git_event_survives_an_empty_display_range(tmp_path: Path
 
     assert result is not None
     assert result["events"] == []
-    assert result["latest_event"]["commit_hash"] == head
-    assert result["latest_event"]["occurred_at"] == "2020-01-02T03:04:05+00:00"
+    assert result["latest_event"]["commit_hash"] == parent
+    assert result["latest_event"]["occurred_at"] == "2026-01-01T01:30:00+00:00"
 
 
 def test_project_marks_a_prunable_linked_worktree_as_foldable_git_fact(tmp_path: Path) -> None:

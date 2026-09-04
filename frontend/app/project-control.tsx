@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, popoverPlacement, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -166,6 +166,12 @@ type FlowEvent = {
   id: string;
 };
 
+type FlowViewport = {
+  left: number;
+  right: number;
+  scrollLeft: number;
+};
+
 function eventDate(row: GraphRow) {
   const value = new Date(row.date).getTime();
   return Number.isNaN(value) ? null : value;
@@ -185,6 +191,8 @@ function FlowEventButton({
   onPreview,
   onSelect,
   trackWidth,
+  popoverShift,
+  popoverWidth,
 }: {
   event: FlowEvent;
   selected: boolean;
@@ -195,11 +203,13 @@ function FlowEventButton({
   onPreview: (id: string | null) => void;
   onSelect: (event: FlowEvent) => void;
   trackWidth: number;
+  popoverShift: number;
+  popoverWidth: number;
 }) {
   const touchPreviewRef = useRef(false);
   const touchPointerRef = useRef(false);
   const touchPreviewOpenRef = useRef(false);
-  const xClass = event.x < 24 ? "flow-event-left" : event.x > 76 ? "flow-event-right" : "";
+  const xClass = event.hitX < 24 ? "flow-event-left" : event.hitX > 76 ? "flow-event-right" : "";
   const leader = eventLeaderGeometry(event.timestampX, event.hitX, trackWidth);
   const hasLeader = leader.width > 0.5;
   const select = () => {
@@ -273,7 +283,11 @@ function FlowEventButton({
         />
       </button>
       {preview && (
-        <div className={`flow-event-popover${popoverBelow ? " flow-event-popover-below" : ""}`} role="tooltip">
+        <div
+          className={`flow-event-popover${popoverBelow ? " flow-event-popover-below" : ""}`}
+          role="tooltip"
+          style={{ "--flow-popover-shift": `${popoverShift}px`, "--flow-popover-width": `${popoverWidth}px` } as React.CSSProperties}
+        >
           <span className="flow-popover-type">Git · コミット</span>
           <strong>{event.row.subject || "(no subject)"}</strong>
           <span>{shortHash(event.row.hash)} · {event.row.author}</span>
@@ -326,6 +340,7 @@ function FlowMap({
   const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
   const [renderedLabelWidth, setRenderedLabelWidth] = useState(220);
+  const [flowViewport, setFlowViewport] = useState<FlowViewport | null>(null);
   const graphRows = project.graph?.rows ?? [];
   const lanes = useMemo(() => {
     const source = project.lanes.filter((lane) => showMerged || lane.branch === project.default_branch || !isFoldedMerged(lane));
@@ -370,13 +385,37 @@ function FlowMap({
       setRenderedLabelWidth((current) => current === labelWidth ? current : labelWidth);
       const next = Math.max(0, Math.round(scroll.clientWidth - labelWidth));
       setAvailableTrackWidth((current) => current === next ? current : next);
+      const rect = scroll.getBoundingClientRect();
+      const nextViewport = { left: rect.left, right: rect.right, scrollLeft: scroll.scrollLeft };
+      setFlowViewport((current) => (
+        current
+        && current.left === nextViewport.left
+        && current.right === nextViewport.right
+        && current.scrollLeft === nextViewport.scrollLeft
+          ? current
+          : nextViewport
+      ));
     };
     updateWidth();
-    if (typeof ResizeObserver === "undefined") return;
+    scroll.addEventListener("scroll", updateWidth, { passive: true });
+    window.addEventListener("resize", updateWidth);
+    window.addEventListener("scroll", updateWidth, { passive: true });
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        scroll.removeEventListener("scroll", updateWidth);
+        window.removeEventListener("resize", updateWidth);
+        window.removeEventListener("scroll", updateWidth);
+      };
+    }
     const observer = new ResizeObserver(updateWidth);
     observer.observe(scroll);
     observer.observe(label);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      scroll.removeEventListener("scroll", updateWidth);
+      window.removeEventListener("resize", updateWidth);
+      window.removeEventListener("scroll", updateWidth);
+    };
   }, [lanes.length]);
   const allTimes = allEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
   const now = Date.now();
@@ -432,7 +471,9 @@ function FlowMap({
   const navigateEvent = useCallback((current: FlowEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => {
     const laneIndex = lanes.findIndex((lane) => lane.id === current.lane.id);
     if (laneIndex < 0) return;
-    const laneEvents = [...(eventsByLane.get(current.lane.id) ?? [])].sort((a, b) => a.x - b.x || a.id.localeCompare(b.id));
+    // eventsByLane is produced from the ancestry/display path. Preserve that
+    // order for equal timestamps and keyboard traversal (parent → child).
+    const laneEvents = [...(eventsByLane.get(current.lane.id) ?? [])];
     let target: FlowEvent | undefined;
     if (key === "ArrowLeft" || key === "ArrowRight") {
       const currentIndex = laneEvents.findIndex((item) => item.row.hash === current.row.hash);
@@ -554,20 +595,31 @@ function FlowMap({
                 </div>
                 <div className="flow-track">
                   {laneEvents.length === 0 && <span className="flow-track-empty">イベント未取得</span>}
-                  {laneEvents.map((event) => (
-                    <FlowEventButton
-                      event={event}
-                      key={event.id}
-                      onPreview={setPreviewId}
-                      onRegister={registerEventButton}
-                      onNavigate={navigateEvent}
-                      onSelect={onSelect}
-                      popoverBelow={index < 2}
-                      preview={previewId === event.id}
-                      selected={selectedKey === event.id}
-                      trackWidth={trackWidth}
-                    />
-                  ))}
+                  {laneEvents.map((event) => {
+                    const popover = flowViewport
+                      ? popoverPlacement({
+                        pointX: flowViewport.left + renderedLabelWidth + (event.hitX * trackWidth) / 100 - flowViewport.scrollLeft,
+                        viewportLeft: flowViewport.left,
+                        viewportRight: flowViewport.right,
+                      })
+                      : { width: 290, offset: 0 };
+                    return (
+                      <FlowEventButton
+                        event={event}
+                        key={event.id}
+                        onPreview={setPreviewId}
+                        onRegister={registerEventButton}
+                        onNavigate={navigateEvent}
+                        onSelect={onSelect}
+                        popoverBelow={index < 2}
+                        preview={previewId === event.id}
+                        selected={selectedKey === event.id}
+                        trackWidth={trackWidth}
+                        popoverShift={popover.offset}
+                        popoverWidth={popover.width}
+                      />
+                    );
+                  })}
                   <span className="flow-lane-end" style={{ left: `${laneEvents.at(-1)?.x ?? 0}%` }} aria-hidden="true" />
                   <span className={`flow-lane-end-label${(laneEvents.at(-1)?.x ?? 0) < 24 ? " flow-lane-end-label-left" : (laneEvents.at(-1)?.x ?? 0) > 76 ? " flow-lane-end-label-right" : ""}`} style={(laneEvents.at(-1)?.x ?? 0) >= 24 && (laneEvents.at(-1)?.x ?? 0) <= 76 ? { left: `${laneEvents.at(-1)?.x ?? 0}%` } : undefined}>
                     <span>Git 最終</span>

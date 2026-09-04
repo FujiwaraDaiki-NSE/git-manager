@@ -2658,24 +2658,21 @@ body {
   color: #fff;
   display: grid;
   gap: 5px;
-  left: 50%;
-  min-width: 230px;
+  left: calc(50% + var(--flow-popover-shift, 0px));
+  min-width: min(230px, var(--flow-popover-width, 230px));
   padding: 12px;
   position: absolute;
   transform: translateX(-50%);
-  width: min(290px, calc(100vw - 34px));
+  width: min(290px, calc(100vw - 34px), var(--flow-popover-width, 290px));
   z-index: 8;
 }
 
 .flow-event-right .flow-event-popover {
-  left: auto;
-  right: -4px;
-  transform: none;
+  left: calc(50% + var(--flow-popover-shift, 0px));
 }
 
 .flow-event-left .flow-event-popover {
-  left: -4px;
-  transform: none;
+  left: calc(50% + var(--flow-popover-shift, 0px));
 }
 
 .flow-event-popover::after {
@@ -2683,7 +2680,7 @@ body {
   border-top-color: var(--control-ink);
   bottom: -12px;
   content: "";
-  left: calc(50% - 6px);
+  left: clamp(6px, calc(50% - var(--flow-popover-shift, 0px)), calc(100% - 6px));
   position: absolute;
 }
 

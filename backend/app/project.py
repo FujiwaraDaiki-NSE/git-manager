@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from app import detail, gitinfo, graph, paths, scanner
@@ -22,6 +22,19 @@ _COMMIT_HASH_LINE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 def _key(path: str) -> str:
     return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+
+
+def _iso_epoch(value: Any) -> float | None:
+    """Parse an ISO timestamp as an absolute epoch only when it has an offset."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc).timestamp()
 
 
 def _commit_metadata(repo: str, commit_hash: str | None) -> dict[str, Any] | None:
@@ -563,9 +576,8 @@ def build(
             date = row.get("date")
             if not isinstance(date, str):
                 return False
-            try:
-                occurred = datetime.fromisoformat(date).timestamp()
-            except (TypeError, ValueError, OverflowError):
+            occurred = _iso_epoch(date)
+            if occurred is None:
                 return False
             return occurred >= range_cutoff
 
@@ -601,8 +613,8 @@ def build(
                 events.append(event)
 
     latest_event = max(
-        (event for event in known_events if isinstance(event.get("occurred_at"), str)),
-        key=lambda event: event["occurred_at"],
+        (event for event in known_events if _iso_epoch(event.get("occurred_at")) is not None),
+        key=lambda event: _iso_epoch(event.get("occurred_at")),
         default=None,
     )
     merged_count = sum(
@@ -674,7 +686,11 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
             if isinstance(row.get("last_commit"), dict)
             and isinstance(row.get("last_commit", {}).get("date"), str)
         ]
-        latest = max(commits, key=lambda commit: commit["date"], default=None)
+        latest = max(
+            (commit for commit in commits if _iso_epoch(commit.get("date")) is not None),
+            key=lambda commit: _iso_epoch(commit.get("date")),
+            default=None,
+        )
         conflicts = sum(
             1
             for row in rows
