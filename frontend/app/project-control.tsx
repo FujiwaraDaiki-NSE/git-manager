@@ -376,6 +376,20 @@ function FlowMap({
     }
     return events;
   }, [laneRows, lanes, visibleEventHashes]);
+  const measureFlowViewport = useCallback(() => {
+    const scroll = flowScrollRef.current;
+    if (!scroll) return;
+    const rect = scroll.getBoundingClientRect();
+    const nextViewport = { left: rect.left, right: rect.right, scrollLeft: scroll.scrollLeft };
+    setFlowViewport((current) => (
+      current
+      && current.left === nextViewport.left
+      && current.right === nextViewport.right
+      && current.scrollLeft === nextViewport.scrollLeft
+        ? current
+        : nextViewport
+    ));
+  }, []);
   useEffect(() => {
     const scroll = flowScrollRef.current;
     const label = firstLaneLabelRef.current;
@@ -385,16 +399,7 @@ function FlowMap({
       setRenderedLabelWidth((current) => current === labelWidth ? current : labelWidth);
       const next = Math.max(0, Math.round(scroll.clientWidth - labelWidth));
       setAvailableTrackWidth((current) => current === next ? current : next);
-      const rect = scroll.getBoundingClientRect();
-      const nextViewport = { left: rect.left, right: rect.right, scrollLeft: scroll.scrollLeft };
-      setFlowViewport((current) => (
-        current
-        && current.left === nextViewport.left
-        && current.right === nextViewport.right
-        && current.scrollLeft === nextViewport.scrollLeft
-          ? current
-          : nextViewport
-      ));
+      measureFlowViewport();
     };
     updateWidth();
     scroll.addEventListener("scroll", updateWidth, { passive: true });
@@ -416,7 +421,7 @@ function FlowMap({
       window.removeEventListener("resize", updateWidth);
       window.removeEventListener("scroll", updateWidth);
     };
-  }, [lanes.length]);
+  }, [lanes.length, measureFlowViewport]);
   const allTimes = allEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
   const now = Date.now();
   const rangeCutoff = range === "24h" ? now - 86_400_000 : range === "7d" ? now - 604_800_000 : null;
@@ -484,8 +489,17 @@ function FlowMap({
       const candidates = nextLane ? [...(eventsByLane.get(nextLane.id) ?? [])] : [];
       target = candidates.sort((a, b) => Math.abs(a.x - current.x) - Math.abs(b.x - current.x))[0];
     }
-    if (target) eventButtonRefs.current.get(target.id)?.focus();
-  }, [eventsByLane, lanes]);
+    if (target) {
+      const button = eventButtonRefs.current.get(target.id);
+      if (!button) return;
+      // Focusing an offscreen target may synchronously scroll the map. Measure
+      // that new scrollLeft in the same key event and once after the browser's
+      // focus scroll has settled, so the preview never uses stale geometry.
+      button.focus();
+      measureFlowViewport();
+      window.requestAnimationFrame(measureFlowViewport);
+    }
+  }, [eventsByLane, lanes, measureFlowViewport]);
   const defaultIndex = lanes.findIndex((lane) => lane.branch === project.default_branch);
   const rowHeight = 72;
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && isFoldedMerged(lane)).length;
