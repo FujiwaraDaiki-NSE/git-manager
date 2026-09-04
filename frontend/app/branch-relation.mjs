@@ -177,12 +177,8 @@ function mergeBase(branchHash, defaultHash, rowsByHash, rowIndex) {
 
 /** @param {GraphResponse} graph */
 function defaultHeadRow(graph) {
-  if (!graph.default_branch || graph.default_lane === null) return null;
-  const remoteName = `origin/${graph.default_branch}`;
-  const remoteRows = graph.rows.filter((row) =>
-    row.refs.some((ref) => ref.kind === "remote" && ref.name === remoteName),
-  );
-  return remoteRows[0] ?? null;
+  if (!graph.default_hash || graph.default_lane === null) return null;
+  return graph.rows.find((row) => row.hash === graph.default_hash) ?? null;
 }
 
 /**

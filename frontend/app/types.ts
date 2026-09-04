@@ -26,6 +26,7 @@ export type GraphResponse = {
   max_lane: number;
   head_lane: number | null;
   default_branch: string | null;
+  default_hash: string | null;
   default_lane: number | null;
   branch_heads: BranchHead[];
   truncated: boolean;

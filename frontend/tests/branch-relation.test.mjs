@@ -9,7 +9,7 @@ import {
   SUMMARY_ROW_HEIGHT,
   buildBranchRelationGeometry,
   buildBranchRelationSummary,
-} from "../app/branch-relation.js";
+} from "../app/branch-relation.mjs";
 
 function row(hash, parents = [], lane = 0, refs = []) {
   return {
@@ -30,11 +30,17 @@ function row(hash, parents = [], lane = 0, refs = []) {
 }
 
 function graph(rows, branchHeads, defaultBranch = "main", defaultLane = 0) {
+  const defaultRow = rows.find((item) =>
+    item.refs.some(
+      (ref) => ref.kind === "remote" && ref.name === `origin/${defaultBranch}`,
+    ),
+  );
   return {
     rows,
     max_lane: Math.max(...rows.map((item) => item.lane), 0),
     head_lane: defaultLane,
     default_branch: defaultBranch,
+    default_hash: defaultRow?.hash ?? null,
     default_lane: defaultLane,
     branch_heads: branchHeads,
     truncated: false,
@@ -231,4 +237,25 @@ test("unavailable default HEAD does not invent a path", () => {
   assert.match(summary.unavailableReason, /表示範囲外/);
   assert.ok(summary.branches.every((relation) => relation.branchPath === null));
   assert.ok(summary.branches.every((relation) => relation.defaultPath === null));
+});
+
+test("default HEAD lookup uses its hash when remote decorations are excluded", () => {
+  const data = graph(
+    [
+      row("main-head", ["base"]),
+      row("feature-head", ["base"], 1),
+      row("base"),
+    ],
+    [head("main", "main-head"), head("feature", "feature-head")],
+  );
+  data.default_hash = "main-head";
+
+  const summary = buildBranchRelationSummary(data);
+
+  assert.ok(summary);
+  assert.equal(summary.unavailableReason, null);
+  const feature = summary.branches.find((relation) =>
+    relation.names.includes("feature"),
+  );
+  assert.equal(feature.commonAncestorHash, "base");
 });

@@ -5,7 +5,7 @@ import {
   BranchRelationSummary,
   GraphView,
 } from "./graph-view";
-import { buildBranchRelationSummary } from "./branch-relation";
+import { buildBranchRelationSummary } from "./branch-relation.mjs";
 import { BranchesResponse, CommitDetail, GraphResponse, Repo } from "./types";
 import { codeColor, stateBadges, truncationLabel } from "./status";
 

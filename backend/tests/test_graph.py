@@ -50,6 +50,11 @@ def test_graph_includes_default_branch_lane_and_all_local_heads(
 
     assert result is not None
     assert result["default_branch"] == "main"
+    assert result["default_hash"] == git(
+        graph_repo,
+        "rev-parse",
+        "origin/main",
+    ).strip()
     assert isinstance(result["branch_heads"], list)
     assert all(set(branch) == {"name", "hash"} for branch in result["branch_heads"])
     heads = {branch["name"]: branch["hash"] for branch in result["branch_heads"]}
@@ -78,6 +83,7 @@ def test_graph_does_not_guess_default_branch_without_origin_head(
 
     assert result is not None
     assert result["default_branch"] is None
+    assert result["default_hash"] is None
     assert result["default_lane"] is None
     assert {branch["name"] for branch in result["branch_heads"]} == {
         "main",
@@ -127,6 +133,11 @@ def test_graph_resolves_default_lane_from_remote_when_local_branch_is_absent(
 
     assert result is not None
     assert result["default_branch"] == "main"
+    assert result["default_hash"] == git(
+        remote_default_without_local,
+        "rev-parse",
+        "origin/main",
+    ).strip()
     assert all(branch["name"] != "main" for branch in result["branch_heads"])
     remote_default_row = next(
         row
@@ -137,6 +148,41 @@ def test_graph_resolves_default_lane_from_remote_when_local_branch_is_absent(
         )
     )
     assert result["default_lane"] == remote_default_row["lane"]
+
+
+def test_graph_preserves_full_ref_names_when_tag_matches_branch(
+    graph_repo: Path,
+) -> None:
+    git(graph_repo, "tag", "main")
+
+    result = graph.build(str(graph_repo), all_refs=True, limit=200)
+
+    assert result is not None
+    assert result["default_branch"] == "main"
+    assert {branch["name"] for branch in result["branch_heads"]} == {
+        "main",
+        "feature",
+    }
+
+
+def test_graph_default_hash_does_not_depend_on_log_decorations(
+    graph_repo: Path,
+) -> None:
+    git(graph_repo, "config", "log.excludeDecoration", "refs/remotes/origin/*")
+
+    result = graph.build(str(graph_repo), all_refs=True, limit=200)
+
+    assert result is not None
+    assert result["default_hash"] == git(
+        graph_repo,
+        "rev-parse",
+        "origin/main",
+    ).strip()
+    assert result["default_lane"] is not None
+    default_row = next(
+        row for row in result["rows"] if row["hash"] == result["default_hash"]
+    )
+    assert all(ref["name"] != "origin/main" for ref in default_row["refs"])
 
 
 def test_graph_all_false_keeps_existing_range_and_extended_metadata(
@@ -166,6 +212,7 @@ def test_graph_keeps_stable_shape_for_empty_repository(tmp_path: Path) -> None:
         "max_lane": 0,
         "head_lane": None,
         "default_branch": None,
+        "default_hash": None,
         "default_lane": None,
         "branch_heads": [],
         "truncated": False,

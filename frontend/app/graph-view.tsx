@@ -6,7 +6,7 @@ import {
   COMMON_ANCESTOR_MARKER,
   MAX_BRANCH_NAMES_PER_GROUP,
   buildBranchRelationGeometry,
-} from "./branch-relation";
+} from "./branch-relation.mjs";
 import type {
   BranchRelationSummary,
   GraphRef,
