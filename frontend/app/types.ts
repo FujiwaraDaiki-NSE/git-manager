@@ -191,11 +191,18 @@ export type ProjectEvent = {
   branch: string | null;
   lane_id: string | null;
   lane_names?: string[];
-  commit_hash: string | null;
-  subject: string | null;
-  author: string | null;
+  commit_hash?: string | null;
+  subject?: string | null;
+  author?: string | null;
   parents?: string[];
   stats?: CommitStats | null;
+  task_id?: string | null;
+  agent_id?: string | null;
+  run_state?: AgentRunState | null;
+  phase?: string | null;
+  attention?: string | null;
+  outcome?: string | null;
+  summary?: string | null;
 };
 
 export type ProjectGitCounts = {

@@ -785,29 +785,16 @@ function ActivityView({
   onFilter: (filter: ActivityFilter) => void;
   onSelect: (event: ProjectEvent) => void;
 }) {
-  const unifiedEvents = useMemo(() => [
-    ...project.events.map((event) => ({ ...event, agent_state: null as string | null, task_id: null as string | null, agent_phase: null as string | null, attention: null as string | null })),
-    ...project.agent_events.map((event) => ({
-      id: event.event_id,
-      occurred_at: event.occurred_at,
-      observed_at: event.observed_at,
-      type: "agent",
-      source: "agent",
-      project_id: project.id,
-      worktree: event.worktree,
-      branch: event.branch,
-      lane_id: project.lanes.find((lane) => (lane.path && lane.path === event.worktree) || (lane.branch && lane.branch === event.branch))?.id ?? null,
-      lane_names: [],
-      commit_hash: null,
-      subject: event.summary,
-      author: event.agent_id,
-      stats: null,
-      agent_state: event.run_state,
-      task_id: event.task_id,
-      agent_phase: event.phase,
-      attention: event.attention,
-    })),
-  ], [project.agent_events, project.events, project.id, project.lanes]);
+  const unifiedEvents = useMemo(() => project.events.map((event) => ({
+    ...event,
+    commit_hash: event.commit_hash ?? null,
+    subject: event.source === "agent" ? event.summary ?? null : event.subject ?? null,
+    author: event.source === "agent" ? event.agent_id ?? null : event.author ?? null,
+    agent_state: event.source === "agent" ? agentTaskState(event) : null,
+    task_id: event.source === "agent" ? event.task_id ?? null : null,
+    agent_phase: event.source === "agent" ? event.phase ?? null : null,
+    attention: event.source === "agent" ? event.attention ?? null : null,
+  })), [project.events]);
   const events = useMemo(() => {
     const filtered = unifiedEvents.filter((event) => {
       if (filter === "all") return true;

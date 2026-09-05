@@ -63,7 +63,7 @@ const detailPayload = {
   range: "current",
   graph: null,
   lanes: [{ id: "feature", name: "feature", branch: "feature", path: "/workspace/feature", agent: task }],
-  events: [],
+  events: [{ id: "agent:event-1", type: "agent", source: "agent", ...task }],
   latest_event: null,
   branch_counts: { local: 1, remote: 0 },
   worktrees: [],
@@ -86,6 +86,7 @@ test("frontend contract follows backend legacy and priority agent fields", () =>
   assert.equal(summaryPayload.latest_agent_event.summary, "テスト結果を確認してください");
   assert.equal(detailPayload.agent_latest_event.event_id, "event-1");
   assert.equal(detailPayload.lanes[0].agent.task_id, "task-1");
+  assert.equal(detailPayload.events.filter((event) => event.source === "agent").length, detailPayload.agent_events.length);
   assert.equal(projectLatestTime(summaryPayload), Date.parse(task.occurred_at));
   for (const key of ["waiting_for_user", "blocked", "review_required", "merge_ready", "active", "completed"]) {
     assert.notEqual(summaryPayload.agent_priority_counts[key], undefined);
