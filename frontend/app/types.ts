@@ -95,12 +95,46 @@ export type BranchesResponse = {
   command: string;
 };
 
+export type AgentRunState =
+  | "investigating"
+  | "implementing"
+  | "testing"
+  | "reviewing"
+  | "waiting_for_user"
+  | "blocked"
+  | "completed"
+  | "stopped"
+  | "active"
+  | "review_required"
+  | "merge_ready"
+  | string;
+
+export type AgentTask = {
+  task_id: string;
+  agent_id: string | null;
+  worktree: string | null;
+  branch: string | null;
+  run_state: AgentRunState | null;
+  phase: string | null;
+  attention: string | null;
+  outcome: string | null;
+  summary: string | null;
+  occurred_at: string | null;
+};
+
+export type AgentEvent = AgentTask & {
+  event_id: string;
+  observed_at: number;
+};
+
 export type AgentCounts = {
-  running: number | null;
   waiting_for_user: number | null;
-  problem: number | null;
-  reviewing: number | null;
-  integratable: number | null;
+  blocked: number | null;
+  review_required: number | null;
+  merge_ready: number | null;
+  active: number | null;
+  completed: number | null;
+  total: number | null;
 };
 
 export type ProjectLane = {
@@ -125,12 +159,8 @@ export type ProjectLane = {
   last_commit: Commit & { short?: string } | null;
   next_command: NextCommand | null;
   error: string | null;
-  agent: {
-    task_id?: string | null;
-    state?: string | null;
-    summary?: string | null;
-    occurred_at?: string | null;
-  } | null;
+  agents: AgentTask[];
+  current_agent: AgentTask | null;
   merge_target: string | null;
   next_phase: string | null;
 };
@@ -186,7 +216,9 @@ export type ProjectSummary = {
   next_lane: string | null;
   largest_difference_lane: string | null;
   agent_counts: AgentCounts;
-  agent_state: string | null;
+  agent_tasks: AgentTask[];
+  priority_state: AgentRunState | null;
+  latest_agent_event: AgentEvent | null;
 };
 
 export type ProjectResponse = {
@@ -210,8 +242,11 @@ export type ProjectResponse = {
   languages: string[] | null;
   directories: string[] | null;
   test_commands: string[] | null;
-  agent_tasks: unknown[] | null;
+  agent_tasks: AgentTask[];
   agent_counts: AgentCounts;
+  priority_state: AgentRunState | null;
+  latest_agent_event: AgentEvent | null;
+  agent_events: AgentEvent[];
   ci: unknown | null;
   reviews: unknown | null;
   merge_target: string | null;

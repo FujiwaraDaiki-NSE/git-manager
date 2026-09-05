@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Repo } from "./types";
+import type { AgentEvent, Repo } from "./types";
 
 export type RepoStreamState = {
   repos: Map<string, Repo>;
   scanning: boolean;
   fetching: boolean;
   connected: boolean;
+  agentEvents: AgentEvent[];
+  agentEventVersion: number;
 };
 
 /** Shared read-only SSE snapshot used by home and the project control page. */
@@ -16,6 +18,8 @@ export function useRepoStream(): RepoStreamState {
   const [scanning, setScanning] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const [agentEventVersion, setAgentEventVersion] = useState(0);
 
   useEffect(() => {
     const es = new EventSource("/api/stream");
@@ -52,8 +56,13 @@ export function useRepoStream(): RepoStreamState {
         Boolean((JSON.parse((event as MessageEvent).data) as { active: boolean }).active),
       );
     });
+    es.addEventListener("agent_event", (event) => {
+      const value = JSON.parse((event as MessageEvent).data) as AgentEvent;
+      setAgentEvents((previous) => [value, ...previous.filter((item) => item.event_id !== value.event_id)].slice(0, 200));
+      setAgentEventVersion((version) => version + 1);
+    });
     return () => es.close();
   }, []);
 
-  return { repos, scanning, fetching, connected };
+  return { repos, scanning, fetching, connected, agentEvents, agentEventVersion };
 }

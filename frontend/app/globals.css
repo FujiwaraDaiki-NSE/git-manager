@@ -1346,6 +1346,127 @@ body {
   }
 }
 
+/* Agent overview additions. State labels stay visible next to these tokens so
+   status never depends on color alone. */
+.agent-state-badge,
+.agent-task-state {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--control-muted);
+  display: inline-flex;
+  font: 700 10px/1.4 var(--control-mono);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.agent-state-waiting_for_user,
+.agent-state-review_required,
+.agent-state-blocked,
+.agent-state-merge_ready,
+.agent-state-active,
+.agent-state-completed,
+.agent-task-state {
+  background: var(--control-panel-soft);
+}
+.agent-state-waiting_for_user { color: var(--control-amber); }
+.agent-state-blocked { color: var(--control-red); }
+.agent-state-review_required { color: var(--control-purple); }
+.agent-state-merge_ready { color: var(--control-green); }
+.agent-state-active { color: var(--control-blue); }
+.agent-state-completed { color: var(--control-muted); }
+.agent-state-unknown { border-style: dashed; }
+.project-card-agent-counts {
+  border-bottom: 1px solid var(--control-border);
+  border-top: 1px solid var(--control-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 13px;
+  padding: 10px 0;
+}
+.project-card-agent-counts span,
+.project-card-secondary {
+  color: var(--control-muted);
+  font: 10px var(--control-mono);
+}
+.project-card-agent-counts strong { color: var(--control-ink); font-size: 12px; }
+.project-card-agent-list { display: grid; gap: 6px; min-width: 0; }
+.agent-task-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(64px, .35fr) minmax(0, 1fr);
+  min-width: 0;
+}
+.agent-task-row strong,
+.agent-task-row > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-task-row > span:last-child { color: var(--control-muted); font: 10px var(--control-mono); }
+.agent-task-state { font-size: 9px; padding: 3px 6px; }
+.agent-task-unknown { grid-template-columns: auto auto minmax(0, 1fr); }
+.agent-remainder { color: var(--control-blue); font: 10px var(--control-mono); justify-self: end; }
+.project-card-secondary { border-top: 1px solid var(--control-border); padding-top: 10px; }
+.order-update {
+  align-items: center;
+  background: var(--control-blue-soft);
+  border: 1px solid color-mix(in srgb, var(--control-blue) 35%, var(--control-border));
+  border-radius: 7px;
+  color: var(--control-blue);
+  display: flex;
+  font: 11px var(--control-mono);
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 8px 10px;
+}
+.order-update button {
+  background: var(--control-panel);
+  border: 1px solid var(--control-blue);
+  border-radius: 5px;
+  color: var(--control-blue);
+  cursor: pointer;
+  font: inherit;
+  min-height: 44px;
+  padding: 6px 10px;
+}
+.agent-fact {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px 7px;
+  min-width: 0;
+}
+.agent-fact strong { color: var(--control-blue); }
+.agent-fact span,
+.agent-fact time,
+.agent-fact em { color: var(--control-muted); font: 9px var(--control-mono); }
+.agent-fact em { color: var(--control-amber); font-style: normal; }
+.agent-unknown { padding: 4px 7px; }
+.activity-attention { color: var(--control-amber) !important; }
+.related-agent-tasks { border-top: 1px solid var(--control-border); }
+.related-agent-task {
+  border-bottom: 1px solid var(--control-border);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px 0;
+}
+.related-agent-task > div { display: grid; gap: 3px; min-width: 0; }
+.related-agent-task strong { font: 600 11px var(--control-mono); overflow-wrap: anywhere; }
+.related-agent-task span,
+.related-agent-task time,
+.related-agent-task p { color: var(--control-muted); font: 10px var(--control-mono); margin: 0; }
+.related-agent-task p { grid-column: 1 / -1; color: var(--control-ink); overflow-wrap: anywhere; }
+.related-agent-task time { white-space: nowrap; }
+
+@media (max-width: 600px) {
+  .agent-task-row { grid-template-columns: auto minmax(0, 1fr); }
+  .agent-task-row > span:last-child { grid-column: 1 / -1; }
+  .related-agent-task { grid-template-columns: 1fr; }
+  .related-agent-task time { white-space: normal; }
+}
+
 /* -------------------------------------------------------------------------
    Phase 1 project control board
    ------------------------------------------------------------------------- */
