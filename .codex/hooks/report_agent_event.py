@@ -21,15 +21,32 @@ STATES = {
 
 
 def main() -> int:
-    hook = sys.argv[1] if len(sys.argv) > 1 else ""
+    try:
+        hook_input = json.load(sys.stdin)
+    except (ValueError, OSError):
+        return 0
+    if not isinstance(hook_input, dict):
+        return 0
+    hook = hook_input.get("hook_event_name")
+    cwd = hook_input.get("cwd")
+    session_id = hook_input.get("session_id")
     endpoint = os.environ.get("GITDASH_AGENT_ENDPOINT")
     token = os.environ.get("GITDASH_AGENT_TOKEN")
-    task_id = os.environ.get("GITDASH_TASK_ID") or os.environ.get("CODEX_TASK_ID")
-    if not endpoint or not token or not task_id or hook not in STATES:
+    if (
+        not endpoint
+        or not token
+        or not isinstance(session_id, str)
+        or not session_id
+        or not isinstance(cwd, str)
+        or not os.path.isabs(cwd)
+        or not isinstance(hook, str)
+        or hook not in STATES
+    ):
         return 0
     try:
         worktree = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
             check=True,
             capture_output=True,
             text=True,
@@ -41,8 +58,8 @@ def main() -> int:
         return 0
     payload = {
         "event_id": str(uuid.uuid4()),
-        "task_id": task_id,
-        "agent_id": os.environ.get("GITDASH_AGENT_ID"),
+        "task_id": session_id,
+        "agent_id": hook_input.get("agent_id"),
         "worktree": worktree,
         "occurred_at": datetime.now(timezone.utc).isoformat(),
         "kind": "lifecycle",

@@ -244,7 +244,23 @@ class _CaptureHandler(BaseHTTPRequestHandler):
 def run_hook(script: Path, cwd: Path, hook: str, **env: str) -> subprocess.CompletedProcess[str]:
     merged = os.environ.copy()
     merged.update(env)
-    return subprocess.run([sys.executable, str(script), hook], cwd=cwd, env=merged, capture_output=True, text=True, check=False)
+    hook_input: dict[str, object] = {
+        "session_id": "task-hook",
+        "cwd": str(cwd),
+        "hook_event_name": hook,
+        "model": "test-model",
+    }
+    if hook == "SubagentStart":
+        hook_input["agent_id"] = "agent-hook"
+    return subprocess.run(
+        [sys.executable, str(script)],
+        cwd=cwd,
+        env=merged,
+        input=json.dumps(hook_input),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def test_hook_mapping_failure_modes_and_real_git_worktree(tmp_path: Path) -> None:
@@ -257,7 +273,7 @@ def test_hook_mapping_failure_modes_and_real_git_worktree(tmp_path: Path) -> Non
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     endpoint = f"http://127.0.0.1:{server.server_port}/api/agent-events"
-    common = {"GITDASH_AGENT_ENDPOINT": endpoint, "GITDASH_AGENT_TOKEN": "token", "GITDASH_TASK_ID": "task-hook"}
+    common = {"GITDASH_AGENT_ENDPOINT": endpoint, "GITDASH_AGENT_TOKEN": "token"}
     try:
         for hook, run_state, action in (
             ("SessionStart", "active", "session_start"),
@@ -270,12 +286,14 @@ def test_hook_mapping_failure_modes_and_real_git_worktree(tmp_path: Path) -> Non
             assert result.returncode == 0
             assert _CaptureHandler.payloads[-1]["run_state"] == run_state
             assert _CaptureHandler.payloads[-1]["action"] == action
+            assert _CaptureHandler.payloads[-1]["task_id"] == "task-hook"
+        assert _CaptureHandler.payloads[1]["agent_id"] == "agent-hook"
         assert all(payload["kind"] == "lifecycle" for payload in _CaptureHandler.payloads)
-        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_TOKEN="token", GITDASH_TASK_ID="task-hook").returncode == 0
+        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_TOKEN="token").returncode == 0
         assert run_hook(script, tmp_path, "SessionStart", **common).returncode == 0
-        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT=endpoint, GITDASH_TASK_ID="task-hook").returncode == 0
+        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT=endpoint).returncode == 0
         # Endpoint failure is intentionally non-fatal to the hook process.
-        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT="http://127.0.0.1:1", **{key: value for key, value in common.items() if key != "GITDASH_AGENT_ENDPOINT"}).returncode == 0
+        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT="http://127.0.0.1:1", GITDASH_AGENT_TOKEN="token").returncode == 0
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -285,10 +303,19 @@ def test_project_local_mcp_config_and_hooks_shape() -> None:
     root = Path(__file__).parents[2]
     hooks = json.loads((root / ".codex/hooks.json").read_text())
     assert set(hooks["hooks"]) == {"SessionStart", "SubagentStart", "Interrupt", "SubagentStop", "SessionEnd"}
+    for groups in hooks["hooks"].values():
+        assert len(groups) == 1
+        assert set(groups[0]) == {"matcher", "hooks"}
+        assert groups[0]["matcher"] == "*"
+        assert len(groups[0]["hooks"]) == 1
+        handler = groups[0]["hooks"][0]
+        assert set(handler) == {"type", "command", "timeout"}
+        assert handler["type"] == "command" and handler["timeout"] == 3
+        assert "git rev-parse --show-toplevel" in handler["command"]
     import tomllib
 
     config = tomllib.loads((root / ".codex/config.toml").read_text())
     server = config["mcp_servers"]["gitdash-agent-events"]
-    assert server["type"] == "streamable_http"
+    assert set(server) == {"url", "bearer_token_env_var"}
     assert server["bearer_token_env_var"] == "GITDASH_AGENT_TOKEN"
     assert server["url"].endswith("/mcp")
