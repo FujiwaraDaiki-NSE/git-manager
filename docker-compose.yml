@@ -1,4 +1,12 @@
 services:
+  data-init:
+    build: ./backend
+    restart: "no"
+    user: "0:0"
+    command: ["chown", "-R", "${GITDASH_UID}:${GITDASH_GID}", "/data"]
+    volumes:
+      - gitdash-data:/data
+
   backend:
     build: ./backend
     restart: always
@@ -28,6 +36,9 @@ services:
       # SSH リモートへ fetch するための鍵と設定。読み取り専用
       - ${HOME}/.ssh:/home/host/.ssh:ro
       - ${HOME}/.gitconfig:/home/host/.gitconfig:ro
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')\""]
       interval: 30s
