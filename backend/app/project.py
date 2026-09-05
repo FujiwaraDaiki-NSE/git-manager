@@ -360,6 +360,16 @@ def _agent_counts(snapshots: list[Mapping[str, Any]]) -> dict[str, int | None]:
     }
 
 
+def _agents_for_worktree(
+    snapshots: Mapping[str, Mapping[str, Any]], worktree: str | None
+) -> list[Mapping[str, Any]]:
+    if not isinstance(worktree, str):
+        return []
+    result = [item for item in snapshots.values() if item.get("worktree") == worktree]
+    result.sort(key=lambda item: (item.get("occurred_at") or "", item.get("sequence") or 0))
+    return result
+
+
 def _agent_priority_categories(snapshots: list[Mapping[str, Any]]) -> dict[str, int | None]:
     """Classify each task into exactly one explicit priority bucket."""
     if not snapshots:
@@ -485,6 +495,7 @@ def build(
         commit = _commit_metadata(repo, head if isinstance(head, str) else None)
         status = _lane_status(branch, worktree, exact_rows)
         lane_id = f"branch:{name}"
+        lane_agents = _agents_for_worktree(agent_snapshots, status.get("path"))
         lanes.append(
             {
                 "id": lane_id,
@@ -508,7 +519,8 @@ def build(
                 "last_commit": commit,
                 "next_command": status["next_command"],
                 "error": status["error"],
-                "agent": agent_snapshots.get(status["path"]) if isinstance(status.get("path"), str) else None,
+                "agent": lane_agents[-1] if lane_agents else None,
+                "agents": lane_agents or None,
                 "merge_target": None,
                 "next_phase": None,
             }
@@ -533,6 +545,7 @@ def build(
         ahead, behind = _count_against_default(repo, default_ref, head) if head else (None, None)
         base = _merge_base(repo, default_ref, head) if head else None
         commit = _commit_metadata(repo, head)
+        lane_agents = _agents_for_worktree(agent_snapshots, path)
         lanes.append(
             {
                 "id": f"worktree:{path}",
@@ -556,7 +569,8 @@ def build(
                 "last_commit": commit,
                 "next_command": status["next_command"],
                 "error": status["error"],
-                "agent": agent_snapshots.get(path),
+                "agent": lane_agents[-1] if lane_agents else None,
+                "agents": lane_agents or None,
                 "merge_target": None,
                 "next_phase": None,
             }

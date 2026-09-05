@@ -1024,6 +1024,8 @@ async def report_agent_status(
         raise HTTPException(status_code=401, detail="invalid bearer token")
     try:
         response = agent_events.append(request, _state_snapshot())
+    except agent_events.DuplicateEventConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (OSError, sqlite3.Error) as exc:

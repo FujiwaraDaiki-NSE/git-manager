@@ -43,12 +43,12 @@ def report_agent_status(
     occurred_at: str,
     kind: str,
     run_state: str,
+    phase: str | None,
+    attention: str | None,
+    outcome: str | None,
+    summary: str | None,
     agent_id: str | None = None,
     action: str | None = None,
-    phase: str | None = None,
-    attention: str | None = None,
-    outcome: str | None = None,
-    summary: str | None = None,
 ) -> dict[str, Any]:
     """Persist one explicit agent event; this call changes gitdash state."""
     request = agent_events.AgentEventRequest(

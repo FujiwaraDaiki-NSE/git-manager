@@ -145,6 +145,21 @@ def test_idempotency_out_of_order_null_clearing_and_lifecycle_projection(event_c
     assert projection["phase"] is None and projection["summary"] is None
 
 
+def test_same_event_id_with_different_payload_is_conflict(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
+    worktree, state = event_context
+    original = agent_events.AgentEventRequest.model_validate(status_payload(worktree, "same"))
+    changed = agent_events.AgentEventRequest.model_validate(status_payload(worktree, "same", summary="changed"))
+    agent_events.append(original, state)
+    with pytest.raises(agent_events.DuplicateEventConflict):
+        agent_events.append(changed, state)
+    assert len(agent_events.events(worktree=worktree)) == 1
+    assert post(
+        "/api/agent-events",
+        changed.model_dump(mode="json"),
+        {"Authorization": "Bearer test-token"},
+    ).status_code == 409
+
+
 def test_multiple_agents_have_mutually_exclusive_priority_counts(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
     worktree, state = event_context
     events = [
@@ -167,6 +182,17 @@ def test_multiple_agents_have_mutually_exclusive_priority_counts(event_context: 
     summary = project.summary_rows(state)[0]
     counts = summary["agent_priority_counts"]
     assert counts == {"waiting_for_user": 1, "blocked": 1, "review_required": 1, "merge_ready": 1, "active": 1, "completed": 1}
+
+
+def test_same_worktree_preserves_distinct_tasks_and_agents(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
+    worktree, state = event_context
+    for task_id, agent_id, summary in (("task-a", None, "root"), ("task-b", "subagent-b", "subagent")):
+        body = status_payload(worktree, task_id, task_id=task_id, agent_id=agent_id, summary=summary)
+        agent_events.append(agent_events.AgentEventRequest.model_validate(body), state)
+    snapshots = agent_events.snapshots(project_id=worktree, state=state)
+    assert {(item["task_id"], item["agent_id"]) for item in snapshots.values()} == {
+        ("task-a", None), ("task-b", "subagent-b")
+    }
 
 
 def test_close_reopen_persistence_and_as_of(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
@@ -223,6 +249,8 @@ def test_fastmcp_only_lists_and_calls_report_agent_status(event_context: tuple[s
     mcp_server.set_state_provider(lambda: state)
     tools = asyncio.run(mcp_server.mcp.list_tools())
     assert [tool.name for tool in tools] == ["report_agent_status"]
+    required = set(tools[0].inputSchema.get("required", []))
+    assert {"phase", "attention", "outcome", "summary"} <= required
     result = asyncio.run(mcp_server.mcp.call_tool("report_agent_status", status_payload(worktree, "mcp")))
     assert isinstance(result, tuple) and isinstance(result[1], dict)
     assert any(row["event_id"] == "mcp" for row in agent_events.events())

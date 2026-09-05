@@ -98,6 +98,10 @@ class ReportAgentStatusResponse(BaseModel):
 _lock = threading.RLock()
 
 
+class DuplicateEventConflict(ValueError):
+    """The event ID exists but the caller supplied a different event."""
+
+
 def db_path() -> Path:
     """Resolve the configured data directory at call time for test isolation."""
     return Path(os.environ.get("GITDASH_DATA_DIR", str(config.DATA_DIR))) / "agent-events.sqlite3"
@@ -172,6 +176,12 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
         existing = db.execute("SELECT * FROM agent_events WHERE event_id = ?", (request.event_id,)).fetchone()
         if existing is not None:
             event = _row(existing)
+            try:
+                existing_payload = json.loads(existing["payload"])
+            except (TypeError, ValueError):
+                existing_payload = None
+            if existing_payload != payload:
+                raise DuplicateEventConflict("event_id already exists with a different payload")
             return ReportAgentStatusResponse(
                 accepted=True,
                 event_id=request.event_id,
@@ -253,8 +263,17 @@ def events(*, project_id: str | None = None, worktree: str | None = None, as_of:
     return result
 
 
-def projection(worktree: str, *, state: Mapping[str, Mapping[str, Any]] | None = None, as_of: datetime | None = None) -> dict[str, Any] | None:
+def projection(
+    worktree: str,
+    *,
+    task_id: str | None = None,
+    agent_id: str | None = None,
+    state: Mapping[str, Mapping[str, Any]] | None = None,
+    as_of: datetime | None = None,
+) -> dict[str, Any] | None:
     rows = events(worktree=worktree, as_of=as_of)
+    if task_id is not None:
+        rows = [row for row in rows if row["task_id"] == task_id and row["agent_id"] == agent_id]
     if not rows:
         return None
     # Stable tie-breaking: occurrence time first, append sequence second.
@@ -274,27 +293,26 @@ def projection(worktree: str, *, state: Mapping[str, Mapping[str, Any]] | None =
 
 def snapshots(*, project_id: str, state: Mapping[str, Mapping[str, Any]], as_of: datetime | None = None) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
-    for path, row in state.items():
-        if row.get("common_dir") != project_id and path != project_id:
-            continue
-        try:
-            item = projection(path, state=state, as_of=as_of)
-        except (OSError, sqlite3.Error):
-            return {}
-        if item is not None:
-            result[path] = item
-    # Include historical paths from the event database when their current row
-    # is no longer scanned; exact worktree matching remains required at ingest.
     try:
         historical = events(project_id=project_id, as_of=as_of)
     except (OSError, sqlite3.Error):
         return result
-    for event in historical:
-        path = event["worktree"]
-        if path not in result:
-            item = projection(path, state=state, as_of=as_of)
-            if item is not None:
-                result[path] = item
+    keys = {(event["worktree"], event["task_id"], event["agent_id"]) for event in historical}
+    for path, row in state.items():
+        if row.get("common_dir") != project_id and path != project_id:
+            continue
+        keys.update((event["worktree"], event["task_id"], event["agent_id"]) for event in historical if event["worktree"] == path)
+    for path, task_id, agent_id in keys:
+        try:
+            item = projection(path, task_id=task_id, agent_id=agent_id, state=state, as_of=as_of)
+        except (OSError, sqlite3.Error):
+            return {}
+        if item is not None:
+            # A separator cannot occur in the two validated identifiers' key
+            # components without becoming ambiguous in API maps, so expose a
+            # stable readable key while retaining the fields in the snapshot.
+            key = f"{task_id}\x1f{agent_id or ''}\x1f{path}"
+            result[key] = item
     return result
 
 
