@@ -79,7 +79,7 @@ export function countsFromTasks(tasks) {
 }
 
 export function projectPriority(project) {
-  const state = project?.priority_state || highestAgentState(project?.agent_tasks);
+  const state = project?.agent_state || highestAgentState(project?.agent_tasks);
   if (state) return agentStatePriority(state);
   const git = project?.git;
   if (git && (git.conflict > 0 || git.dirty > 0 || git.behind > 0)) return 1;
@@ -113,7 +113,7 @@ export function agentSnapshotAt(events, at) {
   const byKey = new Map();
   for (const event of events || []) {
     const time = eventTime(event?.occurred_at);
-    if (time === null || (cutoff !== null && cutoff !== null && time > cutoff)) continue;
+    if (time === null || (cutoff !== null && time > cutoff)) continue;
     const key = event.task_id || event.worktree || event.branch;
     if (!key) continue;
     const current = byKey.get(key);

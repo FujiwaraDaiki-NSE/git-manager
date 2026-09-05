@@ -128,13 +128,20 @@ export type AgentEvent = AgentTask & {
 };
 
 export type AgentCounts = {
+  running: number | null;
+  waiting_for_user: number | null;
+  problem: number | null;
+  reviewing: number | null;
+  integratable: number | null;
+};
+
+export type AgentPriorityCounts = {
   waiting_for_user: number | null;
   blocked: number | null;
   review_required: number | null;
   merge_ready: number | null;
   active: number | null;
   completed: number | null;
-  total: number | null;
 };
 
 export type ProjectLane = {
@@ -217,7 +224,8 @@ export type ProjectSummary = {
   largest_difference_lane: string | null;
   agent_counts: AgentCounts;
   agent_tasks: AgentTask[];
-  priority_state: AgentRunState | null;
+  agent_state: AgentRunState | null;
+  agent_priority_counts: AgentPriorityCounts;
   latest_agent_event: AgentEvent | null;
 };
 
@@ -244,8 +252,9 @@ export type ProjectResponse = {
   test_commands: string[] | null;
   agent_tasks: AgentTask[];
   agent_counts: AgentCounts;
-  priority_state: AgentRunState | null;
-  latest_agent_event: AgentEvent | null;
+  agent_priority_counts: AgentPriorityCounts;
+  agent_state: AgentRunState | null;
+  agent_latest_event: AgentEvent | null;
   agent_events: AgentEvent[];
   ci: unknown | null;
   reviews: unknown | null;

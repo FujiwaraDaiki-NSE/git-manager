@@ -139,8 +139,8 @@ function valueOrUnknown(value: string | number | null | undefined) {
   return value === null || value === undefined || value === "" ? "未取得" : String(value);
 }
 
-function agentCount(project: ProjectResponse, key: keyof ProjectResponse["agent_counts"]) {
-  const value = project.agent_counts?.[key];
+function agentCount(project: ProjectResponse, key: keyof ProjectResponse["agent_priority_counts"]) {
+  const value = project.agent_priority_counts?.[key];
   return value === null || value === undefined ? "?" : value;
 }
 
