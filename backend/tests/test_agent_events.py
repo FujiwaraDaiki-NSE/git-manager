@@ -186,9 +186,12 @@ def test_multiple_agents_have_mutually_exclusive_priority_counts(event_context: 
 
 def test_same_worktree_preserves_distinct_tasks_and_agents(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
     worktree, state = event_context
+    responses = []
     for task_id, agent_id, summary in (("task-a", None, "root"), ("task-b", "subagent-b", "subagent")):
         body = status_payload(worktree, task_id, task_id=task_id, agent_id=agent_id, summary=summary)
-        agent_events.append(agent_events.AgentEventRequest.model_validate(body), state)
+        responses.append(agent_events.append(agent_events.AgentEventRequest.model_validate(body), state))
+    assert responses[0].snapshot is not None and responses[0].snapshot["task_id"] == "task-a"
+    assert responses[1].snapshot is not None and responses[1].snapshot["task_id"] == "task-b"
     snapshots = agent_events.snapshots(project_id=worktree, state=state)
     assert {(item["task_id"], item["agent_id"]) for item in snapshots.values()} == {
         ("task-a", None), ("task-b", "subagent-b")
@@ -249,11 +252,21 @@ def test_fastmcp_only_lists_and_calls_report_agent_status(event_context: tuple[s
     mcp_server.set_state_provider(lambda: state)
     tools = asyncio.run(mcp_server.mcp.list_tools())
     assert [tool.name for tool in tools] == ["report_agent_status"]
-    required = set(tools[0].inputSchema.get("required", []))
-    assert {"phase", "attention", "outcome", "summary"} <= required
+    assert not {"phase", "attention", "outcome", "summary"} - set(tools[0].inputSchema["properties"])
     result = asyncio.run(mcp_server.mcp.call_tool("report_agent_status", status_payload(worktree, "mcp")))
     assert isinstance(result, tuple) and isinstance(result[1], dict)
     assert any(row["event_id"] == "mcp" for row in agent_events.events())
+    lifecycle = {
+        "event_id": "mcp-life", "task_id": "task-life", "worktree": worktree,
+        "occurred_at": "2026-01-02T00:00:00+00:00", "kind": "lifecycle",
+        "run_state": "ended", "action": "session_end",
+    }
+    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", lifecycle))
+    with pytest.raises(Exception):
+        asyncio.run(mcp_server.mcp.call_tool("report_agent_status", {
+            "event_id": "mcp-missing", "task_id": "task-missing", "worktree": worktree,
+            "occurred_at": "2026-01-02T00:00:00+00:00", "kind": "status", "run_state": "active",
+        }))
 
 
 class _CaptureHandler(BaseHTTPRequestHandler):

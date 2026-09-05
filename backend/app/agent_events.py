@@ -187,7 +187,12 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
                 event_id=request.event_id,
                 sequence=int(event["sequence"]),
                 idempotent=True,
-                snapshot=projection(request.worktree, state=state),
+                snapshot=projection(
+                    request.worktree,
+                    task_id=request.task_id,
+                    agent_id=request.agent_id,
+                    state=state,
+                ),
             )
         cursor = db.execute(
             """INSERT INTO agent_events
@@ -234,7 +239,18 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
         "summary": request.summary if request.kind == "status" else None,
     }
     # Caller publishes the SSE notification only after this function returns.
-    return ReportAgentStatusResponse(accepted=True, event_id=request.event_id, sequence=sequence, idempotent=False, snapshot=projection(request.worktree, state=state))
+    return ReportAgentStatusResponse(
+        accepted=True,
+        event_id=request.event_id,
+        sequence=sequence,
+        idempotent=False,
+        snapshot=projection(
+            request.worktree,
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            state=state,
+        ),
+    )
 
 
 def events(*, project_id: str | None = None, worktree: str | None = None, as_of: datetime | None = None) -> list[dict[str, Any]]:
