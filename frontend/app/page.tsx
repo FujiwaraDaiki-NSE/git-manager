@@ -52,7 +52,7 @@ function stateClass(state: AgentRunState | null | undefined) {
 function ProjectCard({ project, onInteractEnd, onInteractStart }: { project: ProjectSummary; onInteractEnd: () => void; onInteractStart: () => void }) {
   const target = project.main_path || project.id;
   const href = `/project?path=${encodeURIComponent(target)}&tab=flow&range=current`;
-  const state = project.priority_state;
+  const state = project.agent_state;
   const tasks = topAgentTasks(project.agent_tasks, 3);
   const latestAgent = project.latest_agent_event;
   const latestGit = project.latest_event;
@@ -62,7 +62,7 @@ function ProjectCard({ project, onInteractEnd, onInteractStart }: { project: Pro
     <article className={`project-card${hasAttention ? " project-card-attention" : ""}`} onFocusCapture={onInteractStart} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onInteractEnd(); }} onPointerEnter={onInteractStart} onPointerLeave={onInteractEnd}>
       <div className="project-card-topline"><span className={`agent-state-badge ${stateClass(state)}`}>{agentStateLabel(state)}</span><span className="project-lane-count">{project.lane_count === null ? "Gitレーン 未取得" : `${project.lane_count} Gitレーン`}</span></div>
       <div className="project-card-heading"><div className="project-card-title-wrap"><h2>{project.name}</h2><code title={remoteLabel(project.remote)}>{remoteLabel(project.remote)}</code></div><Link className="open-project" href={href} aria-label={`${project.name} の管制画面を開く`}>開く <span aria-hidden="true">↗</span></Link></div>
-      <div className="project-card-agent-counts" aria-label="agentタスク件数">{summaryCards.map(({ key, label }) => <span key={key}><strong>{project.agent_counts?.[key] ?? "?"}</strong> {label}</span>)}<span><strong>{project.agent_counts?.completed ?? "?"}</strong> 完了</span></div>
+      <div className="project-card-agent-counts" aria-label="agentタスク件数">{summaryCards.map(({ key, label }) => <span key={key}><strong>{project.agent_priority_counts?.[key] ?? "?"}</strong> {label}</span>)}<span><strong>{project.agent_priority_counts?.completed ?? "?"}</strong> 完了</span></div>
       <div className="project-card-agent-list" aria-label="上位 agent タスク">
         {tasks.length ? tasks.map((task) => <div className="agent-task-row" key={task.task_id}><span className={`agent-task-state ${stateClass(task.run_state)}`}>{agentStateLabel(task.run_state)}</span><strong>{task.agent_id || task.task_id}</strong><span>{task.summary || "報告内容なし"}</span></div>) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent 状態不明</strong><span>タスク未取得</span></div>}
         {maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
@@ -109,7 +109,7 @@ export default function Page() {
   }, [deferredOrder, interactionId, projects]);
   const ordered = useMemo(() => { const byId = new Map(projects.map((project) => [project.id, project])); return displayOrder.map((id) => byId.get(id)).filter((project): project is ProjectSummary => Boolean(project)); }, [displayOrder, projects]);
   const visible = useMemo(() => { const value = query.trim().toLowerCase(); return value ? ordered.filter((project) => [project.name, project.id, project.remote, project.main_path].filter(Boolean).some((item) => item!.toLowerCase().includes(value))) : ordered; }, [ordered, query]);
-  const totals = useMemo(() => summaryCards.reduce((result, { key }) => ({ ...result, [key]: projects.reduce((sum, project) => sum + (project.agent_counts?.[key] ?? 0), 0) }), { waiting_for_user: 0, blocked: 0, active: 0, review_required: 0, merge_ready: 0 }), [projects]);
+  const totals = useMemo(() => summaryCards.reduce((result, { key }) => ({ ...result, [key]: projects.reduce((sum, project) => sum + (project.agent_priority_counts?.[key] ?? 0), 0) }), { waiting_for_user: 0, blocked: 0, active: 0, review_required: 0, merge_ready: 0 }), [projects]);
   const gitTotals = useMemo(() => ({ conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0), dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0), lanes: projects.every((item) => item.lane_count !== null) ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0) : null }), [projects]);
   const startInteraction = (id?: string) => setInteractionId(id || "grid");
   const finishInteraction = () => setInteractionId(null);

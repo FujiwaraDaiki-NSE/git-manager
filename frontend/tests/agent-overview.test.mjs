@@ -41,9 +41,9 @@ test("agent priority, top three, and mutually exclusive counts use explicit stat
 test("project sorting uses agent priority, then absolute latest time", () => {
   const base = { git: { conflict: 0, dirty: 0, behind: 0 }, latest_observed_at: 0, agent_tasks: [] };
   const projects = [
-    { ...base, id: "active", name: "active", priority_state: "active", latest_agent_event: { occurred_at: "2026-09-01T03:00:00Z" } },
-    { ...base, id: "waiting", name: "waiting", priority_state: "waiting_for_user", latest_agent_event: { occurred_at: "2026-09-01T00:00:00Z" } },
-    { ...base, id: "blocked", name: "blocked", priority_state: "blocked", latest_agent_event: { occurred_at: "2026-09-01T02:00:00Z" } },
+    { ...base, id: "active", name: "active", agent_state: "active", latest_agent_event: { occurred_at: "2026-09-01T03:00:00Z" } },
+    { ...base, id: "waiting", name: "waiting", agent_state: "waiting_for_user", latest_agent_event: { occurred_at: "2026-09-01T00:00:00Z" } },
+    { ...base, id: "blocked", name: "blocked", agent_state: "blocked", latest_agent_event: { occurred_at: "2026-09-01T02:00:00Z" } },
   ];
   assert.deepEqual(sortProjects(projects).map((item) => item.id), ["waiting", "blocked", "active"]);
 });
