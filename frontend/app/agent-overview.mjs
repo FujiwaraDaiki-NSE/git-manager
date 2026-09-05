@@ -21,6 +21,7 @@ export const AGENT_STATE_LABELS = {
 
 const priority = new Map(AGENT_STATE_PRIORITY.map((state, index) => [state, index]));
 const activeStates = new Set(["active", "investigating", "implementing", "testing", "reviewing"]);
+const attentionStates = new Set(["waiting_for_user", "blocked", "review_required", "merge_ready"]);
 
 export function agentStateLabel(state) {
   return state ? AGENT_STATE_LABELS[state] || state : "agent 状態不明";
@@ -29,6 +30,14 @@ export function agentStateLabel(state) {
 export function agentStatePriority(state) {
   if (activeStates.has(state)) return priority.get("active");
   return state && priority.has(state) ? priority.get(state) : AGENT_STATE_PRIORITY.length;
+}
+
+export function agentTaskState(task) {
+  if (!task) return null;
+  if (attentionStates.has(task.attention)) return task.attention;
+  if (task.outcome === "completed") return "completed";
+  if (activeStates.has(task.run_state)) return "active";
+  return task.run_state || task.phase || null;
 }
 
 export function eventTime(value) {
@@ -45,14 +54,14 @@ export function topAgentTasks(tasks, limit = 3) {
   return [...(tasks || [])]
     .filter((task) => task && task.task_id)
     .sort((a, b) => {
-      const byState = agentStatePriority(a.run_state) - agentStatePriority(b.run_state);
+      const byState = agentStatePriority(agentTaskState(a)) - agentStatePriority(agentTaskState(b));
       return byState || latestTime(b) - latestTime(a) || String(a.task_id).localeCompare(String(b.task_id));
     })
     .slice(0, limit);
 }
 
 export function highestAgentState(tasks) {
-  return topAgentTasks(tasks, 1)[0]?.run_state || null;
+  return agentTaskState(topAgentTasks(tasks, 1)[0]);
 }
 
 export function latestAgentTask(tasks) {
@@ -70,8 +79,9 @@ export function countsFromTasks(tasks) {
     total: 0,
   };
   for (const task of tasks || []) {
-    if (!task || !task.run_state || !priority.has(task.run_state) && !activeStates.has(task.run_state)) continue;
-    const bucket = activeStates.has(task.run_state) ? "active" : task.run_state;
+    const state = agentTaskState(task);
+    if (!state || !priority.has(state)) continue;
+    const bucket = state;
     counts[bucket] += 1;
     counts.total += 1;
   }

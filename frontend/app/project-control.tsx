@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { agentSnapshotAt, agentStateLabel, laneAgentSnapshotAt } from "./agent-overview.mjs";
+import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt } from "./agent-overview.mjs";
 import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, popoverPlacement, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
@@ -125,7 +125,7 @@ function AgentFact({ task }: { task: AgentTask | null | undefined }) {
   if (!task) return <span className="agent-unknown">agent 状態不明</span>;
   return (
     <span className="agent-fact">
-      <strong>{agentStateLabel(task.run_state)}</strong>
+      <strong>{agentStateLabel(agentTaskState(task))}</strong>
       <span>{task.agent_id || task.task_id || "担当未取得"}</span>
       <span>{task.phase || "工程未取得"}</span>
       <span>{task.summary || "報告内容なし"}</span>
@@ -865,7 +865,7 @@ function ProjectInfo({ project }: { project: ProjectResponse }) {
         <InfoField label="テストコマンド" value={project.test_commands ? project.test_commands.join(" / ") : null} />
         <InfoField label="関連 agent タスク" value={`${project.agent_tasks.length} 件`} />
       </div>
-      <div className="info-subsection"><h4>関連 Codex タスク</h4>{project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={task.task_id}><div><strong>{task.task_id}</strong><span>{task.agent_id || "agent 未取得"} · {agentStateLabel(task.run_state)}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">agent 状態不明（関連タスク未取得）</div>}</div>
+      <div className="info-subsection"><h4>関連 Codex タスク</h4>{project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={task.task_id}><div><strong>{task.task_id}</strong><span>{task.agent_id || "agent 未取得"} · {agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">agent 状態不明（関連タスク未取得）</div>}</div>
       <div className="info-subsection"><h4>worktree 一覧</h4><div className="worktree-records">{project.worktrees.map((item) => <div className="worktree-record" key={item.path}><span className="worktree-shape" aria-hidden="true" /><strong>{item.branch ?? "detached HEAD"}</strong><code title={item.path}>{item.path}</code><span className={`lane-state ${item.state === "prunable" || item.state === "locked" ? "lane-state-warn" : "lane-state-ok"}`}>{item.state ?? "未取得"}</span></div>)}</div></div>
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
     </section>

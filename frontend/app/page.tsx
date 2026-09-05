@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { agentStateLabel, deferProjectOrder, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
+import { agentStateLabel, agentTaskState, deferProjectOrder, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
 import { useRepoStream } from "./repo-stream";
 import type { AgentRunState, ProjectSummary } from "./types";
 
@@ -64,7 +64,7 @@ function ProjectCard({ project, onInteractEnd, onInteractStart }: { project: Pro
       <div className="project-card-heading"><div className="project-card-title-wrap"><h2>{project.name}</h2><code title={remoteLabel(project.remote)}>{remoteLabel(project.remote)}</code></div><Link className="open-project" href={href} aria-label={`${project.name} の管制画面を開く`}>開く <span aria-hidden="true">↗</span></Link></div>
       <div className="project-card-agent-counts" aria-label="agentタスク件数">{summaryCards.map(({ key, label }) => <span key={key}><strong>{project.agent_priority_counts?.[key] ?? "?"}</strong> {label}</span>)}<span><strong>{project.agent_priority_counts?.completed ?? "?"}</strong> 完了</span></div>
       <div className="project-card-agent-list" aria-label="上位 agent タスク">
-        {tasks.length ? tasks.map((task) => <div className="agent-task-row" key={task.task_id}><span className={`agent-task-state ${stateClass(task.run_state)}`}>{agentStateLabel(task.run_state)}</span><strong>{task.agent_id || task.task_id}</strong><span>{task.summary || "報告内容なし"}</span></div>) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent 状態不明</strong><span>タスク未取得</span></div>}
+        {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); return <div className="agent-task-row" key={task.task_id}><span className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{task.agent_id || task.task_id}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent 状態不明</strong><span>タスク未取得</span></div>}
         {maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
       </div>
       <div className="project-card-event"><span className="eyebrow">最終明示レポート</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>Git · {relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>

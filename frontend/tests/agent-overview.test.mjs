@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   agentSnapshotAt,
+  agentTaskState,
   countsFromTasks,
   deferProjectOrder,
   highestAgentState,
@@ -27,10 +28,11 @@ const task = (task_id, run_state, occurred_at, extra = {}) => ({
 test("agent priority, top three, and mutually exclusive counts use explicit states", () => {
   const tasks = [
     task("active", "active", "2026-09-01T01:00:00Z"),
-    task("blocked", "blocked", "2026-09-01T02:00:00Z"),
-    task("waiting", "waiting_for_user", "2026-09-01T00:00:00Z"),
-    task("review", "review_required", "2026-09-01T03:00:00Z"),
+    task("blocked", "active", "2026-09-01T02:00:00Z", { attention: "blocked" }),
+    task("waiting", "active", "2026-09-01T00:00:00Z", { attention: "waiting_for_user" }),
+    task("review", "active", "2026-09-01T03:00:00Z", { attention: "review_required" }),
   ];
+  assert.equal(agentTaskState(tasks[1]), "blocked");
   assert.equal(highestAgentState(tasks), "waiting_for_user");
   assert.deepEqual(topAgentTasks(tasks, 3).map((item) => item.task_id), ["waiting", "blocked", "review"]);
   assert.deepEqual(countsFromTasks(tasks), { waiting_for_user: 1, blocked: 1, review_required: 1, merge_ready: 0, active: 1, completed: 0, total: 4 });
