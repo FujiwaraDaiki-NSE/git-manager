@@ -35,8 +35,8 @@ export function agentStatePriority(state) {
 export function agentTaskState(task) {
   if (!task) return null;
   if (attentionStates.has(task.attention)) return task.attention;
-  if (task.outcome === "completed") return "completed";
   if (activeStates.has(task.run_state)) return "active";
+  if (task.outcome === "completed") return "completed";
   return task.run_state || task.phase || null;
 }
 

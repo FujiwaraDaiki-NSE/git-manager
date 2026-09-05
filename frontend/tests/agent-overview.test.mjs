@@ -33,6 +33,7 @@ test("agent priority, top three, and mutually exclusive counts use explicit stat
     task("review", "active", "2026-09-01T03:00:00Z", { attention: "review_required" }),
   ];
   assert.equal(agentTaskState(tasks[1]), "blocked");
+  assert.equal(agentTaskState(task("active-done", "active", "2026-09-01T04:00:00Z", { outcome: "completed" })), "active");
   assert.equal(highestAgentState(tasks), "waiting_for_user");
   assert.deepEqual(topAgentTasks(tasks, 3).map((item) => item.task_id), ["waiting", "blocked", "review"]);
   assert.deepEqual(countsFromTasks(tasks), { waiting_for_user: 1, blocked: 1, review_required: 1, merge_ready: 0, active: 1, completed: 0, total: 4 });
