@@ -125,6 +125,7 @@ XY コードにはツールチップを付け、状態は色だけでなく `ahe
 | `GITDASH_WATCH`               | true | inotify を使うか                     |
 | `GITDASH_AGENT_PORT`           | —    | agent REST/MCP を bind する localhost ポート（必須） |
 | `GITDASH_AGENT_TOKEN`          | —    | agent REST/MCP の Bearer token（必須。未設定なら integration unavailable） |
+| `GITDASH_AGENT_ENDPOINT`       | —    | host-side command hook の REST endpoint（必須。ポートを合わせる） |
 
 除外ディレクトリは `backend/app/scanner.py` の `SKIP_NAMES`。
 `node_modules` `.venv` `.cargo` `go/pkg` などは登録済み。
@@ -161,7 +162,10 @@ agent status は `POST /api/agent-events` または localhost の Streamable HTT
 `summary` を必ず明示します（値を消す場合は `null`）。イベントは `/data` の
 append-only SQLite に保存され、`.codex/hooks.json` が SessionStart、SubagentStart、
 Interrupt、SubagentStop、SessionEnd を command hook として送信します。SessionEnd
-は終了時に MCP が利用できないため command hook を使用します。
+は終了時に MCP が利用できないため command hook を使用します。hook は Codex の
+ホストプロセスで実行されるため、`GITDASH_AGENT_ENDPOINT` と
+`GITDASH_AGENT_TOKEN` をホスト環境へ `export`（または Codex が同等に供給）し、
+`GITDASH_AGENT_PORT` を変更した場合は `.codex/config.toml` と endpoint も合わせます。
 
 ## 開発
 

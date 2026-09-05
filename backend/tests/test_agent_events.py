@@ -305,8 +305,7 @@ def test_project_local_mcp_config_and_hooks_shape() -> None:
     assert set(hooks["hooks"]) == {"SessionStart", "SubagentStart", "Interrupt", "SubagentStop", "SessionEnd"}
     for groups in hooks["hooks"].values():
         assert len(groups) == 1
-        assert set(groups[0]) == {"matcher", "hooks"}
-        assert groups[0]["matcher"] == "*"
+        assert set(groups[0]) == {"hooks"}
         assert len(groups[0]["hooks"]) == 1
         handler = groups[0]["hooks"][0]
         assert set(handler) == {"type", "command", "timeout"}
