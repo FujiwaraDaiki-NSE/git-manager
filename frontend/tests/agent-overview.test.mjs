@@ -7,6 +7,7 @@ import {
   countsFromTasks,
   deferProjectOrder,
   highestAgentState,
+  mergeAgentSnapshot,
   sortProjects,
   topAgentTasks,
 } from "../app/agent-overview.mjs";
@@ -58,6 +59,37 @@ test("as-of snapshots choose one latest event per task without showing future st
     { ...task("two", "blocked", "2026-09-01T02:00:00Z"), event_id: "3", observed_at: 3 },
   ];
   assert.deepEqual(agentSnapshotAt(events, Date.parse("2026-09-01T02:30:00Z")).map((item) => item.run_state), ["blocked", "active"]);
+});
+
+test("as-of lifecycle replay inherits semantic status while advancing run_state", () => {
+  const events = [
+    { ...task("one", "active", "2026-09-01T01:00:00Z", { kind: "status", phase: "testing", attention: "blocked", summary: "テスト失敗" }), event_id: "status", sequence: 1 },
+    { ...task("one", "stopped", "2026-09-01T02:00:00Z", { kind: "lifecycle", phase: null, attention: null, summary: null }), event_id: "lifecycle", sequence: 2 },
+  ];
+  const [snapshot] = agentSnapshotAt(events, Date.parse("2026-09-01T02:30:00Z"));
+  assert.equal(snapshot.run_state, "stopped");
+  assert.equal(snapshot.phase, "testing");
+  assert.equal(snapshot.attention, "blocked");
+  assert.equal(snapshot.summary, "テスト失敗");
+});
+
+test("incremental agent snapshot updates one project task without replacing Git facts", () => {
+  const project = {
+    id: "repo",
+    git: { conflict: 0, dirty: 0, behind: 0 },
+    agent_tasks: [task("one", "active", "2026-09-01T01:00:00Z")],
+    agent_priority_counts: { waiting_for_user: 0, blocked: 0, review_required: 0, merge_ready: 0, active: 1, completed: 0 },
+    agent_state: "active",
+    latest_agent_event: null,
+    latest_event: { date: "2026-09-01T01:00:00Z" },
+  };
+  const event = { ...task("one", "active", "2026-09-01T02:00:00Z", { attention: "waiting_for_user", summary: "回答待ち" }), event_id: "next", observed_at: 2 };
+  const next = mergeAgentSnapshot(project, event);
+  assert.equal(next.agent_tasks.length, 1);
+  assert.equal(next.agent_tasks[0].attention, "waiting_for_user");
+  assert.equal(next.agent_priority_counts.waiting_for_user, 1);
+  assert.equal(next.agent_state, "waiting_for_user");
+  assert.equal(next.latest_event.date, "2026-09-01T01:00:00Z");
 });
 
 test("deferred ordering retains focused cards and exposes changed order", () => {

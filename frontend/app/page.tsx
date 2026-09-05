@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { agentStateLabel, agentTaskState, deferProjectOrder, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
+import { agentStateLabel, agentTaskState, deferProjectOrder, mergeAgentSnapshot, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
 import { useRepoStream } from "./repo-stream";
 import type { AgentRunState, ProjectSummary } from "./types";
 
@@ -76,7 +76,7 @@ function ProjectCard({ project, onInteractEnd, onInteractStart }: { project: Pro
 }
 
 export default function Page() {
-  const { repos, scanning, fetching, connected, agentEventVersion } = useRepoStream();
+  const { repos, scanning, fetching, connected, latestAgentEvent } = useRepoStream();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
   const [deferredOrder, setDeferredOrder] = useState<string[] | null>(null);
@@ -95,7 +95,16 @@ export default function Page() {
       }).catch((reason: unknown) => { if (!cancelled) { setLoading(false); setError(reason instanceof Error ? reason.message : "unknown error"); } });
     }, snapshotKey ? 120 : 0);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [snapshotKey, agentEventVersion]);
+  }, [snapshotKey]);
+  useEffect(() => {
+    if (!latestAgentEvent) return;
+    setProjects((current) => current.map((project) => (
+      (latestAgentEvent.project_id && project.id === latestAgentEvent.project_id)
+      || project.main_path === latestAgentEvent.worktree
+        ? mergeAgentSnapshot(project, latestAgentEvent)
+        : project
+    )));
+  }, [latestAgentEvent]);
   useEffect(() => {
     const nextIds = sortProjects(projects).map((project) => project.id);
     if (!nextIds.length) { setDisplayOrder([]); return; }

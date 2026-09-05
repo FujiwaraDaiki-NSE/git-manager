@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt } from "./agent-overview.mjs";
+import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
 import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, popoverPlacement, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
@@ -1069,7 +1069,7 @@ function LegacyUnavailableModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function ProjectControl() {
-  const { repos, scanning, connected, agentEventVersion } = useRepoStream();
+  const { repos, scanning, connected, latestAgentEvent } = useRepoStream();
   const { state: urlState, update: updateUrl } = useProjectUrl();
   const [project, setProject] = useState<ProjectResponse | null>(null);
   const [projectState, setProjectState] = useState<LoadState>("idle");
@@ -1106,7 +1106,54 @@ export default function ProjectControl() {
       .then((value) => { setProject(value); setProjectState("ready"); })
       .catch((reason: unknown) => { if (reason instanceof DOMException && reason.name === "AbortError") return; setProjectState("error"); setProjectError(reason instanceof Error ? reason.message : "unknown error"); });
     return () => controller.abort();
-  }, [agentEventVersion, projectSnapshotKey, scanning, urlState.path, urlState.range]);
+  }, [projectSnapshotKey, scanning, urlState.path, urlState.range]);
+
+  useEffect(() => {
+    if (!project || !latestAgentEvent) return;
+    const matches = (latestAgentEvent.project_id && latestAgentEvent.project_id === project.id)
+      || latestAgentEvent.worktree === project.main_path
+      || project.lanes.some((lane) => lane.path === latestAgentEvent.worktree || lane.branch === latestAgentEvent.branch);
+    if (!matches) return;
+    setProject((current) => {
+      if (!current) return current;
+      const summary = mergeAgentSnapshot(current, latestAgentEvent);
+      const lane = current.lanes.find((item) => item.path === latestAgentEvent.worktree || item.branch === latestAgentEvent.branch);
+      const activity = {
+        id: `agent:${latestAgentEvent.event_id}`,
+        occurred_at: latestAgentEvent.occurred_at,
+        observed_at: latestAgentEvent.observed_at,
+        type: "agent",
+        source: "agent",
+        project_id: latestAgentEvent.project_id ?? current.id,
+        worktree: latestAgentEvent.worktree,
+        branch: latestAgentEvent.branch,
+        lane_id: lane?.id ?? null,
+        task_id: latestAgentEvent.task_id,
+        agent_id: latestAgentEvent.agent_id,
+        run_state: latestAgentEvent.run_state,
+        phase: latestAgentEvent.phase,
+        attention: latestAgentEvent.attention,
+        outcome: latestAgentEvent.outcome,
+        summary: latestAgentEvent.summary,
+      } as ProjectEvent;
+      return {
+        ...current,
+        agent_tasks: summary.agent_tasks,
+        agent_priority_counts: summary.agent_priority_counts,
+        agent_state: summary.agent_state,
+        agent_latest_event: latestAgentEvent,
+        agent_events: current.agent_events.some((item) => item.event_id === latestAgentEvent.event_id)
+          ? current.agent_events
+          : [...current.agent_events, latestAgentEvent],
+        events: current.events.some((item) => item.id === activity.id) ? current.events : [...current.events, activity],
+        lanes: current.lanes.map((item) => (
+          item.path === latestAgentEvent.worktree || item.branch === latestAgentEvent.branch
+            ? { ...item, agent: latestAgentEvent }
+            : item
+        )),
+      };
+    });
+  }, [latestAgentEvent, project?.id]);
 
   const selectedHash = urlState.event;
   const selectedLane = urlState.lane;

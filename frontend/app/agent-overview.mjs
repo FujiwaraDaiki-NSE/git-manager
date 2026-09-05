@@ -120,14 +120,27 @@ export function laneAgentTasks(lane, tasks) {
 
 export function agentSnapshotAt(events, at) {
   const cutoff = typeof at === "number" ? at : eventTime(at);
+  const ordered = [...(events || [])]
+    .filter((event) => {
+      const time = eventTime(event?.occurred_at);
+      return time !== null && (cutoff === null || time <= cutoff);
+    })
+    .sort((a, b) => (eventTime(a.occurred_at) ?? 0) - (eventTime(b.occurred_at) ?? 0) || (a.sequence ?? 0) - (b.sequence ?? 0));
   const byKey = new Map();
-  for (const event of events || []) {
-    const time = eventTime(event?.occurred_at);
-    if (time === null || (cutoff !== null && time > cutoff)) continue;
-    const key = event.task_id || event.worktree || event.branch;
+  for (const event of ordered) {
+    const key = [event.task_id, event.agent_id, event.worktree || event.branch].filter(Boolean).join("\u001f");
     if (!key) continue;
-    const current = byKey.get(key);
-    if (!current || time >= (eventTime(current.occurred_at) ?? 0)) byKey.set(key, event);
+    const current = byKey.get(key) || {};
+    // Lifecycle records intentionally carry no semantic status. Inherit the
+    // last status event while advancing only the runtime state and timeline
+    // identity, matching backend projection semantics.
+    const projected = { ...current, ...event };
+    if (event.kind === "lifecycle") {
+      for (const field of ["phase", "attention", "outcome", "summary"]) {
+        projected[field] = current[field] ?? null;
+      }
+    }
+    byKey.set(key, projected);
   }
   return [...byKey.values()].sort((a, b) => latestTime(b) - latestTime(a));
 }
@@ -136,6 +149,33 @@ export function laneAgentSnapshotAt(lane, events, at) {
   return agentSnapshotAt(events, at).filter((event) =>
     (lane?.path && event.worktree === lane.path) || (lane?.branch && event.branch === lane.branch),
   );
+}
+
+/** Apply one persisted snapshot locally without requesting a new Git graph. */
+export function mergeAgentSnapshot(project, event) {
+  if (!project || !event) return project;
+  const tasks = [...(project.agent_tasks || [])];
+  const key = (item) => [item.task_id, item.agent_id, item.worktree || item.branch].filter(Boolean).join("\u001f");
+  const eventKey = key(event);
+  const index = tasks.findIndex((item) => key(item) === eventKey);
+  if (index >= 0) tasks[index] = { ...tasks[index], ...event };
+  else tasks.push(event);
+  const counts = countsFromTasks(tasks);
+  const priorityCounts = {
+    waiting_for_user: counts.waiting_for_user,
+    blocked: counts.blocked,
+    review_required: counts.review_required,
+    merge_ready: counts.merge_ready,
+    active: counts.active,
+    completed: counts.completed,
+  };
+  return {
+    ...project,
+    agent_tasks: tasks,
+    agent_priority_counts: priorityCounts,
+    agent_state: highestAgentState(tasks),
+    latest_agent_event: event,
+  };
 }
 
 export function deferProjectOrder(current, next, interactionActive) {

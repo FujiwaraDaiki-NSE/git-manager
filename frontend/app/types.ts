@@ -125,6 +125,15 @@ export type AgentTask = {
 export type AgentEvent = AgentTask & {
   event_id: string;
   observed_at: number;
+  project_id?: string | null;
+  kind?: "lifecycle" | "status" | string;
+  sequence?: number;
+};
+
+export type AgentEventEnvelope = {
+  event_id: string;
+  worktree: string;
+  snapshot: AgentEvent;
 };
 
 export type AgentCounts = {
