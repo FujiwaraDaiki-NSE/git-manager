@@ -254,9 +254,27 @@
         </p>
         <div class="stamp">
           対象実装:
-          backend/app/main.py・scanner.py・watcher.py・gitinfo.py・detail.py・graph.py、frontend/app/graph-view.tsx・repo-detail.tsx・page.tsx、docker-compose.yml
+          backend/app/main.py・agent_events.py・mcp_server.py・scanner.py・watcher.py・gitinfo.py・detail.py・graph.py、frontend/app/graph-view.tsx・repo-detail.tsx・page.tsx、docker-compose.yml
         </div>
       </header>
+
+      <section>
+        <h2>Agent event integration（Phase 2）</h2>
+        <div class="card">
+          <p>
+            <code>POST /api/agent-events</code> と localhost の Streamable HTTP
+            <code>/mcp</code> は、明示的な Bearer token を要求する
+            <code>report_agent_status</code> だけを公開する。lifecycle は
+            <code>run_state</code> のみ、semantic status は
+            <code>phase</code>・<code>attention</code>・<code>outcome</code>・<code>summary</code>
+            を null を含めて明示する。イベントは append-only SQLite に保存し、
+            SessionEnd は終了時の MCP 制約のため command hook で送信する。
+            host hook 実行には <code>GITDASH_AGENT_ENDPOINT</code> と
+            <code>GITDASH_AGENT_TOKEN</code> の供給が必要で、ポート変更時は
+            MCP URL と endpoint を同時に更新する。
+          </p>
+        </div>
+      </section>
 
       <section>
         <h2>目的と裏テーマ</h2>

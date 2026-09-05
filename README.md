@@ -19,8 +19,10 @@ docker compose up -d --build
 
 http://localhost:4412 を開く。
 
-公開ポートは 4412 だけ。backend は `expose` のみで、ブラウザからの `/api/*` は
-frontend のルートハンドラ経由でしか到達できない。
+通常の公開ポートは 4412 です。agent integration 用 backend は
+`127.0.0.1:${GITDASH_AGENT_PORT}` にだけ bind され、`GITDASH_AGENT_TOKEN` の
+Bearer 認証が必須です。ブラウザからの `/api/*` は frontend のルートハンドラ経由で
+到達します。
 
 ## 表示するもの
 
@@ -121,6 +123,9 @@ XY コードにはツールチップを付け、状態は色だけでなく `ahe
 | `GITDASH_FETCH_WORKERS`       | 4    | fetch の並列数                       |
 | `GITDASH_FETCH_INTERVAL_SEC`  | 300  | 同一リポジトリの fetch 間隔          |
 | `GITDASH_WATCH`               | true | inotify を使うか                     |
+| `GITDASH_AGENT_PORT`           | —    | agent REST/MCP を bind する localhost ポート（必須） |
+| `GITDASH_AGENT_TOKEN`          | —    | agent REST/MCP の Bearer token（必須。未設定なら integration unavailable） |
+| `GITDASH_AGENT_ENDPOINT`       | —    | host-side command hook の REST endpoint（必須。ポートを合わせる） |
 
 除外ディレクトリは `backend/app/scanner.py` の `SKIP_NAMES`。
 `node_modules` `.venv` `.cargo` `go/pkg` などは登録済み。
@@ -148,6 +153,19 @@ watch 数が爆発するのでやっていません。ブラウザにフォー�
 **大きなリポジトリで `git status` が遅い場合**、対象リポジトリで一度だけ
 `git config core.untrackedCache true` を実行すると数倍速くなります。
 アプリ側から設定を書き換えることはしません。
+
+## agent event integration
+
+agent status は `POST /api/agent-events` または localhost の Streamable HTTP MCP
+`/mcp` の `report_agent_status` で明示的に送信します。lifecycle event は
+`run_state` のみを変更し、semantic status は `phase`、`attention`、`outcome`、
+`summary` を必ず明示します（値を消す場合は `null`）。イベントは `/data` の
+append-only SQLite に保存され、`.codex/hooks.json` が SessionStart、SubagentStart、
+Interrupt、SubagentStop、SessionEnd を command hook として送信します。SessionEnd
+は終了時に MCP が利用できないため command hook を使用します。hook は Codex の
+ホストプロセスで実行されるため、`GITDASH_AGENT_ENDPOINT` と
+`GITDASH_AGENT_TOKEN` をホスト環境へ `export`（または Codex が同等に供給）し、
+`GITDASH_AGENT_PORT` を変更した場合は `.codex/config.toml` と endpoint も合わせます。
 
 ## 開発
 
