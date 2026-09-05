@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
+import { agentSnapshotAt, agentStateLabel, laneAgentSnapshotAt } from "./agent-overview.mjs";
 import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, popoverPlacement, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
@@ -12,6 +13,7 @@ import type {
   ProjectLane,
   ProjectResponse,
   Repo,
+  AgentTask,
 } from "./types";
 
 type ControlTab = "flow" | "lanes" | "activity" | "info";
@@ -108,8 +110,38 @@ function upstreamLabel(lane: ProjectLane) {
   return `upstream ${lane.upstream} · ${pushState} · behind ${lane.upstream_behind}`;
 }
 
+function agentElapsed(occurredAt: string | null | undefined) {
+  if (!occurredAt) return "経過時間 未取得";
+  const time = new Date(occurredAt).getTime();
+  if (Number.isNaN(time)) return "経過時間 未取得";
+  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (seconds < 60) return "経過 1分未満";
+  if (seconds < 3600) return `経過 ${Math.floor(seconds / 60)}分`;
+  if (seconds < 86400) return `経過 ${Math.floor(seconds / 3600)}時間`;
+  return `経過 ${Math.floor(seconds / 86400)}日`;
+}
+
+function AgentFact({ task }: { task: AgentTask | null | undefined }) {
+  if (!task) return <span className="agent-unknown">agent 状態不明</span>;
+  return (
+    <span className="agent-fact">
+      <strong>{agentStateLabel(task.run_state)}</strong>
+      <span>{task.agent_id || task.task_id || "担当未取得"}</span>
+      <span>{task.phase || "工程未取得"}</span>
+      <span>{task.summary || "報告内容なし"}</span>
+      <time dateTime={task.occurred_at ?? undefined}>{agentElapsed(task.occurred_at)}</time>
+      {task.attention && <em>{task.attention}</em>}
+    </span>
+  );
+}
+
 function valueOrUnknown(value: string | number | null | undefined) {
   return value === null || value === undefined || value === "" ? "未取得" : String(value);
+}
+
+function agentCount(project: ProjectResponse, key: keyof ProjectResponse["agent_counts"]) {
+  const value = project.agent_counts?.[key];
+  return value === null || value === undefined ? "?" : value;
 }
 
 function projectFromUrl() {
@@ -437,6 +469,12 @@ function FlowMap({
   const maxCandidate = Math.max(...(rangeTimes.length ? rangeTimes : [now]));
   const maxTime = Math.max(minTime + 3_600_000, maxCandidate);
   const observationTime = minTime + ((maxTime - minTime) * timeline) / 100;
+  // Agent history is resolved against the same observation point as the Git
+  // flow. A historical slider value must never show the current task state.
+  const observedAgentEvents = useMemo(
+    () => agentSnapshotAt(project.agent_events, observationTime),
+    [observationTime, project.agent_events],
+  );
   const positionedEvents = rangeEvents
     .filter(({ row }) => {
       const value = eventDate(row);
@@ -592,6 +630,8 @@ function FlowMap({
           {lanes.map((lane, index) => {
             const laneEvents = eventsByLane.get(lane.id) ?? [];
             const mergeBase = mergeBasePositions.get(lane.id);
+            const snapshot = laneAgentSnapshotAt(lane, observedAgentEvents, observationTime)[0]
+              ?? (timeline === 100 ? lane.current_agent ?? lane.agents[0] ?? null : null);
             return (
               <div className="flow-row" key={lane.id}>
                 <div className="flow-lane-label" ref={index === 0 ? firstLaneLabelRef : undefined}>
@@ -602,7 +642,7 @@ function FlowMap({
                   </div>
                   <div className="flow-lane-meta">
                     <span className={`lane-state ${laneStateClass(lane, project.default_branch)}`}>{laneState(lane, project.default_branch)}</span>
-                    <span>agent 状態不明</span>
+                    <AgentFact task={snapshot} />
                     <span title={lane.path ?? undefined}>{lane.path ?? "パス未取得"}</span>
                     <span className={mergeBase?.outside ? "flow-range-note" : undefined}>{!lane.merge_base ? "分岐点 未取得" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点 表示範囲外" : "分岐点 表示中"}</span>
                   </div>
@@ -660,7 +700,7 @@ function LaneSummary({ lane, defaultBranch }: { lane: ProjectLane; defaultBranch
   return (
     <>
       <span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span>
-      <span className="agent-unknown">agent 状態不明</span>
+      <AgentFact task={lane.current_agent ?? lane.agents[0] ?? null} />
       <span className="lane-diff">
         {ahead === null || behind === null ? "既定差分 未取得" : `既定差分 +${ahead} / -${behind}`}
       </span>
@@ -691,14 +731,14 @@ function WorkLanes({
         <div>
           <p className="eyebrow">LANE REGISTER</p>
           <h3 id="lanes-title">作業一覧</h3>
-          <p className="section-copy">Git の状態と既定ブランチとの差を一覧します。agent欄は Phase 1 では未取得です。</p>
+          <p className="section-copy">Git の状態と agent の明示した現在地、次の判断を一覧します。</p>
         </div>
         {mergedCount > 0 && <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "merged を折り畳む" : `merged・完了を表示 (${mergedCount})`}</button>}
       </div>
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
-            <tr><th>作業</th><th>状態</th><th>最終活動</th><th>既定ブランチとの差</th><th>担当</th><th>合流先</th><th>次の工程</th><th aria-label="操作" /></tr>
+            <tr><th>作業</th><th>状態 / agent</th><th>最終活動</th><th>既定ブランチとの差</th><th>最新メッセージ</th><th>合流先</th><th>次の工程 / 注意</th><th aria-label="操作" /></tr>
           </thead>
           <tbody>
             {lanes.map((lane) => (
@@ -716,9 +756,9 @@ function WorkLanes({
                   <span className="table-subvalue">{exactDate(lane.last_commit?.date)}</span>
                 </td>
                 <td className="mono-cell">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
-                <td className="unknown-cell">未関連付け</td>
-                <td className="unknown-cell">合流先不明</td>
-                <td className="unknown-cell">未取得</td>
+                <td className="unknown-cell">{(lane.current_agent ?? lane.agents[0])?.summary || "報告内容なし"}</td>
+                <td className="unknown-cell">{lane.merge_target || "合流先不明"}</td>
+                <td className="unknown-cell">{lane.next_phase || (lane.current_agent ?? lane.agents[0])?.attention || "未取得"}</td>
                 <td><button className="table-action" type="button" onClick={() => onOpenGit(lane)}>Git詳細</button></td>
               </tr>
             ))}
@@ -741,19 +781,49 @@ function ActivityView({
   onFilter: (filter: ActivityFilter) => void;
   onSelect: (event: ProjectEvent) => void;
 }) {
+  const unifiedEvents = useMemo(() => [
+    ...project.events.map((event) => ({ ...event, agent_state: null as string | null, task_id: null as string | null, agent_phase: null as string | null, attention: null as string | null })),
+    ...project.agent_events.map((event) => ({
+      id: event.event_id,
+      occurred_at: event.occurred_at,
+      observed_at: event.observed_at,
+      type: "agent",
+      source: "agent",
+      project_id: project.id,
+      worktree: event.worktree,
+      branch: event.branch,
+      lane_id: project.lanes.find((lane) => (lane.path && lane.path === event.worktree) || (lane.branch && lane.branch === event.branch))?.id ?? null,
+      lane_names: [],
+      commit_hash: null,
+      subject: event.summary,
+      author: event.agent_id,
+      stats: null,
+      agent_state: event.run_state,
+      task_id: event.task_id,
+      agent_phase: event.phase,
+      attention: event.attention,
+    })),
+  ], [project.agent_events, project.events, project.id, project.lanes]);
   const events = useMemo(() => {
-    const filtered = filter === "all" ? project.events : filter === "commit" ? project.events.filter((event) => event.type === "commit") : [];
-    return [...filtered].sort((a, b) => (b.occurred_at ?? "").localeCompare(a.occurred_at ?? ""));
-  }, [filter, project.events]);
+    const filtered = unifiedEvents.filter((event) => {
+      if (filter === "all") return true;
+      if (filter === "commit") return event.type === "commit";
+      if (filter === "edit") return event.agent_phase === "implementing";
+      if (filter === "test") return event.agent_phase === "testing";
+      if (filter === "review") return event.agent_state === "review_required" || event.agent_state === "reviewing";
+      return event.agent_state === "waiting_for_user";
+    });
+    return [...filtered].sort((a, b) => (b.occurred_at ?? "").localeCompare(a.occurred_at ?? "") || b.observed_at - a.observed_at);
+  }, [filter, unifiedEvents]);
   return (
     <section className="activity-section" aria-labelledby="activity-title">
       <div className="section-heading-row">
-        <div><p className="eyebrow">EVENT STREAM</p><h3 id="activity-title">アクティビティ</h3><p className="section-copy">発生元を Git と agent 系で分離します。Phase 1 の Git イベントはコミットのみです。</p></div>
+        <div><p className="eyebrow">EVENT STREAM</p><h3 id="activity-title">アクティビティ</h3><p className="section-copy">Git と agent のイベントを絶対時刻順に表示します。発生元と状態は文字でも確認できます。</p></div>
       </div>
       <div className="activity-filters" role="toolbar" aria-label="イベント種別">
         {activityFilters.map((item) => (
           <button className="filter-button" aria-pressed={filter === item.id} type="button" key={item.id} onClick={() => onFilter(item.id)}>
-            {item.label}{item.id !== "all" && item.id !== "commit" && <span className="filter-unavailable">未取得</span>}
+            {item.label}
           </button>
         ))}
       </div>
@@ -764,8 +834,8 @@ function ActivityView({
           {events.map((event) => (
             <li key={event.id}>
               <div className="activity-time"><time dateTime={event.occurred_at ?? undefined}>{exactDate(event.occurred_at)}</time><span>{relativeTime(event.occurred_at)}</span></div>
-              <span className="activity-source"><i aria-hidden="true" />{event.source}</span>
-              <div className="activity-content"><strong>{event.subject || "(no subject)"}</strong><span>{event.lane_names?.length ? event.lane_names.join(" / ") : event.branch ?? "対象レーン未取得"} · {event.author ?? "author 未取得"}</span></div>
+              <span className="activity-source"><i aria-hidden="true" />{event.source === "agent" ? "agent" : event.source} · {event.type === "commit" ? "コミット" : event.agent_state ? agentStateLabel(event.agent_state) : event.type}</span>
+              <div className="activity-content"><strong>{event.subject || (event.type === "agent" ? "報告内容なし" : "(no subject)")}</strong><span>{event.lane_names?.length ? event.lane_names.join(" / ") : event.branch ?? "対象レーン未取得"} · {event.author ?? "author 未取得"}{event.task_id ? ` · task ${event.task_id}` : ""}</span>{event.attention && <span className="activity-attention">注意: {event.attention}</span>}</div>
               {event.commit_hash && <button className="activity-commit" type="button" onClick={() => onSelect(event)}>{shortHash(event.commit_hash)} 詳細</button>}
             </li>
           ))}
@@ -793,10 +863,11 @@ function ProjectInfo({ project }: { project: ProjectResponse }) {
         <InfoField label="使用言語" value={project.languages ? project.languages.join(", ") : null} />
         <InfoField label="主要ディレクトリ" value={project.directories ? project.directories.join(", ") : null} />
         <InfoField label="テストコマンド" value={project.test_commands ? project.test_commands.join(" / ") : null} />
-        <InfoField label="関連 agent タスク" value={project.agent_tasks ? `${project.agent_tasks.length} 件` : null} />
+        <InfoField label="関連 agent タスク" value={`${project.agent_tasks.length} 件`} />
       </div>
+      <div className="info-subsection"><h4>関連 Codex タスク</h4>{project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={task.task_id}><div><strong>{task.task_id}</strong><span>{task.agent_id || "agent 未取得"} · {agentStateLabel(task.run_state)}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">agent 状態不明（関連タスク未取得）</div>}</div>
       <div className="info-subsection"><h4>worktree 一覧</h4><div className="worktree-records">{project.worktrees.map((item) => <div className="worktree-record" key={item.path}><span className="worktree-shape" aria-hidden="true" /><strong>{item.branch ?? "detached HEAD"}</strong><code title={item.path}>{item.path}</code><span className={`lane-state ${item.state === "prunable" || item.state === "locked" ? "lane-state-warn" : "lane-state-ok"}`}>{item.state ?? "未取得"}</span></div>)}</div></div>
-      <div className="info-unavailable" role="status">agent・PR・レビュー・CI・合流先・次工程: 未取得（Phase 1）</div>
+      <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
     </section>
   );
 }
@@ -810,15 +881,15 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
     <div className="selection-content">
       <div className="selection-kicker">作業レーン</div>
       <h3>{laneLabel(lane)}</h3>
-      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><span className="agent-unknown">agent 状態不明</span></div>
+      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={lane.current_agent ?? lane.agents[0] ?? null} /></div>
       <dl className="selection-list">
         <div><dt>作業先端</dt><dd><code>{lane.head ?? "未取得"}</code></dd></div>
         <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.last_commit?.subject ?? "未取得"}<small>{exactDate(lane.last_commit?.date)}</small></dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
-        <div><dt>担当 agent</dt><dd>未関連付け</dd></div>
-        <div><dt>合流先</dt><dd>合流先不明</dd></div>
-        <div><dt>次の工程</dt><dd>未取得</dd></div>
+        <div><dt>担当 agent</dt><dd>{(lane.current_agent ?? lane.agents[0])?.agent_id || "未関連付け"}</dd></div>
+        <div><dt>合流先</dt><dd>{lane.merge_target || "合流先不明"}</dd></div>
+        <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || (lane.current_agent ?? lane.agents[0])?.attention || "未取得"}</dd></div>
       </dl>
       {lane.next_command && <div className="selection-command"><span>Git 次コマンド</span><code>{lane.next_command.command}</code><small>{lane.next_command.reason}</small></div>}
       <button className="primary-action" type="button" onClick={() => onOpenGit(lane)}>既存の Git 詳細を開く</button>
@@ -1007,7 +1078,7 @@ function LegacyUnavailableModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function ProjectControl() {
-  const { repos, scanning, connected } = useRepoStream();
+  const { repos, scanning, connected, agentEventVersion } = useRepoStream();
   const { state: urlState, update: updateUrl } = useProjectUrl();
   const [project, setProject] = useState<ProjectResponse | null>(null);
   const [projectState, setProjectState] = useState<LoadState>("idle");
@@ -1044,7 +1115,7 @@ export default function ProjectControl() {
       .then((value) => { setProject(value); setProjectState("ready"); })
       .catch((reason: unknown) => { if (reason instanceof DOMException && reason.name === "AbortError") return; setProjectState("error"); setProjectError(reason instanceof Error ? reason.message : "unknown error"); });
     return () => controller.abort();
-  }, [projectSnapshotKey, scanning, urlState.path, urlState.range]);
+  }, [agentEventVersion, projectSnapshotKey, scanning, urlState.path, urlState.range]);
 
   const selectedHash = urlState.event;
   const selectedLane = urlState.lane;
@@ -1103,7 +1174,7 @@ export default function ProjectControl() {
       </header>
       <section className="control-hero" aria-labelledby="project-title">
         <div className="control-hero-main"><p className="eyebrow">PROJECT CONTROL / GIT FACTS</p><h1 id="project-title">{project.name}</h1><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">LATEST GIT FACT</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div></div>
-        <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div><div><strong>{project.maintenance.merged}</strong><span>merged</span></div><div><strong>{project.maintenance.prunable + project.maintenance.locked}</strong><span>保守対象</span></div><div className="metric-unknown"><strong>?</strong><span>agent状態</span></div></div>
+        <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>統合可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div>
       </section>
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">
         {tabs.map((tab) => <button aria-selected={urlState.tab === tab.id} className="control-tab" key={tab.id} role="tab" type="button" onClick={() => updateUrl({ tab: tab.id })}><span>{tab.label}</span><small>{tab.short}</small></button>)}
