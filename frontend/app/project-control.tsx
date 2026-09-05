@@ -101,6 +101,10 @@ function isFoldedMerged(lane: ProjectLane) {
   return shouldFoldMergedLane(lane);
 }
 
+function currentLaneAgent(lane: ProjectLane) {
+  return lane.agent;
+}
+
 function upstreamLabel(lane: ProjectLane) {
   if (!lane.upstream) return "upstream 未取得";
   if (lane.upstream_ahead === null || lane.upstream_behind === null) {
@@ -631,7 +635,7 @@ function FlowMap({
             const laneEvents = eventsByLane.get(lane.id) ?? [];
             const mergeBase = mergeBasePositions.get(lane.id);
             const snapshot = laneAgentSnapshotAt(lane, observedAgentEvents, observationTime)[0]
-              ?? (timeline === 100 ? lane.current_agent ?? lane.agents[0] ?? null : null);
+              ?? (timeline === 100 ? currentLaneAgent(lane) : null);
             return (
               <div className="flow-row" key={lane.id}>
                 <div className="flow-lane-label" ref={index === 0 ? firstLaneLabelRef : undefined}>
@@ -700,7 +704,7 @@ function LaneSummary({ lane, defaultBranch }: { lane: ProjectLane; defaultBranch
   return (
     <>
       <span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span>
-      <AgentFact task={lane.current_agent ?? lane.agents[0] ?? null} />
+      <AgentFact task={currentLaneAgent(lane)} />
       <span className="lane-diff">
         {ahead === null || behind === null ? "既定差分 未取得" : `既定差分 +${ahead} / -${behind}`}
       </span>
@@ -756,9 +760,9 @@ function WorkLanes({
                   <span className="table-subvalue">{exactDate(lane.last_commit?.date)}</span>
                 </td>
                 <td className="mono-cell">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
-                <td className="unknown-cell">{(lane.current_agent ?? lane.agents[0])?.summary || "報告内容なし"}</td>
+                <td className="unknown-cell">{currentLaneAgent(lane)?.summary || "報告内容なし"}</td>
                 <td className="unknown-cell">{lane.merge_target || "合流先不明"}</td>
-                <td className="unknown-cell">{lane.next_phase || (lane.current_agent ?? lane.agents[0])?.attention || "未取得"}</td>
+                <td className="unknown-cell">{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</td>
                 <td><button className="table-action" type="button" onClick={() => onOpenGit(lane)}>Git詳細</button></td>
               </tr>
             ))}
@@ -881,15 +885,15 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
     <div className="selection-content">
       <div className="selection-kicker">作業レーン</div>
       <h3>{laneLabel(lane)}</h3>
-      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={lane.current_agent ?? lane.agents[0] ?? null} /></div>
+      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={currentLaneAgent(lane)} /></div>
       <dl className="selection-list">
         <div><dt>作業先端</dt><dd><code>{lane.head ?? "未取得"}</code></dd></div>
         <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.last_commit?.subject ?? "未取得"}<small>{exactDate(lane.last_commit?.date)}</small></dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
-        <div><dt>担当 agent</dt><dd>{(lane.current_agent ?? lane.agents[0])?.agent_id || "未関連付け"}</dd></div>
+        <div><dt>担当 agent</dt><dd>{currentLaneAgent(lane)?.agent_id || "未関連付け"}</dd></div>
         <div><dt>合流先</dt><dd>{lane.merge_target || "合流先不明"}</dd></div>
-        <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || (lane.current_agent ?? lane.agents[0])?.attention || "未取得"}</dd></div>
+        <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</dd></div>
       </dl>
       {lane.next_command && <div className="selection-command"><span>Git 次コマンド</span><code>{lane.next_command.command}</code><small>{lane.next_command.reason}</small></div>}
       <button className="primary-action" type="button" onClick={() => onOpenGit(lane)}>既存の Git 詳細を開く</button>

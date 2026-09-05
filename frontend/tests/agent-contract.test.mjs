@@ -8,9 +8,9 @@ const task = {
   agent_id: "agent-1",
   worktree: "/workspace/feature",
   branch: "feature",
-  run_state: "waiting_for_user",
+  run_state: "active",
   phase: "testing",
-  attention: "質問への回答が必要",
+  attention: "waiting_for_user",
   outcome: null,
   summary: "テスト結果を確認してください",
   occurred_at: "2026-09-05T07:00:00Z",
@@ -62,7 +62,7 @@ const detailPayload = {
   observed_at: 1_000,
   range: "current",
   graph: null,
-  lanes: [{ id: "feature", name: "feature", branch: "feature", path: "/workspace/feature", agents: [task], current_agent: task }],
+  lanes: [{ id: "feature", name: "feature", branch: "feature", path: "/workspace/feature", agent: task }],
   events: [],
   latest_event: null,
   branch_counts: { local: 1, remote: 0 },
@@ -85,7 +85,7 @@ test("frontend contract follows backend legacy and priority agent fields", () =>
   assert.equal(summaryPayload.agent_state, "waiting_for_user");
   assert.equal(summaryPayload.latest_agent_event.summary, "テスト結果を確認してください");
   assert.equal(detailPayload.agent_latest_event.event_id, "event-1");
-  assert.equal(detailPayload.lanes[0].current_agent.task_id, "task-1");
+  assert.equal(detailPayload.lanes[0].agent.task_id, "task-1");
   assert.equal(projectLatestTime(summaryPayload), Date.parse(task.occurred_at));
   for (const key of ["waiting_for_user", "blocked", "review_required", "merge_ready", "active", "completed"]) {
     assert.notEqual(summaryPayload.agent_priority_counts[key], undefined);

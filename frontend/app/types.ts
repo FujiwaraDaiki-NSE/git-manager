@@ -166,8 +166,7 @@ export type ProjectLane = {
   last_commit: Commit & { short?: string } | null;
   next_command: NextCommand | null;
   error: string | null;
-  agents: AgentTask[];
-  current_agent: AgentTask | null;
+  agent: AgentTask | null;
   merge_target: string | null;
   next_phase: string | null;
 };
