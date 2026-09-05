@@ -1,5 +1,3 @@
 [mcp_servers.gitdash-agent-events]
-type = "streamable_http"
 url = "http://127.0.0.1:8000/mcp"
 bearer_token_env_var = "GITDASH_AGENT_TOKEN"
-instructions = "Report explicit semantic status with report_agent_status. Lifecycle events may set only run_state. Status events must explicitly set phase, attention, outcome, and summary; use null to clear values. Calls append persistent events. SessionEnd uses the command hook because MCP is unavailable during process shutdown."

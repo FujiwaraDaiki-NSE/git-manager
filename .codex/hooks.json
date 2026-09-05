@@ -1,9 +1,9 @@
 {
   "hooks": {
-    "SessionStart": [{"command": "python3 .codex/hooks/report_agent_event.py SessionStart"}],
-    "SubagentStart": [{"command": "python3 .codex/hooks/report_agent_event.py SubagentStart"}],
-    "Interrupt": [{"command": "python3 .codex/hooks/report_agent_event.py Interrupt"}],
-    "SubagentStop": [{"command": "python3 .codex/hooks/report_agent_event.py SubagentStop"}],
-    "SessionEnd": [{"command": "python3 .codex/hooks/report_agent_event.py SessionEnd"}]
+    "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}],
+    "SubagentStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}],
+    "Interrupt": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}],
+    "SubagentStop": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}],
+    "SessionEnd": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}]
   }
 }
