@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from app import detail, gitinfo, graph, paths, scanner
+from app import agent_events, detail, gitinfo, graph, paths, scanner
 
 MAX_PROJECT_COMMITS = 200
 README_MAX_CHARS = 280
@@ -340,6 +340,42 @@ def _lane_status(
     }
 
 
+def _agent_counts(snapshots: list[Mapping[str, Any]]) -> dict[str, int | None]:
+    """Count explicit agent projections; no snapshot means unavailable."""
+    if not snapshots:
+        return {
+            "running": None,
+            "waiting_for_user": None,
+            "problem": None,
+            "reviewing": None,
+            "integratable": None,
+        }
+    categories = _agent_priority_categories(snapshots)
+    return {
+        "running": categories["active"],
+        "waiting_for_user": categories["waiting_for_user"],
+        "problem": categories["blocked"],
+        "reviewing": categories["review_required"],
+        "integratable": categories["merge_ready"],
+    }
+
+
+def _agent_priority_categories(snapshots: list[Mapping[str, Any]]) -> dict[str, int | None]:
+    """Classify each task into exactly one explicit priority bucket."""
+    if not snapshots:
+        return {name: None for name in ("waiting_for_user", "blocked", "review_required", "merge_ready", "active", "completed")}
+    result = {name: 0 for name in ("waiting_for_user", "blocked", "review_required", "merge_ready", "active", "completed")}
+    for item in snapshots:
+        attention = item.get("attention")
+        if attention in {"waiting_for_user", "blocked", "review_required", "merge_ready"}:
+            result[attention] += 1
+        elif item.get("run_state") == "active":
+            result["active"] += 1
+        elif item.get("outcome") == "completed":
+            result["completed"] += 1
+    return result
+
+
 def _parse_track(track: str | None) -> tuple[int | None, int | None]:
     """Parse Git's explicit ``[ahead N, behind M]`` tracking fact."""
     if not track:
@@ -389,6 +425,7 @@ def build(
     *,
     limit: int = MAX_PROJECT_COMMITS,
     range_name: str = "current",
+    as_of: datetime | None = None,
 ) -> dict[str, Any] | None:
     """Build the project control payload from one concrete Git checkout."""
     if range_name not in PROJECT_RANGES:
@@ -407,6 +444,9 @@ def build(
     exact_rows = dict(state_rows)
     for path, row in normalized_state.items():
         exact_rows.setdefault(path, row)
+
+    agent_snapshots = agent_events.snapshots(project_id=project_id, state=state_rows, as_of=as_of)
+    agent_history = agent_events.project_events(project_id, state=state_rows, as_of=as_of)
 
     worktrees, worktree_by_branch, main_path = _worktree_rows(repo, common_host, exact_rows)
     branch_data = detail.get_branches(repo)
@@ -468,8 +508,7 @@ def build(
                 "last_commit": commit,
                 "next_command": status["next_command"],
                 "error": status["error"],
-                # Phase 2/3 inputs are intentionally unavailable in Phase 1.
-                "agent": None,
+                "agent": agent_snapshots.get(status["path"]) if isinstance(status.get("path"), str) else None,
                 "merge_target": None,
                 "next_phase": None,
             }
@@ -517,7 +556,7 @@ def build(
                 "last_commit": commit,
                 "next_command": status["next_command"],
                 "error": status["error"],
-                "agent": None,
+                "agent": agent_snapshots.get(path),
                 "merge_target": None,
                 "next_phase": None,
             }
@@ -628,6 +667,14 @@ def build(
     main_row = exact_rows.get(main_path) or normalized_state.get(_key(main_path))
     fetched_at = main_row.get("fetched_at") if main_row else None
 
+    agent_history.sort(key=lambda event: (_iso_epoch(event.get("occurred_at")) or 0, event.get("sequence", 0)))
+    agent_latest_event = agent_history[-1] if agent_history else None
+    # The activity feed contains both explicit agent events and Git facts. The
+    # legacy latest_event field remains the latest Git commit for compatibility.
+    events.extend(agent_history)
+    events.sort(key=lambda event: (_iso_epoch(event.get("occurred_at")) or 0, event.get("sequence", 0)))
+    agent_counts = _agent_counts(list(agent_snapshots.values()))
+    agent_priority_counts = _agent_priority_categories(list(agent_snapshots.values()))
     return {
         "id": project_id,
         "name": os.path.basename(project_id.rstrip("/")) or project_id,
@@ -643,6 +690,9 @@ def build(
         "lanes": lanes,
         "events": events,
         "latest_event": latest_event,
+        "agent_events": agent_history,
+        "agent_latest_event": agent_latest_event,
+        "agent_snapshots": list(agent_snapshots.values()),
         "branch_counts": {"local": len(local), "remote": len(remotes)},
         "worktrees": worktrees,
         "maintenance": {
@@ -654,14 +704,9 @@ def build(
         "languages": None,
         "directories": None,
         "test_commands": None,
-        "agent_tasks": None,
-        "agent_counts": {
-            "running": None,
-            "waiting_for_user": None,
-            "problem": None,
-            "reviewing": None,
-            "integratable": None,
-        },
+        "agent_tasks": sorted(list(agent_snapshots.values()), key=lambda item: (item.get("worktree") or "", item.get("task_id") or "")) or None,
+        "agent_counts": agent_counts,
+        "agent_priority_counts": agent_priority_counts,
         "ci": None,
         "reviews": None,
         "merge_target": None,
@@ -679,6 +724,13 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
 
     summaries: list[dict[str, Any]] = []
     for project_id, rows in groups.items():
+        agent_snapshots = agent_events.snapshots(project_id=project_id, state=state)
+        snapshot_values = list(agent_snapshots.values())
+        agent_counts = _agent_counts(snapshot_values)
+        agent_priority_counts = _agent_priority_categories(snapshot_values)
+        agent_history = agent_events.project_events(project_id, state=state)
+        agent_history.sort(key=lambda event: (_iso_epoch(event.get("occurred_at")) or 0, event.get("sequence", 0)))
+        latest_agent = agent_history[-1] if agent_history else None
         main = next((row for row in rows if row.get("is_worktree") is False), rows[0])
         commits = [
             row.get("last_commit")
@@ -759,7 +811,42 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
                     if difference > largest_difference:
                         largest_difference = difference
                         largest_difference_lane = branch
-        issue_rank = 0 if conflicts else 1 if dirty else 2 if behind else 3
+        # Explicit agent attention has priority over Git maintenance facts.
+        attention_priority = {
+            "waiting_for_user": 0,
+            "blocked": 1,
+            "review_required": 2,
+            "merge_ready": 3,
+        }
+        explicit_priorities = [
+            attention_priority[item.get("attention")]
+            for item in snapshot_values
+            if item.get("attention") in attention_priority
+        ]
+        active_agents = any(item.get("run_state") == "active" for item in snapshot_values)
+        completed_agents = bool(snapshot_values) and all(item.get("outcome") == "completed" for item in snapshot_values)
+        issue_rank = (
+            min(explicit_priorities)
+            if explicit_priorities
+            else 4
+            if active_agents
+            else 5
+            if completed_agents
+            else 6
+            if snapshot_values
+            else 0 if conflicts else 1 if dirty else 2 if behind else 3
+        )
+        latest_summary = latest_agent.get("summary") if latest_agent else None
+        agent_state = None
+        if snapshot_values:
+            state_order = ("waiting_for_user", "blocked", "review_required", "merge_ready")
+            agent_state = next((value for value in state_order if any(item.get("attention") == value for item in snapshot_values)), None)
+            if agent_state is None and active_agents:
+                agent_state = "active"
+            elif agent_state is None and completed_agents:
+                agent_state = "completed"
+            elif agent_state is None:
+                agent_state = next((item.get("phase") for item in snapshot_values if item.get("phase")), None)
         summaries.append(
             {
                 "id": project_id,
@@ -781,6 +868,9 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
                     "locked": locked,
                 },
                 "latest_event": latest,
+                "latest_agent_event": latest_agent,
+                "latest_summary": latest_summary,
+                "agent_tasks": sorted(snapshot_values, key=lambda item: (item.get("worktree") or "", item.get("task_id") or "")) or None,
                 "latest_observed_at": max(
                     (row.get("activity", 0) for row in rows if isinstance(row.get("activity", 0), (int, float))),
                     default=0,
@@ -789,14 +879,9 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
                 "next_lane": next_lane,
                 "largest_difference_lane": largest_difference_lane,
                 # Never interpret a worktree as an agent being active.
-                "agent_counts": {
-                    "running": None,
-                    "waiting_for_user": None,
-                    "problem": None,
-                    "reviewing": None,
-                    "integratable": None,
-                },
-                "agent_state": None,
+                "agent_counts": agent_counts,
+                "agent_priority_counts": agent_priority_counts,
+                "agent_state": agent_state,
             }
         )
     summaries.sort(

@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "SessionStart": [{"command": "python3 .codex/hooks/report_agent_event.py SessionStart"}],
+    "SubagentStart": [{"command": "python3 .codex/hooks/report_agent_event.py SubagentStart"}],
+    "Interrupt": [{"command": "python3 .codex/hooks/report_agent_event.py Interrupt"}],
+    "SubagentStop": [{"command": "python3 .codex/hooks/report_agent_event.py SubagentStop"}],
+    "SessionEnd": [{"command": "python3 .codex/hooks/report_agent_event.py SessionEnd"}]
+  }
+}
