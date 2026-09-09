@@ -134,22 +134,34 @@ def _parse_ref_line(line: str) -> dict[str, Any] | None:
 
 
 def get_branches(repo: str) -> dict[str, Any] | None:
-    """ローカル/リモート ref と HEAD にマージ済みのローカル ref を返す。"""
+    """ローカル/リモート ref と origin/HEAD 基準の merged 状態を返す。"""
     refs = gitinfo._run(repo, ["for-each-ref", f"--format={REF_FORMAT}", "refs/heads", "refs/remotes"])
     if refs is None:
         return None
-    merged_raw = gitinfo._run(repo, ["branch", "--merged", "HEAD", "--format=%(refname:short)"])
-    if merged_raw is None:
-        merged = set()
-    else:
-        merged = {line.strip() for line in merged_raw.splitlines() if line.strip()}
+    default_branch = gitinfo.default_branch(repo)
+    merged: set[str] | None = None
+    if default_branch:
+        merged_raw = gitinfo._run(
+            repo,
+            [
+                "branch",
+                "--merged",
+                f"refs/remotes/origin/{default_branch}",
+                "--format=%(refname:short)",
+            ],
+        )
+        if merged_raw is not None:
+            merged = {line.strip() for line in merged_raw.splitlines() if line.strip()}
     local: list[dict[str, Any]] = []
     remotes: list[dict[str, Any]] = []
     for line in refs.splitlines():
         branch = _parse_ref_line(line)
         if branch is None:
             continue
-        branch["merged"] = branch["name"] in merged
+        # Without origin/HEAD Git has not supplied a trustworthy merge target;
+        # keep the fact unavailable instead of treating the current checkout's
+        # reachability as project completion.
+        branch["merged"] = branch["name"] in merged if merged is not None and not branch["remote"] else None
         if branch.pop("remote"):
             remotes.append(branch)
         else:

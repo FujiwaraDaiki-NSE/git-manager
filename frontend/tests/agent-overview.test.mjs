@@ -1,0 +1,98 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  agentSnapshotAt,
+  agentTaskState,
+  countsFromTasks,
+  deferProjectOrder,
+  highestAgentState,
+  mergeAgentSnapshot,
+  sortProjects,
+  topAgentTasks,
+} from "../app/agent-overview.mjs";
+
+const task = (task_id, run_state, occurred_at, extra = {}) => ({
+  task_id,
+  agent_id: `agent-${task_id}`,
+  worktree: `/work/${task_id}`,
+  branch: task_id,
+  run_state,
+  phase: null,
+  attention: null,
+  outcome: null,
+  summary: null,
+  occurred_at,
+  ...extra,
+});
+
+test("agent priority, top three, and mutually exclusive counts use explicit states", () => {
+  const tasks = [
+    task("active", "active", "2026-09-01T01:00:00Z"),
+    task("blocked", "active", "2026-09-01T02:00:00Z", { attention: "blocked" }),
+    task("waiting", "active", "2026-09-01T00:00:00Z", { attention: "waiting_for_user" }),
+    task("review", "active", "2026-09-01T03:00:00Z", { attention: "review_required" }),
+  ];
+  assert.equal(agentTaskState(tasks[1]), "blocked");
+  assert.equal(agentTaskState(task("active-done", "active", "2026-09-01T04:00:00Z", { outcome: "completed" })), "active");
+  assert.equal(highestAgentState(tasks), "waiting_for_user");
+  assert.deepEqual(topAgentTasks(tasks, 3).map((item) => item.task_id), ["waiting", "blocked", "review"]);
+  assert.deepEqual(countsFromTasks(tasks), { waiting_for_user: 1, blocked: 1, review_required: 1, merge_ready: 0, active: 1, completed: 0, total: 4 });
+  assert.equal(highestAgentState([]), null);
+  assert.deepEqual(countsFromTasks(null), { waiting_for_user: 0, blocked: 0, review_required: 0, merge_ready: 0, active: 0, completed: 0, total: 0 });
+});
+
+test("project sorting uses agent priority, then absolute latest time", () => {
+  const base = { git: { conflict: 0, dirty: 0, behind: 0 }, latest_observed_at: 0, agent_tasks: [] };
+  const projects = [
+    { ...base, id: "active", name: "active", agent_state: "active", latest_agent_event: { occurred_at: "2026-09-01T03:00:00Z" } },
+    { ...base, id: "waiting", name: "waiting", agent_state: "waiting_for_user", latest_agent_event: { occurred_at: "2026-09-01T00:00:00Z" } },
+    { ...base, id: "blocked", name: "blocked", agent_state: "blocked", latest_agent_event: { occurred_at: "2026-09-01T02:00:00Z" } },
+  ];
+  assert.deepEqual(sortProjects(projects).map((item) => item.id), ["waiting", "blocked", "active"]);
+});
+
+test("as-of snapshots choose one latest event per task without showing future state", () => {
+  const events = [
+    { ...task("one", "active", "2026-09-01T01:00:00Z"), event_id: "1", observed_at: 1 },
+    { ...task("one", "completed", "2026-09-01T03:00:00Z"), event_id: "2", observed_at: 2 },
+    { ...task("two", "blocked", "2026-09-01T02:00:00Z"), event_id: "3", observed_at: 3 },
+  ];
+  assert.deepEqual(agentSnapshotAt(events, Date.parse("2026-09-01T02:30:00Z")).map((item) => item.run_state), ["blocked", "active"]);
+});
+
+test("as-of lifecycle replay inherits semantic status while advancing run_state", () => {
+  const events = [
+    { ...task("one", "active", "2026-09-01T01:00:00Z", { kind: "status", phase: "testing", attention: "blocked", summary: "テスト失敗" }), event_id: "status", sequence: 1 },
+    { ...task("one", "stopped", "2026-09-01T02:00:00Z", { kind: "lifecycle", phase: null, attention: null, summary: null }), event_id: "lifecycle", sequence: 2 },
+  ];
+  const [snapshot] = agentSnapshotAt(events, Date.parse("2026-09-01T02:30:00Z"));
+  assert.equal(snapshot.run_state, "stopped");
+  assert.equal(snapshot.phase, "testing");
+  assert.equal(snapshot.attention, "blocked");
+  assert.equal(snapshot.summary, "テスト失敗");
+});
+
+test("incremental agent snapshot updates one project task without replacing Git facts", () => {
+  const project = {
+    id: "repo",
+    git: { conflict: 0, dirty: 0, behind: 0 },
+    agent_tasks: [task("one", "active", "2026-09-01T01:00:00Z")],
+    agent_priority_counts: { waiting_for_user: 0, blocked: 0, review_required: 0, merge_ready: 0, active: 1, completed: 0 },
+    agent_state: "active",
+    latest_agent_event: null,
+    latest_event: { date: "2026-09-01T01:00:00Z" },
+  };
+  const event = { ...task("one", "active", "2026-09-01T02:00:00Z", { attention: "waiting_for_user", summary: "回答待ち" }), event_id: "next", observed_at: 2 };
+  const next = mergeAgentSnapshot(project, event);
+  assert.equal(next.agent_tasks.length, 1);
+  assert.equal(next.agent_tasks[0].attention, "waiting_for_user");
+  assert.equal(next.agent_priority_counts.waiting_for_user, 1);
+  assert.equal(next.agent_state, "waiting_for_user");
+  assert.equal(next.latest_event.date, "2026-09-01T01:00:00Z");
+});
+
+test("deferred ordering retains focused cards and exposes changed order", () => {
+  assert.deepEqual(deferProjectOrder(["a", "b", "c"], ["b", "a", "c"], true), { order: ["a", "b", "c"], deferred: true });
+  assert.deepEqual(deferProjectOrder(["a", "b"], ["b", "a"], false), { order: ["b", "a"], deferred: false });
+});

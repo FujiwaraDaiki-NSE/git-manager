@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}],
+    "SubagentStart": [{"hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}],
+    "Interrupt": [{"hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}],
+    "SubagentStop": [{"hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/report_agent_event.py\"", "timeout": 3}]}]
+  }
+}

@@ -1,10 +1,18 @@
 services:
+  data-init:
+    build: ./backend
+    restart: "no"
+    user: "0:0"
+    command: ["chown", "-R", "${GITDASH_UID}:${GITDASH_GID}", "/data"]
+    volumes:
+      - gitdash-data:/data
+
   backend:
     build: ./backend
     restart: always
-    # ポートは公開しない。frontend からのみ到達できる
-    expose:
-      - "8000"
+    # Agent/MCP integration is host-local and never exposed on LAN.
+    ports:
+      - "127.0.0.1:${GITDASH_AGENT_PORT}:8000"
     # ホストの uid で動かす。root だと git の safe.directory に引っかかる
     user: "${GITDASH_UID}:${GITDASH_GID}"
     environment:
@@ -19,6 +27,7 @@ services:
       GITDASH_FETCH_WORKERS: ${GITDASH_FETCH_WORKERS:-4}
       GITDASH_FETCH_INTERVAL_SEC: ${GITDASH_FETCH_INTERVAL_SEC:-300}
       GITDASH_WATCH: ${GITDASH_WATCH:-true}
+      GITDASH_AGENT_TOKEN: ${GITDASH_AGENT_TOKEN}
       HOME: /home/host
     volumes:
       # fetch が .git に書き込むため rw。アプリは fetch 以外書き込まない
@@ -27,6 +36,9 @@ services:
       # SSH リモートへ fetch するための鍵と設定。読み取り専用
       - ${HOME}/.ssh:/home/host/.ssh:ro
       - ${HOME}/.gitconfig:/home/host/.gitconfig:ro
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')\""]
       interval: 30s

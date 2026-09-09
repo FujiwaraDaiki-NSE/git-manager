@@ -4,17 +4,19 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app import config, detail, gitinfo, graph, paths, scanner, store
+from app import agent_events, config, detail, gitinfo, graph, mcp_server, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
 
@@ -125,6 +127,19 @@ def _get_commit_sync(host_path: str, repo: str, commit_hash: str) -> dict[str, A
 def _get_branches_sync(host_path: str, repo: str) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return detail.get_branches(repo)
+
+
+def _get_project_sync(
+    host_path: str,
+    repo: str,
+    project_id: str,
+    state_rows: dict[str, dict[str, Any]],
+    range_name: str,
+    as_of: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Build one project payload while sharing the repository Git lock."""
+    with _repo_lock(host_path):
+        return project.build(repo, project_id, state_rows, range_name=range_name, as_of=as_of)
 
 
 def _upsert(repo: dict[str, Any]) -> None:
@@ -906,6 +921,14 @@ async def lifespan(_app: FastAPI):
     loop = asyncio.get_running_loop()
     _app.state.loop = loop
     bus.bind(loop)
+    try:
+        agent_events.initialize()
+    except (OSError, sqlite3.Error):
+        # Git browsing remains available when the optional integration's
+        # persistence directory has not been mounted.
+        pass
+    mcp_server.set_state_provider(_state_snapshot)
+    mcp_server.set_event_publisher(lambda event: bus.publish("agent_event", event))
 
     # 探索せずキャッシュから即座に立ち上げる
     cached = _load_cached_state()
@@ -922,7 +945,9 @@ async def lifespan(_app: FastAPI):
                     watcher.watch(container)
 
     asyncio.create_task(_discover())
-    yield
+    mcp_http_lifespan = mcp_http_app.router.lifespan_context(mcp_http_app)
+    async with mcp_http_lifespan:
+        yield
 
     if watcher is not None:
         watcher.stop()
@@ -931,6 +956,104 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="gitdash", docs_url="/api/docs", lifespan=lifespan)
+
+
+class _MCPBearer:
+    """Small ASGI guard because FastMCP's OAuth verifier is not configured."""
+
+    def __init__(self, wrapped: Any) -> None:
+        self.wrapped = wrapped
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") == "http":
+            headers = {key.lower(): value for key, value in scope.get("headers", [])}
+            authorization = headers.get(b"authorization")
+            expected = os.environ.get("GITDASH_AGENT_TOKEN")
+            if not expected:
+                await _send_json(send, 503, {"detail": "agent event integration unavailable"})
+                return
+            if authorization != f"Bearer {expected}".encode():
+                await _send_json(send, 401, {"detail": "invalid bearer token"})
+                return
+        await self.wrapped(scope, receive, send)
+
+
+async def _send_json(send: Any, status: int, body: dict[str, Any]) -> None:
+    encoded = json.dumps(body).encode()
+    await send({"type": "http.response.start", "status": status, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(encoded)).encode())]})
+    await send({"type": "http.response.body", "body": encoded})
+
+
+mcp_http_app = mcp_server.mcp.streamable_http_app()
+app.mount("/mcp", _MCPBearer(mcp_http_app), name="mcp")
+
+
+def _state_snapshot() -> dict[str, dict[str, Any]]:
+    with STATE_LOCK:
+        return {path: dict(row) for path, row in STATE.items()}
+
+
+def _agent_token_valid(authorization: str | None) -> bool:
+    """Require an explicitly configured bearer token for agent integration."""
+    expected = os.environ.get("GITDASH_AGENT_TOKEN")
+    if not expected:
+        return False
+    return authorization == f"Bearer {expected}"
+
+
+@app.post(
+    "/api/agent-events",
+    operation_id="report_agent_status",
+    response_model=agent_events.ReportAgentStatusResponse,
+    summary="Report an explicit agent lifecycle or semantic status event",
+)
+async def report_agent_status(
+    request: agent_events.AgentEventRequest,
+    authorization: str | None = Header(default=None),
+) -> agent_events.ReportAgentStatusResponse:
+    """Persist an agent event after bearer authentication and exact-worktree validation.
+
+    This endpoint has a side effect: accepted events are appended to the
+    agent-event SQLite log and published to SSE after the database commit.
+    Lifecycle events alter only ``run_state``; semantic status events must set
+    all semantic fields explicitly, including nulls used for clearing.
+    """
+    if not _agent_token_valid(authorization):
+        if not os.environ.get("GITDASH_AGENT_TOKEN"):
+            raise HTTPException(status_code=503, detail="agent event integration unavailable")
+        raise HTTPException(status_code=401, detail="invalid bearer token")
+    try:
+        response = agent_events.append(request, _state_snapshot())
+    except agent_events.DuplicateEventConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail="agent event persistence unavailable") from exc
+    # append() commits before returning. Never notify subscribers before that.
+    bus.publish("agent_event", {"event_id": request.event_id, "worktree": request.worktree, "snapshot": response.snapshot})
+    return response
+
+
+@app.get("/api/agent-events", operation_id="list_agent_events")
+async def list_agent_events(
+    project_id: str | None = None,
+    worktree: str | None = None,
+    as_of: datetime | None = None,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Read the append-only agent history, optionally replayed as-of a time."""
+    if not _agent_token_valid(authorization):
+        if not os.environ.get("GITDASH_AGENT_TOKEN"):
+            raise HTTPException(status_code=503, detail="agent event integration unavailable")
+        raise HTTPException(status_code=401, detail="invalid bearer token")
+    if as_of is not None and (as_of.tzinfo is None or as_of.utcoffset() is None):
+        raise HTTPException(status_code=422, detail="as_of must include a timezone")
+    try:
+        rows = agent_events.events(project_id=project_id, worktree=worktree, as_of=as_of)
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail="agent event persistence unavailable") from exc
+    return {"events": rows}
 
 
 @app.get("/api/repos")
@@ -947,6 +1070,63 @@ async def get_repos() -> dict[str, Any]:
             "log": "git log --oneline --graph --all",
         },
     }
+
+
+@app.get("/api/projects")
+async def get_projects() -> dict[str, Any]:
+    """Return lightweight project cards without loading graph/diff data."""
+    with STATE_LOCK:
+        snapshot = {path: dict(repo) for path, repo in STATE.items()}
+    projects = project.summary_rows(snapshot)
+    return {
+        "count": len(projects),
+        "scanning": scanning["active"],
+        "projects": projects,
+    }
+
+
+@app.get("/api/project")
+async def get_project(path: str, range: str = "current", as_of: datetime | None = None) -> dict[str, Any]:
+    """Return one project control payload composed from Git observations."""
+    if range not in project.PROJECT_RANGES:
+        raise HTTPException(status_code=422, detail="range は current、24h、7d、all のいずれかで指定してください")
+    if as_of is not None and (as_of.tzinfo is None or as_of.utcoffset() is None):
+        raise HTTPException(status_code=422, detail="as_of must include a timezone")
+    with STATE_LOCK:
+        selected = STATE.get(path)
+        if selected is None:
+            raise HTTPException(status_code=404, detail="リポジトリが見つかりません")
+        project_id = selected.get("common_dir")
+        project_id = project_id if isinstance(project_id, str) and project_id else path
+        siblings = {
+            sibling_path: dict(row)
+            for sibling_path, row in STATE.items()
+            if row.get("common_dir") == project_id
+            or sibling_path == project_id
+        }
+        representative = next(
+            (
+                sibling_path
+                for sibling_path, row in siblings.items()
+                if row.get("is_worktree") is False
+            ),
+            path,
+        )
+    repo = paths.to_container(representative)
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        pool,
+        _get_project_sync,
+        representative,
+        repo,
+        project_id,
+        siblings,
+        range,
+        as_of,
+    )
+    if result is None:
+        raise HTTPException(status_code=502, detail="プロジェクトの Git 情報を取得できませんでした")
+    return result
 
 
 @app.get("/api/repo/graph")
