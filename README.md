@@ -167,6 +167,14 @@ Interrupt、SubagentStop、SessionEnd を command hook として送信します�
 `GITDASH_AGENT_TOKEN` をホスト環境へ `export`（または Codex が同等に供給）し、
 `GITDASH_AGENT_PORT` を変更した場合は `.codex/config.toml` と endpoint も合わせます。
 
+MCP は通常セッションのコンテキストを増やさないよう、プロジェクト設定では既定で
+`enabled = false` です。意味的な agent status を報告したいセッションだけ、次のように
+明示して起動します。Hooks による lifecycle event の送信はこの設定と独立して動作します。
+
+```bash
+codex --config mcp_servers.gitdash-agent-events.enabled=true
+```
+
 ## 開発
 
 ```bash

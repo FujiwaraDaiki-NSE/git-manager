@@ -356,6 +356,7 @@ def test_project_local_mcp_config_and_hooks_shape() -> None:
 
     config = tomllib.loads((root / ".codex/config.toml").read_text())
     server = config["mcp_servers"]["gitdash-agent-events"]
-    assert set(server) == {"url", "bearer_token_env_var"}
+    assert set(server) == {"url", "bearer_token_env_var", "enabled"}
     assert server["bearer_token_env_var"] == "GITDASH_AGENT_TOKEN"
     assert server["url"].endswith("/mcp")
+    assert server["enabled"] is False
