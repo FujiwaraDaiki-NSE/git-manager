@@ -3563,7 +3563,10 @@ body {
 .flow-scroll { border: 1px solid var(--control-border); border-radius: 8px; --control-label-width: 260px; }
 .flow-axis { font: 12px var(--control-sans); gap: 0; padding-top: 0; padding-bottom: 0; }
 .flow-axis > span { padding: 12px; border-right: 1px solid var(--control-border); }
-.flow-axis-track { padding: 12px 8px; }
+.flow-axis-track { padding: 0; position: relative; min-height: 40px; }
+.flow-axis-track > span { position: absolute; top: 12px; transform: translateX(-50%); }
+.flow-axis-track > span:first-child { transform: none; }
+.flow-axis-track > span:last-child { transform: translateX(-100%); }
 .flow-lane-label { border-right: 1px solid var(--control-border); padding: 8px 12px; }
 .flow-lane-title { height: 30px; }
 .flow-lane-button { font-size: 13px; min-height: 30px; }

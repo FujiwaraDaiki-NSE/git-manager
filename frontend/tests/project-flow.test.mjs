@@ -9,6 +9,8 @@ import {
   flowPopoverPlacement,
   layoutFlowEvents,
   mergeBasePosition,
+  recentTimePosition,
+  recentTimeAt,
   mergeRelationInWindow,
   mergeRelationLinks,
   routeMergeLinks,
@@ -210,7 +212,7 @@ test("merge-base remains anchored at the range edge when its commit is hidden", 
   );
   assert.deepEqual(
     mergeBasePosition("2026-09-03T12:00:00+09:00", start, end),
-    { x: 50, outside: false, available: true },
+    { x: recentTimePosition(Date.parse("2026-09-03T12:00:00+09:00"), start, end), outside: false, available: true },
   );
 });
 
@@ -237,8 +239,8 @@ test("merge links preserve source and non-default target direction", () => {
   assert.equal(links.length, 1);
   assert.equal(links[0].sourceIndex, 2);
   assert.equal(links[0].targetIndex, 1);
-  assert.equal(links[0].x, 50);
-  assert.equal(links[0].sourceX, 25);
+  assert.equal(links[0].x, recentTimePosition(Date.parse("2026-09-03T12:00:00+09:00"),Date.parse("2026-09-03T00:00:00+09:00"),Date.parse("2026-09-04T00:00:00+09:00")));
+  assert.equal(links[0].sourceX, recentTimePosition(Date.parse("2026-09-03T06:00:00+09:00"),Date.parse("2026-09-03T00:00:00+09:00"),Date.parse("2026-09-04T00:00:00+09:00")));
   assert.equal(links[0].target_branch, "release");
 });
 
@@ -374,4 +376,36 @@ test("missing or inverted source dates are explicit and never fabricated", () =>
   const [clipped] = mergeRelationLinks(...args,[{hash:"parent",date:"2026-09-02T00:00:00Z"}]);
   assert.equal(clipped.sourceX,0);
   assert.equal(clipped.sourceOutside,true);
+});
+
+
+test("recent time scale expands recent hours and remains monotonic and invertible", () => {
+  const now = Date.parse("2026-09-14T12:00:00Z"), hour = 3_600_000;
+  for (const duration of [hour, 24*hour, 7*24*hour, 365*24*hour]) {
+    const min = now-duration;
+    assert.equal(recentTimePosition(min,min,now),0);
+    assert.equal(recentTimePosition(now,min,now),100);
+    let previous = -1;
+    for(let i=0;i<=100;i++) {
+      const time = min+duration*i/100;
+      const position = recentTimePosition(time,min,now);
+      assert.ok(position > previous);
+      assert.ok(Math.abs(recentTimeAt(position,min,now)-time)<.01);
+      previous = position;
+    }
+    assert.ok(100-recentTimePosition(now-hour/2,min,now) > recentTimePosition(min+hour/2,min,now));
+    assert.ok(recentTimeAt(50,min,now) > min+duration/2);
+    assert.equal(mergeBasePosition(new Date(now-hour/2).toISOString(),min,now).x,recentTimePosition(now-hour/2,min,now));
+  }
+});
+
+test("logarithmic slider preserves the URL's elapsed-time percentage", () => {
+  const min=Date.parse("2026-09-01T00:00:00Z"), max=Date.parse("2026-09-14T00:00:00Z");
+  const observed=min+(max-min)*.7;
+  const slider=recentTimePosition(observed,min,max);
+  assert.ok(Math.abs((recentTimeAt(slider,min,max)-min)/(max-min)*100-70)<1e-9);
+  assert.equal(recentTimeAt(100,min,max),max);
+  assert.equal(recentTimePosition(min-1000,min,max),0);
+  assert.equal(recentTimePosition(max+1000,min,max),100);
+  assert.throws(()=>recentTimePosition(max,min,min),RangeError);
 });

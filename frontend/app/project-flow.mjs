@@ -91,6 +91,26 @@ export function shouldFoldMergedLane({ merged, is_worktree, dirty, conflict, wor
   return completed && is_worktree !== true && dirty !== true && conflict !== true;
 }
 
+// A one-hour transition keeps the most recent hour nearly linear while
+// progressively compressing older time. Both directions share this constant.
+const RECENT_TIME_UNIT = 3_600_000;
+
+export function recentTimePosition(time, minTime, maxTime) {
+  if (![time, minTime, maxTime].every(Number.isFinite) || maxTime <= minTime) throw new RangeError("Invalid time scale");
+  if (time <= minTime) return 0;
+  if (time >= maxTime) return 100;
+  return 100 * (1 - Math.log1p((maxTime - time) / RECENT_TIME_UNIT)
+    / Math.log1p((maxTime - minTime) / RECENT_TIME_UNIT));
+}
+
+export function recentTimeAt(position, minTime, maxTime) {
+  if (![position, minTime, maxTime].every(Number.isFinite) || maxTime <= minTime) throw new RangeError("Invalid time scale");
+  if (position <= 0) return minTime;
+  if (position >= 100) return maxTime;
+  return maxTime - RECENT_TIME_UNIT * Math.expm1((1 - position / 100)
+    * Math.log1p((maxTime - minTime) / RECENT_TIME_UNIT));
+}
+
 /**
  * Return the x position of a merge-base in the currently displayed time
  * window.  The commit can be outside the window, but its real position is
@@ -102,10 +122,9 @@ export function mergeBasePosition(mergeBaseDate, minTime, maxTime) {
   if (!Number.isFinite(base) || !Number.isFinite(minTime) || !Number.isFinite(maxTime) || maxTime <= minTime) {
     return { x: 0, outside: false, available: false };
   }
-  const raw = ((base - minTime) / (maxTime - minTime)) * 100;
   return {
-    x: Math.min(100, Math.max(0, raw)),
-    outside: raw < 0 || raw > 100,
+    x: recentTimePosition(base, minTime, maxTime),
+    outside: base < minTime || base > maxTime,
     available: true,
   };
 }
@@ -130,7 +149,7 @@ export function mergeRelationLinks(relations, lanes, minTime, maxTime, observati
     const sourceTime = sourceRow?.date == null ? NaN : new Date(sourceRow.date).getTime();
     const mergeTime = new Date(relation.occurred_at).getTime();
     const sourceX = Number.isFinite(sourceTime) && sourceTime <= mergeTime
-      ? Math.max(0, Math.min(100, (sourceTime - minTime) / (maxTime - minTime) * 100)) : null;
+      ? recentTimePosition(sourceTime, minTime, maxTime) : null;
     return [{ ...relation, ...position, sourceX, sourceOutside: sourceTime < minTime, sourceIndex, targetIndex }];
   });
 }
