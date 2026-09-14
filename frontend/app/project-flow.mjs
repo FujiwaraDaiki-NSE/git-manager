@@ -110,6 +110,33 @@ export function mergeBasePosition(mergeBaseDate, minTime, maxTime) {
   };
 }
 
+/**
+ * Resolve authoritative merge relations to visible lane coordinates. A link
+ * is drawable only when both branch names were resolved by the API and both
+ * corresponding lanes are present in the current folded/filter view.
+ */
+export function mergeRelationLinks(relations, lanes, minTime, maxTime, observationTime) {
+  const laneIndexes = new Map(lanes.map((lane, index) => [lane.id, index]));
+  return relations.flatMap((relation) => {
+    if (!relation.source_lane_id || !relation.target_lane_id) return [];
+    const sourceIndex = laneIndexes.get(relation.source_lane_id);
+    const targetIndex = laneIndexes.get(relation.target_lane_id);
+    if (sourceIndex === undefined || targetIndex === undefined || sourceIndex === targetIndex) return [];
+    if (!mergeRelationInWindow(relation, minTime, maxTime, observationTime)) return [];
+    const position = mergeBasePosition(relation.occurred_at, minTime, maxTime);
+    if (!position.available) return [];
+    return [{ ...relation, ...position, sourceIndex, targetIndex }];
+  });
+}
+
+export function mergeRelationInWindow(relation, minTime, maxTime, observationTime) {
+  const occurredAt = new Date(relation.occurred_at || "").getTime();
+  return Number.isFinite(occurredAt)
+    && occurredAt >= minTime
+    && occurredAt <= maxTime
+    && occurredAt <= observationTime;
+}
+
 export function flowKeyboardAction(key) {
   if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) return "move";
   if (key === "Enter" || key === " " || key === "Spacebar") return "select";

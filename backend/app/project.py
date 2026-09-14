@@ -1,8 +1,9 @@
 """プロジェクト管制画面向けの Git 事実集約。
 
-このモジュールは Git から観測できる値だけを返す。agent、PR、CI、合流先や
-次工程はここで推測しないため、呼び出し側が渡さない限り常に ``None`` になる。
-コミットの patch は取得せず、詳細 API は従来の ``/api/repo/commit`` に任せる。
+このモジュールは Git から観測できる値だけを返す。agent、PR、CI、次工程は
+ここで推測しない。合流関係も、現在存在するローカル branch ref が merge commit
+またはその親を直接指す場合だけ返す。コミットの patch は取得せず、
+詳細 API は従来の ``/api/repo/commit`` に任せる。
 """
 from __future__ import annotations
 
@@ -403,6 +404,146 @@ def _parse_track(track: str | None) -> tuple[int | None, int | None]:
     )
 
 
+def _unique_branch_at_commit(
+    repo: str,
+    branch_heads: Mapping[str, str],
+    commit_hash: str,
+    occurred_at: Any,
+    evidence_cache: dict[str, tuple[str, str, int] | None],
+) -> str | None:
+    """Resolve a commit only when one current ref has non-administrative history.
+
+    An ancestor relationship cannot prove a historical branch name: a new
+    branch may be created from either parent after the merge. Exact current
+    ref equality plus a latest reflog action produced by ordinary history
+    formation excludes later branch/reset/update aliases. Missing or
+    administrative reflog evidence is unavailable, not permission to guess.
+    """
+    merge_epoch = _iso_epoch(occurred_at)
+    if merge_epoch is None:
+        return None
+    matches: list[str] = []
+    for branch, head in branch_heads.items():
+        if head != commit_hash:
+            continue
+        if branch not in evidence_cache:
+            raw = gitinfo._run(
+                repo,
+                [
+                    "reflog",
+                    "show",
+                    "-1",
+                    "--date=unix",
+                    "--format=%H%x1f%gD%x1f%gs",
+                    f"refs/heads/{branch}",
+                ],
+            )
+            entries: list[tuple[str, int, str]] = []
+            for line in raw.splitlines() if raw else []:
+                fields = line.split("\x1f", 2)
+                selector_time = re.search(r"@\{(\d+)(?: [+-]\d{4})?\}$", fields[1]) if len(fields) == 3 else None
+                if selector_time:
+                    entries.append((fields[0], int(selector_time.group(1)), fields[2]))
+            latest = entries[0] if entries else None
+            evidence_cache[branch] = (latest[0], latest[2], latest[1]) if latest and latest[0] == head else None
+        evidence = evidence_cache[branch]
+        if evidence is None:
+            continue
+        _latest_hash, action, pointed_at = evidence
+        history_actions = ("commit", "merge ", "pull", "fetch", "rebase", "cherry-pick")
+        if action.startswith(history_actions) and pointed_at <= merge_epoch:
+            matches.append(branch)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _merge_relations(
+    repo: str,
+    graph_rows: list[Mapping[str, Any]],
+    branch_heads: Mapping[str, str],
+    lane_ids: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Build one relation for every second-or-later parent of each merge row."""
+    merge_rows = [
+        row
+        for row in graph_rows
+        if isinstance(row.get("hash"), str)
+        and row.get("hash")
+        and isinstance(row.get("parents"), list)
+        and len(row["parents"]) >= 2
+    ]
+    if not merge_rows:
+        return []
+
+    evidence_cache: dict[str, tuple[str, str, int] | None] = {}
+    relations: list[dict[str, Any]] = []
+    for row in merge_rows:
+        commit_hash = row["hash"]
+        parents = row["parents"]
+        occurred_at = row.get("date") if isinstance(row.get("date"), str) else None
+        target_branch = _unique_branch_at_commit(
+            repo, branch_heads, commit_hash, occurred_at, evidence_cache
+        )
+        for source_parent in parents[1:]:
+            if not isinstance(source_parent, str) or not source_parent:
+                continue
+            source_branch = _unique_branch_at_commit(
+                repo, branch_heads, source_parent, occurred_at, evidence_cache
+            )
+            relations.append(
+                {
+                    "commit_hash": commit_hash,
+                    "occurred_at": occurred_at,
+                    "source_parent": source_parent,
+                    "source_branch": source_branch,
+                    "source_lane_id": lane_ids.get(source_branch) if source_branch else None,
+                    "target_branch": target_branch,
+                    "target_lane_id": lane_ids.get(target_branch) if target_branch else None,
+                }
+            )
+    return relations
+
+
+def _latest_unique_merge_target(relations: list[Mapping[str, Any]]) -> str | None:
+    """Return a source lane's legacy target only when the latest fact is unique."""
+    if not relations:
+        return None
+    dated: list[tuple[float, Mapping[str, Any]]] = []
+    for relation in relations:
+        occurred_at = _iso_epoch(relation.get("occurred_at"))
+        if occurred_at is None:
+            # Without a comparable date, selecting a latest relation would be
+            # an unsupported fallback.
+            return None
+        dated.append((occurred_at, relation))
+    latest_time = max(occurred_at for occurred_at, _relation in dated)
+    latest = [relation for occurred_at, relation in dated if occurred_at == latest_time]
+    if len(latest) != 1:
+        return None
+    target_branch = latest[0].get("target_branch")
+    return target_branch if isinstance(target_branch, str) and target_branch else None
+
+
+def _attach_merge_relations(
+    lanes: list[dict[str, Any]],
+    relations: list[dict[str, Any]],
+) -> None:
+    """Attach full relation facts to their resolved source/target lanes."""
+    lanes_by_id = {
+        lane["id"]: lane
+        for lane in lanes
+        if isinstance(lane.get("id"), str)
+    }
+    for relation in relations:
+        source_lane_id = relation.get("source_lane_id")
+        if isinstance(source_lane_id, str) and source_lane_id in lanes_by_id:
+            lanes_by_id[source_lane_id]["merge_sources"].append(dict(relation))
+        target_lane_id = relation.get("target_lane_id")
+        if isinstance(target_lane_id, str) and target_lane_id in lanes_by_id:
+            lanes_by_id[target_lane_id]["merge_targets"].append(dict(relation))
+    for lane in lanes:
+        lane["merge_target"] = _latest_unique_merge_target(lane["merge_sources"])
+
+
 def _event_from_row(
     row: Mapping[str, Any],
     lane_names: list[str],
@@ -522,6 +663,8 @@ def build(
                 "agent": lane_agents[-1] if lane_agents else None,
                 "agents": lane_agents or None,
                 "merge_target": None,
+                "merge_sources": [],
+                "merge_targets": [],
                 "next_phase": None,
             }
         )
@@ -572,6 +715,8 @@ def build(
                 "agent": lane_agents[-1] if lane_agents else None,
                 "agents": lane_agents or None,
                 "merge_target": None,
+                "merge_sources": [],
+                "merge_targets": [],
                 "next_phase": None,
             }
         )
@@ -580,13 +725,24 @@ def build(
     # A project can have no local branch refs but still expose an empty graph.
     graph_data = graph.build(repo, all_refs=True, limit=limit)
     observed_at = time.time()
+    merge_relations: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     known_events: list[dict[str, Any]] = []
     latest_event: dict[str, Any] | None = None
     if graph_data is not None:
+        graph_rows = graph_data.get("rows", [])
+        if isinstance(graph_rows, list):
+            lane_ids = {
+                lane["branch"]: lane["id"]
+                for lane in lanes
+                if isinstance(lane.get("branch"), str)
+                and isinstance(lane.get("id"), str)
+            }
+            merge_relations = _merge_relations(repo, graph_rows, branch_heads, lane_ids)
+            _attach_merge_relations(lanes, merge_relations)
         parents_by_hash = {
             row.get("hash"): row.get("parents") or []
-            for row in graph_data.get("rows", [])
+            for row in graph_rows
             if isinstance(row.get("hash"), str)
         }
         lane_hashes: dict[str, set[str]] = {}
@@ -607,7 +763,6 @@ def build(
                     if isinstance(parent, str)
                 )
             lane_hashes[lane["id"]] = seen
-        graph_rows = graph_data.get("rows", [])
         head_hashes = {
             lane.get("head")
             for lane in lanes
@@ -702,6 +857,7 @@ def build(
         "range": range_name,
         "graph": graph_data,
         "lanes": lanes,
+        "merge_relations": merge_relations,
         "events": events,
         "latest_event": latest_event,
         "agent_events": agent_history,

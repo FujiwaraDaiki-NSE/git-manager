@@ -153,6 +153,16 @@ export type AgentPriorityCounts = {
   completed: number | null;
 };
 
+export type ProjectMergeRelation = {
+  commit_hash: string;
+  occurred_at: string | null;
+  source_parent: string;
+  source_branch: string | null;
+  source_lane_id: string | null;
+  target_branch: string | null;
+  target_lane_id: string | null;
+};
+
 export type ProjectLane = {
   id: string;
   name: string;
@@ -177,6 +187,8 @@ export type ProjectLane = {
   error: string | null;
   agent: AgentTask | null;
   merge_target: string | null;
+  merge_sources: ProjectMergeRelation[];
+  merge_targets: ProjectMergeRelation[];
   next_phase: string | null;
 };
 
@@ -257,6 +269,7 @@ export type ProjectResponse = {
   range: "current" | "24h" | "7d" | "all";
   graph: GraphResponse | null;
   lanes: ProjectLane[];
+  merge_relations: ProjectMergeRelation[];
   events: ProjectEvent[];
   latest_event: ProjectEvent | null;
   branch_counts: { local: number; remote: number };

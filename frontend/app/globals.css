@@ -2496,6 +2496,10 @@ body {
   color: var(--control-blue);
 }
 
+.legend-line-merge {
+  color: var(--control-purple);
+}
+
 .flow-axis {
   color: var(--control-muted);
   display: grid;
@@ -2566,6 +2570,26 @@ body {
 
 .flow-branch-link-unknown {
   stroke: var(--control-muted);
+}
+
+.flow-merge-link {
+  fill: none;
+  marker-end: url(#flow-merge-arrow);
+  stroke: var(--control-purple);
+  stroke-width: 2.5;
+}
+
+.flow-merge-link-outside {
+  stroke-dasharray: 4 3;
+}
+
+.flow-merge-arrow {
+  fill: var(--control-purple);
+}
+
+.flow-merge-fact {
+  color: var(--control-purple) !important;
+  font-weight: 700;
 }
 
 .flow-now-line {
