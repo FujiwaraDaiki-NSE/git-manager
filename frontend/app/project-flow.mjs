@@ -115,7 +115,8 @@ export function mergeBasePosition(mergeBaseDate, minTime, maxTime) {
  * is drawable only when both branch names were resolved by the API and both
  * corresponding lanes are present in the current folded/filter view.
  */
-export function mergeRelationLinks(relations, lanes, minTime, maxTime, observationTime) {
+export function mergeRelationLinks(relations, lanes, minTime, maxTime, observationTime, graphRows) {
+  const rowsByHash = new Map(graphRows.map((row) => [row.hash, row]));
   const laneIndexes = new Map(lanes.map((lane, index) => [lane.id, index]));
   return relations.flatMap((relation) => {
     if (!relation.source_lane_id || !relation.target_lane_id) return [];
@@ -125,39 +126,53 @@ export function mergeRelationLinks(relations, lanes, minTime, maxTime, observati
     if (!mergeRelationInWindow(relation, minTime, maxTime, observationTime)) return [];
     const position = mergeBasePosition(relation.occurred_at, minTime, maxTime);
     if (!position.available) return [];
-    return [{ ...relation, ...position, sourceIndex, targetIndex }];
+    const sourceRow = rowsByHash.get(relation.source_parent);
+    const sourceTime = sourceRow?.date == null ? NaN : new Date(sourceRow.date).getTime();
+    const mergeTime = new Date(relation.occurred_at).getTime();
+    const sourceX = Number.isFinite(sourceTime) && sourceTime <= mergeTime
+      ? Math.max(0, Math.min(100, (sourceTime - minTime) / (maxTime - minTime) * 100)) : null;
+    return [{ ...relation, ...position, sourceX, sourceOutside: sourceTime < minTime, sourceIndex, targetIndex }];
   });
 }
 
-/** Route overlapping lane spans through separate pixel columns.
- * Endpoints retain their observed time; only the connecting route is displaced.
- * Callers reserve at least links.length * 16 + 48 pixels of track width.
+/** Keep every control point between the source-parent and merge timestamps.
+ * Prefer 16px separation where time permits. In a short interval subdivide
+ * its free gaps rather than routing backward or beyond the merge time.
  */
 export function routeMergeLinks(links, trackWidth, rowHeight) {
-  if (trackWidth < links.length * 16 + 48 || rowHeight <= 0) throw new RangeError("Insufficient merge routing space");
-  const columns = Array.from({ length: Math.floor((trackWidth - 24) / 16) + 1 }, (_, index) => 12 + index * 16);
+  if (trackWidth <= 0 || rowHeight <= 0) throw new RangeError("Invalid merge routing size");
   const routed = [];
-  const ordered = [...links].sort((a, b) => a.x - b.x
+  const ordered = links.filter((link) => link.sourceX !== null).sort((a, b) => a.x - b.x
     || a.sourceIndex - b.sourceIndex || a.targetIndex - b.targetIndex
     || a.commit_hash.localeCompare(b.commit_hash)
     || a.source_parent.localeCompare(b.source_parent));
   for (const link of ordered) {
-    const x = link.x * trackWidth / 100;
+    const startX = link.sourceX * trackWidth / 100;
+    const endX = link.x * trackWidth / 100;
+    if (!Number.isFinite(startX) || startX > endX) throw new RangeError("Invalid merge timestamps");
     const low = Math.min(link.sourceIndex, link.targetIndex);
     const high = Math.max(link.sourceIndex, link.targetIndex);
     const occupied = routed.filter((other) => low <= other.high && high >= other.low);
-    const preferred = Math.max(12, Math.min(trackWidth - 12, x - 24));
-    const channel = [...columns].sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred) || a - b)
-      .find((candidate) => occupied.every((other) => Math.abs(other.channel - candidate) >= 16));
-    if (channel === undefined) throw new RangeError("No merge routing column available");
+    const preferred = Math.max(startX, endX - 24);
+    const candidates = Array.from({length: Math.floor((endX - startX) / 16) + 1}, (_, i) => startX + i * 16)
+      .filter((x) => x > startX && x < endX)
+      .sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred) || a - b);
+    let channel = candidates.find((x) => occupied.every((other) => Math.abs(other.channel - x) >= 16));
+    if (channel === undefined) {
+      const boundaries = [startX, ...occupied.map((other) => other.channel).filter((x) => x > startX && x < endX), endX].sort((a,b) => a-b);
+      let gapStart = startX, gapEnd = startX;
+      for (let i = 1; i < boundaries.length; i++) {
+        if (boundaries[i] - boundaries[i-1] > gapEnd - gapStart) { gapStart = boundaries[i-1]; gapEnd = boundaries[i]; }
+      }
+      channel = (gapStart + gapEnd) / 2;
+    }
     const sourceY = (link.sourceIndex + .5) * rowHeight;
     const targetY = (link.targetIndex + .5) * rowHeight;
     const direction = Math.sign(targetY - sourceY);
-    const side = Math.sign(x - channel);
-    const radius = Math.min(6, Math.abs(x - channel) / 2);
+    const radius = Math.min(6, channel - startX, endX - channel);
     const middleY = (sourceY + targetY) / 2;
-    routed.push({ ...link, low, high, channel,
-      path: `M ${x} ${sourceY} H ${channel + side * radius} Q ${channel} ${sourceY} ${channel} ${sourceY + direction * radius} V ${targetY - direction * radius} Q ${channel} ${targetY} ${channel + side * radius} ${targetY} H ${x}`,
+    routed.push({ ...link, low, high, channel, startX, endX,
+      path: `M ${startX} ${sourceY} H ${channel - radius} Q ${channel} ${sourceY} ${channel} ${sourceY + direction * radius} V ${targetY - direction * radius} Q ${channel} ${targetY} ${channel + radius} ${targetY} H ${endX}`,
       arrow: `M ${channel - 4} ${middleY - direction * 4} L ${channel} ${middleY + direction * 3} L ${channel + 4} ${middleY - direction * 4}`,
     });
   }
