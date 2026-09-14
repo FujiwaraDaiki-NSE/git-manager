@@ -1991,7 +1991,7 @@ body {
   display: grid;
   gap: 32px;
   grid-template-columns: minmax(0, 1fr) auto;
-  padding: 50px 0 28px;
+  padding: 24px 0 20px;
 }
 
 .control-hero h1 {
@@ -3296,7 +3296,7 @@ body {
 
   .control-hero {
     gap: 22px;
-    padding: 38px 0 22px;
+    padding: 22px 0 18px;
   }
 
   .control-hero h1 {
@@ -3358,7 +3358,7 @@ body {
   }
 
   .flow-current-label {
-    margin-left: -50px;
+    margin-left: 0;
   }
 
   .activity-list li {
@@ -3479,4 +3479,43 @@ body {
   .project-card:hover {
     transform: none;
   }
+}
+
+/* The map keeps a fixed row height so SVG paths and click targets agree. */
+.flow-toolbar { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 18px; }
+.flow-toolbar .range-tabs { padding: 0; flex-wrap: wrap; }
+.flow-observation { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--control-border); }
+.flow-observation .timeline-control { flex: 1; grid-template-columns: auto minmax(100px, 1fr) auto; font: 12px var(--control-sans); gap: 12px; }
+.flow-observation input { width: 100%; min-height: 32px; }
+.flow-observation output { min-width: 230px; }
+.flow-observation button:disabled { opacity: .45; cursor: default; }
+.flow-history-note { color: var(--control-amber); font-size: 12px; margin: 10px 0; }
+.flow-help { color: var(--control-muted); font-size: 12px; margin: 12px 0; }
+.flow-help summary { cursor: pointer; width: fit-content; padding: 8px 0; }
+.flow-help p { line-height: 1.7; margin: 8px 0; }
+.flow-help .flow-legend { margin-top: 0; border-top: 0; font-size: 12px; }
+.flow-axis { gap: 0; }
+.flow-axis > span { position: sticky; left: 0; z-index: 1; background: var(--control-panel); }
+.flow-axis-track { gap: 12px; }
+.flow-axis-track span { white-space: nowrap; }
+.flow-row { height: var(--flow-row-height); }
+.flow-row.is-selected .flow-track { background: color-mix(in srgb, var(--control-blue) 8%, transparent); box-shadow: inset 0 1px var(--control-blue), inset 0 -1px var(--control-blue); }
+.flow-row.is-selected .flow-lane-label { background: var(--control-blue-soft); box-shadow: inset 3px 0 var(--control-blue); padding-left: 8px; }
+.flow-lane-label { height: var(--flow-row-height); padding-top: 5px; padding-bottom: 5px; }
+.flow-lane-title { height: 28px; }
+.flow-lane-button { min-width: 0; padding: 4px 0; border: 0; background: transparent; color: var(--control-ink); font: 600 13px var(--control-mono); text-align: left; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; cursor: pointer; }
+.flow-lane-button:hover { color: var(--control-blue); text-decoration: underline; }
+.flow-lane-button:focus-visible, .flow-help summary:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
+.flow-lane-meta { margin-top: 0; flex-wrap: nowrap; height: 18px; font-size: 11px; }
+.flow-lane-relation { margin-top: 2px; color: var(--control-muted); font: 10px var(--control-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-latest-visible { position: absolute; left: 12px; right: 12px; bottom: 4px; display: flex; gap: 12px; align-items: center; pointer-events: none; color: var(--control-muted); font-size: 11px; }
+.flow-latest-visible > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-latest-visible time { flex: 0 0 auto; font: 10px var(--control-mono); margin-left: auto; }
+.flow-current-label { transform: translateX(-100%); }
+@media (max-width: 600px) {
+  .flow-observation .timeline-control { grid-template-columns: auto minmax(100px, 1fr); width: 100%; flex-basis: 100%; }
+  .flow-observation output { grid-column: 1 / -1; text-align: left; min-width: 0; }
+  .flow-toolbar .range-tabs { gap: 2px; }
+  .flow-toolbar .range-tab { padding: 6px 8px; font-size: 11px; }
+  .flow-lane-button { font-size: 12px; }
 }

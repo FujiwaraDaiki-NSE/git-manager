@@ -32,10 +32,10 @@ const tabs: { id: ControlTab; label: string; short: string }[] = [
 ];
 
 const ranges: { id: TimeRange; label: string }[] = [
-  { id: "current", label: "現在" },
+  { id: "current", label: "各ブランチの先端" },
   { id: "24h", label: "24時間" },
   { id: "7d", label: "7日" },
-  { id: "all", label: "全履歴" },
+  { id: "all", label: "取得済み履歴" },
 ];
 
 const activityFilters: { id: ActivityFilter; label: string }[] = [
@@ -462,6 +462,9 @@ function FlowMap({
   selectedKey,
   onTimelineChange,
   onSelect,
+  selectedLane,
+  onSelectLane,
+  onRangeChange,
   showMerged,
   onShowMergedChange,
 }: {
@@ -471,6 +474,9 @@ function FlowMap({
   selectedKey: string | null;
   onTimelineChange: (value: number) => void;
   onSelect: (event: FlowEvent) => void;
+  selectedLane: string | null;
+  onSelectLane: (lane: ProjectLane) => void;
+  onRangeChange: (range: TimeRange) => void;
   showMerged: boolean;
   onShowMergedChange: (value: boolean) => void;
 }) {
@@ -559,7 +565,10 @@ function FlowMap({
   const minTime = Math.min(...(displayedTimes.length ? displayedTimes : allTimes.length ? allTimes : [now]));
   const maxCandidate = Math.max(now, ...(displayedTimes.length ? displayedTimes : [now]));
   const maxTime = Math.max(minTime + 3_600_000, maxCandidate);
-  const observationTime = minTime + ((maxTime - minTime) * timeline) / 100;
+  const observationTime = minTime + ((now - minTime) * timeline) / 100;
+  const observationX = ((observationTime - minTime) / (maxTime - minTime)) * 100;
+  const observationLabel = exactDate(new Date(observationTime).toISOString());
+  const axisLabel = (time: number) => new Date(time).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
   // Agent history is resolved against the same observation point as the Git
   // flow. A historical slider value must never show the current task state.
   const observedAgentEvents = useMemo(
@@ -596,6 +605,7 @@ function FlowMap({
     return [lane.id, {
       ...mergeBasePosition(mergeBaseRow?.date ?? null, minTime, maxTime),
       date: mergeBaseRow?.date ?? null,
+      afterObservation: mergeBaseRow !== undefined && eventDate(mergeBaseRow) !== null && eventDate(mergeBaseRow)! > observationTime,
     }];
   }));
   const mergeLinks = mergeRelationLinks(project.merge_relations, lanes, minTime, maxTime, observationTime);
@@ -635,54 +645,54 @@ function FlowMap({
   const defaultIndex = lanes.findIndex((lane) => lane.branch === project.default_branch);
   const rowHeight = 72;
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
-  const nowX = Math.min(100, Math.max(0, ((now - minTime) / (maxTime - minTime)) * 100));
 
   return (
     <section className="flow-section" aria-labelledby="flow-map-title">
       <div className="flow-controls">
         <div>
-          <p className="eyebrow">DEVELOPMENT FLOW</p>
-          <h3 id="flow-map-title">Git から観測した作業レーン</h3>
-          <p className="section-copy">分岐点は実際の merge-base、矢印はGitの親履歴から特定できた合流元 → 合流先です。agent の工程は推測しません。</p>
-        </div>
-        <div className="flow-control-actions">
-          {mergedCount > 0 && (
-            <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>
-              {showMerged ? "merged を折り畳む" : `merged・完了を表示 (${mergedCount})`}
-            </button>
-          )}
-          <label className="timeline-control">
-            <span>観測時点</span>
-            <input
-              aria-label="過去の観測時点"
-              max="100"
-              min="0"
-              onChange={(event) => onTimelineChange(Number(event.target.value))}
-              step="1"
-              type="range"
-              value={timeline}
-            />
-            <output>{timeline === 100 ? "現在" : `${timeline}%`}</output>
-          </label>
+          <h3 id="flow-map-title">ブランチの分岐と合流</h3>
+          <p className="section-copy">左から右へ時間が進みます。ブランチ名で作業状態、点でコミットの変更内容を確認できます。</p>
         </div>
       </div>
+      <div className="flow-toolbar">
+        <div className="range-tabs" role="toolbar" aria-label="表示するコミット">
+          {ranges.map((item) => <button aria-pressed={range === item.id} className="range-tab" key={item.id} type="button" onClick={() => onRangeChange(item.id)}>{item.label}</button>)}
+        </div>
+        <div className="flow-control-actions">
+          {mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}
+          <button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: "smooth" })}>右端へ移動 →</button>
+        </div>
+      </div>
+      <div className="flow-observation">
+        <label className="timeline-control">
+          <span>履歴をたどる</span>
+          <input aria-label="過去の観測時点" aria-valuetext={observationLabel} max="100" min="0" onChange={(event) => onTimelineChange(Number(event.target.value))} step="1" type="range" value={timeline} />
+          <output>{timeline === 100 ? "最新の観測" : "選択日時"} · {observationLabel}</output>
+        </label>
+        <button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button>
+      </div>
+      {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・agent履歴を表示中。ブランチ名とGit作業状態、作業詳細は現在の情報です。</p>}
       {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
       {unresolvedMergeCount > 0 && (
         <div className="inline-note" role="status">
           {`合流関係 ${unresolvedMergeCount} 件はブランチを特定できないため、線を表示していません。`}
         </div>
       )}
-      <div className="flow-legend" aria-label="フロー凡例">
-        <span><i className="legend-dot legend-dot-head" aria-hidden="true" /> HEAD</span>
-        <span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span>
-        <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> merge</span>
-        <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
-        <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
-        <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
-        <span><i className="legend-dot legend-dot-unknown" aria-hidden="true" /> agent 状態不明</span>
-      </div>
+      <details className="flow-help">
+        <summary>グラフの見方・キーボード操作</summary>
+        <div className="flow-legend" aria-label="フロー凡例">
+          <span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span>
+          <span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span>
+          <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span>
+          <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
+          <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
+          <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
+        </div>
+        <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
+        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。矢印はGitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
+      </details>
       {lanes.length === 0 ? (
-        <div className="empty-flow">表示できる作業レーンはありません。merged・完了を表示すると確認できます。</div>
+        <div className="empty-flow">表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。</div>
       ) : (
         <div
           className="flow-scroll"
@@ -693,11 +703,11 @@ function FlowMap({
           tabIndex={0}
         >
           <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
-            <span>分岐関係 / 作業先端</span>
+            <span>ブランチ / 現在の作業状態</span>
             <div className="flow-axis-track">
-              <span>{new Date(minTime).toLocaleDateString("ja-JP")}</span>
-              <span>{new Date(minTime + (maxTime - minTime) / 2).toLocaleDateString("ja-JP")}</span>
-              <span>{new Date(maxTime).toLocaleDateString("ja-JP")}</span>
+              <span>{axisLabel(minTime)}</span>
+              <span>{axisLabel(minTime + (maxTime - minTime) / 2)}</span>
+              <span>{axisLabel(maxTime)}</span>
             </div>
           </div>
           <div className="flow-rows" style={{ "--flow-row-height": `${rowHeight}px`, "--flow-lanes": lanes.length, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
@@ -712,7 +722,7 @@ function FlowMap({
                 <path className="flow-merge-arrow" d="M 0 0 L 7 3 L 0 6 z" />
               </marker>
             </defs>
-            <line className="flow-now-line" x1={nowX * 10} x2={nowX * 10} y1="0" y2={lanes.length * rowHeight} />
+            <line className="flow-now-line" x1={observationX * 10} x2={observationX * 10} y1="0" y2={lanes.length * rowHeight} />
             {lanes.map((lane, index) => {
               const laneEvents = eventsByLane.get(lane.id) ?? [];
               const last = laneEvents.at(-1);
@@ -722,6 +732,7 @@ function FlowMap({
               const startX = mergeBase?.available ? mergeBase.x * 10 : 0;
               const endX = last ? last.x * 10 : startX;
               const isDefault = lane.branch === project.default_branch;
+              if (!isDefault && mergeBase?.afterObservation) return null;
               return (
                 <g key={lane.id}>
                   <line className={isDefault ? "flow-base-line" : "flow-lane-line"} x1={isDefault ? 0 : startX} x2={isDefault ? 1000 : endX} y1={y} y2={y} />
@@ -751,27 +762,29 @@ function FlowMap({
           {lanes.map((lane, index) => {
             const laneEvents = eventsByLane.get(lane.id) ?? [];
             const mergeBase = mergeBasePositions.get(lane.id);
+            const visibleRelations = [
+              ...lane.merge_sources.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => `→ ${relation.target_branch ?? "不明"}`),
+              ...lane.merge_targets.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => `${relation.source_branch ?? "不明"} →`),
+            ].join(" / ");
             const snapshot = laneAgentSnapshotAt(lane, observedAgentEvents, observationTime)[0]
               ?? (timeline === 100 ? currentLaneAgent(lane) : null);
             return (
-              <div className="flow-row" key={lane.id}>
+              <div className={`flow-row${selectedLane === lane.id ? " is-selected" : ""}`} key={lane.id}>
                 <div className="flow-lane-label" ref={index === 0 ? firstLaneLabelRef : undefined}>
                   <div className="flow-lane-title">
                     <span className="lane-shape" aria-hidden="true" />
-                    <strong title={laneLabel(lane)}>{laneLabel(lane)}</strong>
-                    {lane.branch === project.default_branch && <span className="baseline-tag">既定</span>}
+                    <button className="flow-lane-button" aria-pressed={selectedLane === lane.id} title={laneLabel(lane)} type="button" onClick={() => onSelectLane(lane)}>{laneLabel(lane)}</button>
                   </div>
                   <div className="flow-lane-meta">
                     <span className={`lane-state ${laneStateClass(lane, project.default_branch)}`}>{laneState(lane, project.default_branch)}</span>
-                    <AgentFact task={snapshot} />
-                    <span title={lane.path ?? undefined}>{lane.path ?? "パス未取得"}</span>
-                    <span className={mergeBase?.outside ? "flow-range-note" : undefined}>{!lane.merge_base ? "分岐点 未取得" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点 表示範囲外" : "分岐点 表示中"}</span>
-                    {lane.merge_sources.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => <span className="flow-merge-fact" key={`source:${relation.commit_hash}:${relation.source_parent}`}>{`合流元 → ${relation.target_branch ?? "不明"}`}</span>)}
-                    {lane.merge_targets.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => <span className="flow-merge-fact" key={`target:${relation.commit_hash}:${relation.source_parent}`}>{`${relation.source_branch ?? "不明"} → 合流先`}</span>)}
+                    <span title={snapshot?.summary ?? undefined}>{snapshot ? agentStateLabel(agentTaskState(snapshot)) : "agent 状態不明"}</span>
+                  </div>
+                  <div className="flow-lane-relation" title={visibleRelations}>
+                    {visibleRelations ? visibleRelations : mergeBase?.afterObservation ? "分岐点は選択日時より後" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点は表示範囲外" : "分岐点を表示中"}
                   </div>
                 </div>
                 <div className="flow-track">
-                  {laneEvents.length === 0 && <span className="flow-track-empty">イベント未取得</span>}
+                  {laneEvents.length === 0 && <span className="flow-track-empty">{!project.graph ? "履歴未取得" : timeline < 100 ? "選択日時までの表示対象コミットなし" : "この表示範囲にコミットなし"}</span>}
                   {laneEvents.map((event) => {
                     return (
                       <FlowEventButton
@@ -788,17 +801,16 @@ function FlowMap({
                       />
                     );
                   })}
-                  <span className="flow-lane-end" style={{ left: `${laneEvents.at(-1)?.x ?? 0}%` }} aria-hidden="true" />
-                  <span className={`flow-lane-end-label${(laneEvents.at(-1)?.x ?? 0) < 24 ? " flow-lane-end-label-left" : (laneEvents.at(-1)?.x ?? 0) > 76 ? " flow-lane-end-label-right" : ""}`} style={(laneEvents.at(-1)?.x ?? 0) >= 24 && (laneEvents.at(-1)?.x ?? 0) <= 76 ? { left: `${laneEvents.at(-1)?.x ?? 0}%` } : undefined}>
-                    <span>Git 最終</span>
-                    <time dateTime={lane.last_commit?.date ?? undefined}>{relativeTime(lane.last_commit?.date)} · {exactDate(lane.last_commit?.date)}</time>
-                  </span>
+                  {laneEvents.length > 0 && <div className="flow-latest-visible">
+                    <span title={laneEvents[laneEvents.length - 1].row.subject}>{laneEvents[laneEvents.length - 1].row.subject}</span>
+                    <time dateTime={laneEvents[laneEvents.length - 1].row.date}>{axisLabel(eventDate(laneEvents[laneEvents.length - 1].row)!)}</time>
+                  </div>}
                 </div>
               </div>
             );
           })}
-          <div className="flow-current-label" style={{ left: `${renderedLabelWidth + (nowX * trackWidth) / 100}px` }} aria-hidden="true">
-            {timeline === 100 ? "現在" : "観測時点"}
+          <div className="flow-current-label" style={{ left: `${renderedLabelWidth + (observationX * trackWidth) / 100}px` }} aria-hidden="true">
+            {timeline === 100 ? "最新の観測" : "選択日時"}
           </div>
           </div>
         </div>
@@ -987,6 +999,7 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
       <h3>{laneLabel(lane)}</h3>
       <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={currentLaneAgent(lane)} /></div>
       <dl className="selection-list">
+        <div><dt>作業パス</dt><dd><code>{lane.path ?? "未取得"}</code></dd></div>
         <div><dt>作業先端</dt><dd><code>{lane.head ?? "未取得"}</code></dd></div>
         <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.last_commit?.subject ?? "未取得"}<small>{exactDate(lane.last_commit?.date)}</small></dd></div>
@@ -1063,8 +1076,10 @@ function useDialogKeyboard(
   rootRef: React.RefObject<HTMLElement>,
   closeRef: React.RefObject<HTMLElement>,
   onClose: () => void,
+  modal = true,
 ) {
   useEffect(() => {
+    if (!modal) return;
     const root = rootRef.current;
     if (!root) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1107,7 +1122,7 @@ function useDialogKeyboard(
       if (index >= 0) dialogStack.splice(index, 1);
       if (previous?.isConnected && !rootRef.current?.contains(previous)) previous.focus();
     };
-  }, [closeRef, onClose, rootRef]);
+  }, [closeRef, onClose, rootRef, modal]);
 }
 
 function SelectionPane({
@@ -1127,10 +1142,18 @@ function SelectionPane({
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  useDialogKeyboard(panelRef, closeRef, onClose);
+  const [modal, setModal] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1199px)");
+    const sync = () => setModal(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+  useDialogKeyboard(panelRef, closeRef, onClose, modal);
   const lane = project.lanes.find((item) => item.id === selectedLane) ?? (selectedEvent && "lane" in selectedEvent ? selectedEvent.lane : null);
   return (
-    <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal="true" role="dialog" tabIndex={-1}>
+    <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal={modal ? true : undefined} role={modal ? "dialog" : "complementary"} tabIndex={-1}>
       <div className="selection-head"><span className="eyebrow">DETAIL</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
       {selectedEvent && selectedHash ? <CommitDetail event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail defaultBranch={project.default_branch} lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
     </aside>
@@ -1331,10 +1354,9 @@ export default function ProjectControl() {
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">
         {tabs.map((tab) => <button aria-selected={urlState.tab === tab.id} className="control-tab" key={tab.id} role="tab" type="button" onClick={() => updateUrl({ tab: tab.id })}><span>{tab.label}</span><small>{tab.short}</small></button>)}
       </nav>
-      {urlState.tab === "flow" && <div className="range-tabs" role="toolbar" aria-label="時間範囲">{ranges.map((range) => <button aria-pressed={urlState.range === range.id} className="range-tab" key={range.id} type="button" onClick={() => updateUrl({ range: range.id, at: 100 })}>{range.label}</button>)}</div>}
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main">
-          {urlState.tab === "flow" && <FlowMap onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
+          {urlState.tab === "flow" && <FlowMap selectedLane={selectedLane} onSelectLane={selectLane} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
           {urlState.tab === "lanes" && <WorkLanes onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView filter={activityFilter} onFilter={(filter) => { setActivityFilter(filter); updateUrl({ event: null }); }} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} />}
