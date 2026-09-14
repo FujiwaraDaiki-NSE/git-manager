@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
-import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, mergeRelationInWindow, mergeRelationLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -593,7 +593,8 @@ function FlowMap({
       pointOffset: 0,
       id: flowEventKey(lane.id, row.hash),
     }));
-  const minimumTrackWidth = Math.max(440, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
+  const mergeLinks = mergeRelationLinks(project.merge_relations, lanes, minTime, maxTime, observationTime);
+  const minimumTrackWidth = Math.max(440, mergeLinks.length * 16 + 48, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
   // A track grows to the available viewport width when it fits, and becomes
   // horizontally scrollable when 44px hit areas need more room.  The same
   // resolved width is passed to the per-lane layout and rendered as the
@@ -613,7 +614,6 @@ function FlowMap({
       afterObservation: mergeBaseRow !== undefined && eventDate(mergeBaseRow) !== null && eventDate(mergeBaseRow)! > observationTime,
     }];
   }));
-  const mergeLinks = mergeRelationLinks(project.merge_relations, lanes, minTime, maxTime, observationTime);
   const visibleMergeKeys = new Set(project.merge_relations
     .filter((relation) => mergeRelationInWindow(relation, minTime, maxTime, observationTime))
     .map((relation) => `${relation.commit_hash}:${relation.source_parent}`));
@@ -649,6 +649,7 @@ function FlowMap({
   }, [eventsByLane, lanes]);
   const defaultIndex = lanes.findIndex((lane) => lane.branch === project.default_branch);
   const rowHeight = 88;
+  const routedMergeLinks = routeMergeLinks(mergeLinks, trackWidth, rowHeight);
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
 
   return (
@@ -702,47 +703,36 @@ function FlowMap({
             aria-hidden="true"
             className="flow-connections"
             preserveAspectRatio="none"
-            viewBox={`0 0 1000 ${lanes.length * rowHeight}`}
+            viewBox={`0 0 ${trackWidth} ${lanes.length * rowHeight}`}
           >
-            <defs>
-              <marker id="flow-merge-arrow" markerHeight="6" markerWidth="7" orient="auto" refX="6" refY="3" viewBox="0 0 7 6">
-                <path className="flow-merge-arrow" d="M 0 0 L 7 3 L 0 6 z" />
-              </marker>
-            </defs>
-            <line className="flow-now-line" x1={observationX * 10} x2={observationX * 10} y1="0" y2={lanes.length * rowHeight} />
+            <line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={lanes.length * rowHeight} />
             {lanes.map((lane, index) => {
               const laneEvents = eventsByLane.get(lane.id) ?? [];
               const last = laneEvents.at(-1);
               const baseline = defaultIndex >= 0 ? defaultIndex * rowHeight + rowHeight / 2 : null;
               const y = index * rowHeight + rowHeight / 2;
               const mergeBase = mergeBasePositions.get(lane.id);
-              const startX = mergeBase?.available ? mergeBase.x * 10 : 0;
-              const endX = last ? last.x * 10 : startX;
+              const startX = mergeBase?.available ? mergeBase.x * trackWidth / 100 : 0;
+              const endX = last ? last.x * trackWidth / 100 : startX;
               const isDefault = lane.branch === project.default_branch;
               if (!isDefault && mergeBase?.afterObservation) return null;
               return (
                 <g key={lane.id}>
-                  <line className={isDefault ? "flow-base-line" : "flow-lane-line"} x1={isDefault ? 0 : startX} x2={isDefault ? 1000 : endX} y1={y} y2={y} />
+                  <line className={isDefault ? "flow-base-line" : "flow-lane-line"} x1={isDefault ? 0 : startX} x2={isDefault ? trackWidth : endX} y1={y} y2={y} />
                   {!isDefault && baseline !== null && (
                     <line className={lane.merge_base ? "flow-branch-link" : "flow-branch-link flow-branch-link-unknown"} x1={startX} x2={startX} y1={baseline} y2={y} />
                   )}
                 </g>
               );
             })}
-            {mergeLinks.map((link: ProjectMergeRelation & { x: number; outside: boolean; sourceIndex: number; targetIndex: number }) => {
-              const x = link.x * 10;
-              const sourceY = link.sourceIndex * rowHeight + rowHeight / 2;
-              const targetY = link.targetIndex * rowHeight + rowHeight / 2;
-              const approachX = Math.max(0, x - 24);
+            {routedMergeLinks.map((link) => {
+              const related = selectedLane === link.source_lane_id || selectedLane === link.target_lane_id;
               return (
-                <path
-                  className={`flow-merge-link${link.outside ? " flow-merge-link-outside" : ""}`}
-                  d={`M ${approachX} ${sourceY} L ${x} ${targetY}`}
-                  key={`${link.commit_hash}:${link.source_parent}`}
-                  markerEnd="url(#flow-merge-arrow)"
-                >
+                <g className={`flow-merge-route${selectedLane ? related ? " is-emphasized" : " is-muted" : ""}`} key={`${link.commit_hash}:${link.source_parent}`}>
                   <title>{`${link.source_branch} → ${link.target_branch} · ${shortHash(link.commit_hash)}`}</title>
-                </path>
+                  <path className={`flow-merge-link${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />
+                  <path className="flow-merge-direction" d={link.arrow} />
+                </g>
               );
             })}
           </svg>
@@ -821,7 +811,7 @@ function FlowMap({
         <summary>グラフの見方・キーボード操作</summary>
         <p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進みます。</p>
         <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
-        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。矢印はGitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
+        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は重なりを避けて迂回し、線の途中の矢印で合流方向を示します。線の両端が合流日時を表し、迂回部分は時刻を表しません。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
       </details>
       {project.graph?.truncated && <div className="inline-note">全履歴の取得上限は 200 件です。表示範囲外の履歴は未取得です。</div>}
     </section>

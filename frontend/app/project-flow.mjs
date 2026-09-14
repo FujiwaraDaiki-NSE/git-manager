@@ -129,6 +129,41 @@ export function mergeRelationLinks(relations, lanes, minTime, maxTime, observati
   });
 }
 
+/** Route overlapping lane spans through separate pixel columns.
+ * Endpoints retain their observed time; only the connecting route is displaced.
+ * Callers reserve at least links.length * 16 + 48 pixels of track width.
+ */
+export function routeMergeLinks(links, trackWidth, rowHeight) {
+  if (trackWidth < links.length * 16 + 48 || rowHeight <= 0) throw new RangeError("Insufficient merge routing space");
+  const columns = Array.from({ length: Math.floor((trackWidth - 24) / 16) + 1 }, (_, index) => 12 + index * 16);
+  const routed = [];
+  const ordered = [...links].sort((a, b) => a.x - b.x
+    || a.sourceIndex - b.sourceIndex || a.targetIndex - b.targetIndex
+    || a.commit_hash.localeCompare(b.commit_hash)
+    || a.source_parent.localeCompare(b.source_parent));
+  for (const link of ordered) {
+    const x = link.x * trackWidth / 100;
+    const low = Math.min(link.sourceIndex, link.targetIndex);
+    const high = Math.max(link.sourceIndex, link.targetIndex);
+    const occupied = routed.filter((other) => low <= other.high && high >= other.low);
+    const preferred = Math.max(12, Math.min(trackWidth - 12, x - 24));
+    const channel = [...columns].sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred) || a - b)
+      .find((candidate) => occupied.every((other) => Math.abs(other.channel - candidate) >= 16));
+    if (channel === undefined) throw new RangeError("No merge routing column available");
+    const sourceY = (link.sourceIndex + .5) * rowHeight;
+    const targetY = (link.targetIndex + .5) * rowHeight;
+    const direction = Math.sign(targetY - sourceY);
+    const side = Math.sign(x - channel);
+    const radius = Math.min(6, Math.abs(x - channel) / 2);
+    const middleY = (sourceY + targetY) / 2;
+    routed.push({ ...link, low, high, channel,
+      path: `M ${x} ${sourceY} H ${channel + side * radius} Q ${channel} ${sourceY} ${channel} ${sourceY + direction * radius} V ${targetY - direction * radius} Q ${channel} ${targetY} ${channel + side * radius} ${targetY} H ${x}`,
+      arrow: `M ${channel - 4} ${middleY - direction * 4} L ${channel} ${middleY + direction * 3} L ${channel + 4} ${middleY - direction * 4}`,
+    });
+  }
+  return routed;
+}
+
 export function mergeRelationInWindow(relation, minTime, maxTime, observationTime) {
   const occurredAt = new Date(relation.occurred_at || "").getTime();
   return Number.isFinite(occurredAt)
