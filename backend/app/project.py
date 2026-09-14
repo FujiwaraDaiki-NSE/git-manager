@@ -404,54 +404,123 @@ def _parse_track(track: str | None) -> tuple[int | None, int | None]:
     )
 
 
-def _unique_branch_at_commit(
+ReflogEntry = tuple[str, int, str]
+
+
+def _branch_reflog(
     repo: str,
-    branch_heads: Mapping[str, str],
+    branch: str,
+    cache: dict[str, list[ReflogEntry]],
+) -> list[ReflogEntry]:
+    """Return a current local branch's complete observable ref history."""
+    if branch in cache:
+        return cache[branch]
+    raw = gitinfo._run(
+        repo,
+        [
+            "reflog",
+            "show",
+            "--date=unix",
+            "--format=%H%x1f%gD%x1f%gs",
+            f"refs/heads/{branch}",
+        ],
+    )
+    entries: list[ReflogEntry] = []
+    for line in raw.splitlines() if raw else []:
+        fields = line.split("\x1f", 2)
+        selector_time = re.search(r"@\{(\d+)(?: [+-]\d{4})?\}$", fields[1]) if len(fields) == 3 else None
+        if selector_time:
+            entries.append((fields[0], int(selector_time.group(1)), fields[2]))
+    cache[branch] = entries
+    return entries
+
+
+def _history_action(action: str) -> bool:
+    return action.startswith(("commit", "merge ", "pull", "fetch", "rebase", "cherry-pick"))
+
+
+def _tracks_remote_branch(repo: str, branch: str, commit_hash: str) -> bool:
+    """Confirm that a fast-forwarded local branch tracks a ref containing the merge."""
+    upstream = gitinfo._run(
+        repo,
+        ["for-each-ref", "--format=%(upstream)", f"refs/heads/{branch}"],
+    )
+    upstream_ref = upstream.strip() if upstream else ""
+    if not upstream_ref:
+        return False
+    return gitinfo._run(repo, ["merge-base", "--is-ancestor", commit_hash, upstream_ref]) is not None
+
+
+def _unique_merge_target(
+    repo: str,
+    branches: Mapping[str, str],
+    target_parent: str,
     commit_hash: str,
     occurred_at: Any,
-    evidence_cache: dict[str, tuple[str, str, int] | None],
-) -> str | None:
-    """Resolve a commit only when one current ref has non-administrative history.
-
-    An ancestor relationship cannot prove a historical branch name: a new
-    branch may be created from either parent after the merge. Exact current
-    ref equality plus a latest reflog action produced by ordinary history
-    formation excludes later branch/reset/update aliases. Missing or
-    administrative reflog evidence is unavailable, not permission to guess.
-    """
+    cache: dict[str, list[ReflogEntry]],
+) -> tuple[str, int] | None:
+    """Resolve the one local ref observed moving from first parent to merge."""
     merge_epoch = _iso_epoch(occurred_at)
-    if merge_epoch is None:
+    matches: list[tuple[str, int]] = []
+    for branch in branches:
+        entries = _branch_reflog(repo, branch, cache)
+        for index, (new_hash, pointed_at, action) in enumerate(entries[:-1]):
+            old_hash, old_pointed_at, old_action = entries[index + 1]
+            if new_hash != commit_hash or old_hash != target_parent:
+                continue
+            local_merge = (
+                action.startswith("commit (merge)")
+                or (action.startswith("merge ") and "Fast-forward" not in action)
+                or (action.startswith("pull") and "Fast-forward" not in action)
+            )
+            remote_update = action.startswith("fetch") or (
+                action.startswith("pull") and "Fast-forward" in action
+            ) or (
+                action.startswith("merge ") and "Fast-forward" in action
+            )
+            target_parent_predates_merge = merge_epoch is not None and (
+                old_pointed_at < merge_epoch
+                or (old_pointed_at == merge_epoch and _history_action(old_action))
+            )
+            if local_merge or (
+                remote_update
+                and target_parent_predates_merge
+                and _tracks_remote_branch(repo, branch, commit_hash)
+            ):
+                matches.append((branch, pointed_at))
+            break
+    return matches[0] if len(matches) == 1 else None
+
+
+def _unique_source_branch(
+    repo: str,
+    branches: Mapping[str, str],
+    source_parent: str,
+    cutoff: int | None,
+    cache: dict[str, list[ReflogEntry]],
+) -> str | None:
+    """Resolve one extant branch that formed the source tip before target update."""
+    if cutoff is None:
         return None
     matches: list[str] = []
-    for branch, head in branch_heads.items():
-        if head != commit_hash:
-            continue
-        if branch not in evidence_cache:
-            raw = gitinfo._run(
-                repo,
-                [
-                    "reflog",
-                    "show",
-                    "-1",
-                    "--date=unix",
-                    "--format=%H%x1f%gD%x1f%gs",
-                    f"refs/heads/{branch}",
-                ],
+    for branch in branches:
+        entries = _branch_reflog(repo, branch, cache)
+        matched = False
+        for index, (commit_hash, pointed_at, action) in enumerate(entries):
+            if commit_hash != source_parent or not _history_action(action):
+                continue
+            local_formation = action.startswith(("commit", "cherry-pick", "rebase")) or (
+                action.startswith("merge ") and "Fast-forward" not in action
             )
-            entries: list[tuple[str, int, str]] = []
-            for line in raw.splitlines() if raw else []:
-                fields = line.split("\x1f", 2)
-                selector_time = re.search(r"@\{(\d+)(?: [+-]\d{4})?\}$", fields[1]) if len(fields) == 3 else None
-                if selector_time:
-                    entries.append((fields[0], int(selector_time.group(1)), fields[2]))
-            latest = entries[0] if entries else None
-            evidence_cache[branch] = (latest[0], latest[2], latest[1]) if latest and latest[0] == head else None
-        evidence = evidence_cache[branch]
-        if evidence is None:
-            continue
-        _latest_hash, action, pointed_at = evidence
-        history_actions = ("commit", "merge ", "pull", "fetch", "rebase", "cherry-pick")
-        if action.startswith(history_actions) and pointed_at <= merge_epoch:
+            prior_history = any(
+                older_at < pointed_at for _older_hash, older_at, _older_action in entries[index + 1:]
+            )
+            if (local_formation and pointed_at <= cutoff) or (
+                not local_formation and prior_history and pointed_at < cutoff
+            ):
+                matched = True
+                break
+        if matched:
             matches.append(branch)
     return matches[0] if len(matches) == 1 else None
 
@@ -474,25 +543,31 @@ def _merge_relations(
     if not merge_rows:
         return []
 
-    evidence_cache: dict[str, tuple[str, str, int] | None] = {}
+    evidence_cache: dict[str, list[ReflogEntry]] = {}
     relations: list[dict[str, Any]] = []
     for row in merge_rows:
         commit_hash = row["hash"]
         parents = row["parents"]
         occurred_at = row.get("date") if isinstance(row.get("date"), str) else None
-        target_branch = _unique_branch_at_commit(
-            repo, branch_heads, commit_hash, occurred_at, evidence_cache
+        target_parent = parents[0]
+        if not isinstance(target_parent, str) or not target_parent:
+            continue
+        target = _unique_merge_target(
+            repo, branch_heads, target_parent, commit_hash, occurred_at, evidence_cache
         )
+        target_branch = target[0] if target else None
+        target_observed_at = target[1] if target else None
         for source_parent in parents[1:]:
             if not isinstance(source_parent, str) or not source_parent:
                 continue
-            source_branch = _unique_branch_at_commit(
-                repo, branch_heads, source_parent, occurred_at, evidence_cache
+            source_branch = _unique_source_branch(
+                repo, branch_heads, source_parent, target_observed_at, evidence_cache
             )
             relations.append(
                 {
                     "commit_hash": commit_hash,
                     "occurred_at": occurred_at,
+                    "target_parent": target_parent,
                     "source_parent": source_parent,
                     "source_branch": source_branch,
                     "source_lane_id": lane_ids.get(source_branch) if source_branch else None,
