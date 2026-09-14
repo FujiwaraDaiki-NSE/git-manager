@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
-import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, recentTimePosition, recentTimeAt, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, recentTimePosition, recentTimeAt, graphTimeTicks, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -599,6 +599,7 @@ function FlowMap({
   // resolved width is passed to the per-lane layout and rendered as the
   // explicit track width, keeping point/offset/popover geometry aligned.
   const trackWidth = Math.max(minimumTrackWidth, availableTrackWidth);
+  const timeTicks = graphTimeTicks(minTime, maxTime, trackWidth);
   const events = lanes.flatMap((lane) => layoutFlowEvents(
     positionedEvents.filter((event) => event.lane.id === lane.id),
     trackWidth,
@@ -693,7 +694,7 @@ function FlowMap({
           <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
             <span>ブランチ / 現在の作業状態</span>
             <div className="flow-axis-track">
-              {[0, 50, 100].map((position) => <span key={position} style={{ left: `${position}%` }}>{axisLabel(recentTimeAt(position, minTime, maxTime))}</span>)}
+              {timeTicks.map((tick) => <span className={`flow-time-tick${tick.edge ? ` is-${tick.edge}` : ""}`} key={tick.time} style={{ left: `${tick.position}%` }} title={exactDate(new Date(tick.time).toISOString())}><span className="flow-tick-date">{tick.dateLabel}</span><span>{tick.timeLabel}</span></span>)}
             </div>
           </div>
           <div className="flow-rows" style={{ "--flow-row-height": `${rowHeight}px`, "--flow-lanes": lanes.length, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
@@ -703,6 +704,7 @@ function FlowMap({
             preserveAspectRatio="none"
             viewBox={`0 0 ${trackWidth} ${lanes.length * rowHeight}`}
           >
+            {timeTicks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={lanes.length * rowHeight} />)}
             <line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={lanes.length * rowHeight} />
             {lanes.map((lane, index) => {
               const laneEvents = eventsByLane.get(lane.id) ?? [];

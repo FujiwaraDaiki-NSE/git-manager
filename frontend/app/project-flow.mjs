@@ -111,6 +111,59 @@ export function recentTimeAt(position, minTime, maxTime) {
     * Math.log1p((maxTime - minTime) / RECENT_TIME_UNIT));
 }
 
+/** Calendar-aligned labels, with a fixed minimum pixel distance on the
+ * logarithmic axis. Candidates are generated near each desired position,
+ * avoiding a scan through every minute of long histories.
+ */
+export function graphTimeTicks(minTime, maxTime, trackWidth) {
+  if (!Number.isFinite(trackWidth) || trackWidth < 100) throw new RangeError("Invalid tick width");
+  const count = Math.min(9, Math.floor(trackWidth / 100) + 1);
+  const gap = trackWidth / (count - 1);
+  const room = (gap - 90) / 2;
+  const steps = [604800000, 86400000, 21600000, 10800000, 3600000, 1800000, 900000, 300000, 60000, 30000, 15000, 5000, 1000];
+  const times = [minTime];
+  for (let i = 1; i < count - 1; i++) {
+    const center = i * gap;
+    const target = recentTimeAt(center / trackWidth * 100, minTime, maxTime);
+    let chosen = null;
+    for (const step of steps) {
+      const date = new Date(target);
+      if (step >= 86400000) {
+        date.setHours(0, 0, 0, 0);
+        if (step === 604800000) date.setDate(date.getDate() - (date.getDay() + 6) % 7);
+      } else if (step >= 3600000) {
+        date.setHours(Math.floor(date.getHours() / (step / 3600000)) * (step / 3600000), 0, 0, 0);
+      } else if (step >= 60000) {
+        date.setMinutes(Math.floor(date.getMinutes() / (step / 60000)) * (step / 60000), 0, 0);
+      } else {
+        date.setSeconds(Math.floor(date.getSeconds() / (step / 1000)) * (step / 1000), 0);
+      }
+      const next = new Date(date);
+      if (step >= 86400000) next.setDate(next.getDate() + step / 86400000);
+      else next.setTime(next.getTime() + step);
+      const candidates = [date.getTime(), next.getTime()].filter((time) => time > minTime && time < maxTime
+        && Math.abs(recentTimePosition(time, minTime, maxTime) / 100 * trackWidth - center) <= room);
+      candidates.sort((a,b) => Math.abs(a-target) - Math.abs(b-target));
+      if (candidates.length) { chosen = candidates[0]; break; }
+    }
+    if (chosen !== null) times.push(chosen);
+  }
+  times.push(maxTime);
+  const dayKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  const includeYear = new Date(minTime).getFullYear() !== new Date(maxTime).getFullYear();
+  const includeSeconds = maxTime - minTime < 300000;
+  return times.map((time, index) => {
+    const date = new Date(time);
+    const newDay = index === 0 || dayKey(date) !== dayKey(new Date(times[index-1]));
+    return {
+      time, position: recentTimePosition(time, minTime, maxTime),
+      dateLabel: newDay ? date.toLocaleDateString("ja-JP", { ...(includeYear ? { year: "numeric" } : {}), month: "numeric", day: "numeric" }) : null,
+      timeLabel: date.toLocaleTimeString("ja-JP", {hour:"2-digit",minute:"2-digit", ...(includeSeconds ? {second:"2-digit"} : {})}),
+      edge: index === 0 ? "start" : index === times.length - 1 ? "end" : null,
+    };
+  });
+}
+
 /**
  * Return the x position of a merge-base in the currently displayed time
  * window.  The commit can be outside the window, but its real position is
