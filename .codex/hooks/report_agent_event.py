@@ -31,10 +31,8 @@ def main() -> int:
     cwd = hook_input.get("cwd")
     session_id = hook_input.get("session_id")
     endpoint = os.environ.get("GITDASH_AGENT_ENDPOINT")
-    token = os.environ.get("GITDASH_AGENT_TOKEN")
     if (
         not endpoint
-        or not token
         or not isinstance(session_id, str)
         or not session_id
         or not isinstance(cwd, str)
@@ -69,7 +67,7 @@ def main() -> int:
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:

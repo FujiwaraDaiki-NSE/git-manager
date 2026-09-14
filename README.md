@@ -20,9 +20,9 @@ docker compose up -d --build
 http://localhost:4412 を開く。
 
 通常の公開ポートは 4412 です。agent integration 用 backend は
-`127.0.0.1:${GITDASH_AGENT_PORT}` にだけ bind され、`GITDASH_AGENT_TOKEN` の
-Bearer 認証が必須です。ブラウザからの `/api/*` は frontend のルートハンドラ経由で
-到達します。
+`127.0.0.1:${GITDASH_AGENT_PORT}` にだけ bind されます。ブラウザからの `/api/*` は
+frontend のルートハンドラ経由で到達します。認証不要の agent REST
+`/api/agent-events` もこの proxy 経由で利用できます。
 
 ## 表示するもの
 
@@ -124,7 +124,6 @@ XY コードにはツールチップを付け、状態は色だけでなく `ahe
 | `GITDASH_FETCH_INTERVAL_SEC`  | 300  | 同一リポジトリの fetch 間隔          |
 | `GITDASH_WATCH`               | true | inotify を使うか                     |
 | `GITDASH_AGENT_PORT`           | —    | agent REST/MCP を bind する localhost ポート（必須） |
-| `GITDASH_AGENT_TOKEN`          | —    | agent REST/MCP の Bearer token（必須。未設定なら integration unavailable） |
 | `GITDASH_AGENT_ENDPOINT`       | —    | host-side command hook の REST endpoint（必須。ポートを合わせる） |
 
 除外ディレクトリは `backend/app/scanner.py` の `SKIP_NAMES`。
@@ -156,16 +155,17 @@ watch 数が爆発するのでやっていません。ブラウザにフォー�
 
 ## agent event integration
 
-agent status は `POST /api/agent-events` または localhost の Streamable HTTP MCP
-`/mcp` の `report_agent_status` で明示的に送信します。lifecycle event は
+agent status は `POST /api/agent-events`（frontend の `/api` proxy 経由でも利用可能）
+または localhost の Streamable HTTP MCP `/mcp` の `report_agent_status` で、認証なしに
+明示的に送信します。lifecycle event は
 `run_state` のみを変更し、semantic status は `phase`、`attention`、`outcome`、
 `summary` を必ず明示します（値を消す場合は `null`）。イベントは `/data` の
 append-only SQLite に保存され、`.codex/hooks.json` が SessionStart、SubagentStart、
 Interrupt、SubagentStop、SessionEnd を command hook として送信します。SessionEnd
 は終了時に MCP が利用できないため command hook を使用します。hook は Codex の
-ホストプロセスで実行されるため、`GITDASH_AGENT_ENDPOINT` と
-`GITDASH_AGENT_TOKEN` をホスト環境へ `export`（または Codex が同等に供給）し、
-`GITDASH_AGENT_PORT` を変更した場合は `.codex/config.toml` と endpoint も合わせます。
+ホストプロセスで実行されるため、`GITDASH_AGENT_ENDPOINT` をホスト環境へ
+`export`（または Codex が同等に供給）し、`GITDASH_AGENT_PORT` を変更した場合は
+`.codex/config.toml` と endpoint も合わせます。
 
 MCP は通常セッションのコンテキストを増やさないよう、プロジェクト設定では既定で
 `enabled = false` です。意味的な agent status を報告したいセッションだけ、次のように

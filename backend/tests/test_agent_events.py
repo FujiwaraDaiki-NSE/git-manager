@@ -27,7 +27,6 @@ def ts(day: int = 1) -> datetime:
 def event_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict[str, dict[str, object]]]:
     data = tmp_path / "data"
     monkeypatch.setenv("GITDASH_DATA_DIR", str(data))
-    monkeypatch.setenv("GITDASH_AGENT_TOKEN", "test-token")
     worktree = tmp_path / "repo"
     worktree.mkdir()
     subprocess.run(["git", "-C", str(worktree), "init", "-q", "-b", "main"], check=True)
@@ -71,31 +70,37 @@ def post(path: str, body: dict[str, object], headers: dict[str, str] | None = No
     return asyncio.run(run())
 
 
-def test_auth_absent_wrong_and_correct(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
+def get(path: str, params: dict[str, object] | None = None) -> httpx.Response:
+    async def run() -> httpx.Response:
+        transport = httpx.ASGITransport(app=main.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get(path, params=params)
+
+    return asyncio.run(run())
+
+
+def test_rest_agent_events_are_available_without_authorization(
+    event_context: tuple[str, dict[str, dict[str, object]]],
+) -> None:
     worktree, _ = event_context
     body = status_payload(worktree)
-    assert post("/api/agent-events", body).status_code == 401
-    assert post("/api/agent-events", body, {"Authorization": "Bearer wrong"}).status_code == 401
-    assert post("/api/agent-events", body, {"Authorization": "Bearer test-token"}).status_code == 200
-
-
-def test_missing_configured_token_reports_integration_unavailable(event_context: tuple[str, dict[str, dict[str, object]]], monkeypatch: pytest.MonkeyPatch) -> None:
-    worktree, _ = event_context
-    monkeypatch.delenv("GITDASH_AGENT_TOKEN")
-    assert post("/api/agent-events", status_payload(worktree)).status_code == 503
+    response = post("/api/agent-events", body)
+    assert response.status_code == 200
+    assert get("/api/agent-events").status_code == 200
+    assert get("/api/agent-events").json()["events"][0]["event_id"] == "e1"
 
 
 def test_missing_invalid_timezone_and_unknown_path_validation(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
     worktree, _ = event_context
     missing = status_payload(worktree)
     del missing["task_id"]
-    assert post("/api/agent-events", missing, {"Authorization": "Bearer test-token"}).status_code == 422
+    assert post("/api/agent-events", missing).status_code == 422
     invalid_kind = status_payload(worktree, kind="bogus")
-    assert post("/api/agent-events", invalid_kind, {"Authorization": "Bearer test-token"}).status_code == 422
+    assert post("/api/agent-events", invalid_kind).status_code == 422
     naive = status_payload(worktree, occurred_at="2026-01-01T00:00:00")
-    assert post("/api/agent-events", naive, {"Authorization": "Bearer test-token"}).status_code == 422
+    assert post("/api/agent-events", naive).status_code == 422
     unknown = status_payload("/tmp/not-a-known-worktree")
-    assert post("/api/agent-events", unknown, {"Authorization": "Bearer test-token"}).status_code == 422
+    assert post("/api/agent-events", unknown).status_code == 422
 
 
 def test_status_requires_explicit_semantic_fields_and_lifecycle_rejects_them(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
@@ -156,7 +161,6 @@ def test_same_event_id_with_different_payload_is_conflict(event_context: tuple[s
     assert post(
         "/api/agent-events",
         changed.model_dump(mode="json"),
-        {"Authorization": "Bearer test-token"},
     ).status_code == 409
 
 
@@ -234,7 +238,7 @@ def test_sse_publish_observes_committed_row(event_context: tuple[str, dict[str, 
         seen.append(any(row["event_id"] == "e1" for row in agent_events.events()))
 
     monkeypatch.setattr(main.bus, "publish", publish)
-    assert post("/api/agent-events", status_payload(worktree), {"Authorization": "Bearer test-token"}).status_code == 200
+    assert post("/api/agent-events", status_payload(worktree)).status_code == 200
     assert seen == [True]
 
 
@@ -243,7 +247,7 @@ def test_sse_is_not_published_when_commit_fails(event_context: tuple[str, dict[s
     published: list[object] = []
     monkeypatch.setattr(main.agent_events, "append", lambda *_args: (_ for _ in ()).throw(sqlite3.OperationalError("disk full")))
     monkeypatch.setattr(main.bus, "publish", lambda *_args: published.append(True))
-    assert post("/api/agent-events", status_payload(worktree), {"Authorization": "Bearer test-token"}).status_code == 503
+    assert post("/api/agent-events", status_payload(worktree)).status_code == 503
     assert published == []
 
 
@@ -269,12 +273,51 @@ def test_fastmcp_only_lists_and_calls_report_agent_status(event_context: tuple[s
         }))
 
 
+def test_mcp_http_is_available_without_authorization(
+    event_context: tuple[str, dict[str, dict[str, object]]],
+) -> None:
+    worktree, _ = event_context
+
+    async def run() -> tuple[httpx.Response, httpx.Response]:
+        async with main.mcp_http_app.router.lifespan_context(main.mcp_http_app):
+            transport = httpx.ASGITransport(app=main.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as client:
+                headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+                initialize = await client.post(
+                    "/mcp/",
+                    headers=headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-03-26",
+                            "capabilities": {},
+                            "clientInfo": {"name": "test", "version": "1.0"},
+                        },
+                    },
+                )
+                tools = await client.post(
+                    "/mcp/",
+                    headers=headers,
+                    json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+                )
+                return initialize, tools
+
+    initialize, tools = asyncio.run(run())
+    assert initialize.status_code == 200
+    assert tools.status_code == 200
+    assert "report_agent_status" in tools.text
+
+
 class _CaptureHandler(BaseHTTPRequestHandler):
     payloads: list[dict[str, object]] = []
+    headers_seen: list[dict[str, str]] = []
 
     def do_POST(self) -> None:  # noqa: N802
         size = int(self.headers["Content-Length"])
         self.payloads.append(json.loads(self.rfile.read(size)))
+        self.headers_seen.append({key.lower(): value for key, value in self.headers.items()})
         self.send_response(200)
         self.end_headers()
 
@@ -310,11 +353,12 @@ def test_hook_mapping_failure_modes_and_real_git_worktree(tmp_path: Path) -> Non
     repo.mkdir()
     subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], check=True)
     _CaptureHandler.payloads = []
+    _CaptureHandler.headers_seen = []
     server = HTTPServer(("127.0.0.1", 0), _CaptureHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     endpoint = f"http://127.0.0.1:{server.server_port}/api/agent-events"
-    common = {"GITDASH_AGENT_ENDPOINT": endpoint, "GITDASH_AGENT_TOKEN": "token"}
+    common = {"GITDASH_AGENT_ENDPOINT": endpoint}
     try:
         for hook, run_state, action in (
             ("SessionStart", "active", "session_start"),
@@ -330,11 +374,14 @@ def test_hook_mapping_failure_modes_and_real_git_worktree(tmp_path: Path) -> Non
             assert _CaptureHandler.payloads[-1]["task_id"] == "task-hook"
         assert _CaptureHandler.payloads[1]["agent_id"] == "agent-hook"
         assert all(payload["kind"] == "lifecycle" for payload in _CaptureHandler.payloads)
-        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_TOKEN="token").returncode == 0
+        assert all("authorization" not in headers for headers in _CaptureHandler.headers_seen)
+        count = len(_CaptureHandler.payloads)
+        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT="").returncode == 0
+        assert len(_CaptureHandler.payloads) == count
         assert run_hook(script, tmp_path, "SessionStart", **common).returncode == 0
-        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT=endpoint).returncode == 0
+        assert run_hook(script, repo, "SessionStart", **common).returncode == 0
         # Endpoint failure is intentionally non-fatal to the hook process.
-        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT="http://127.0.0.1:1", GITDASH_AGENT_TOKEN="token").returncode == 0
+        assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT="http://127.0.0.1:1").returncode == 0
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -356,7 +403,6 @@ def test_project_local_mcp_config_and_hooks_shape() -> None:
 
     config = tomllib.loads((root / ".codex/config.toml").read_text())
     server = config["mcp_servers"]["gitdash-agent-events"]
-    assert set(server) == {"url", "bearer_token_env_var", "enabled"}
-    assert server["bearer_token_env_var"] == "GITDASH_AGENT_TOKEN"
+    assert set(server) == {"url", "enabled"}
     assert server["url"].endswith("/mcp")
     assert server["enabled"] is False

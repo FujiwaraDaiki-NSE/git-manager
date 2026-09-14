@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -958,47 +958,13 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="gitdash", docs_url="/api/docs", lifespan=lifespan)
 
 
-class _MCPBearer:
-    """Small ASGI guard because FastMCP's OAuth verifier is not configured."""
-
-    def __init__(self, wrapped: Any) -> None:
-        self.wrapped = wrapped
-
-    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        if scope.get("type") == "http":
-            headers = {key.lower(): value for key, value in scope.get("headers", [])}
-            authorization = headers.get(b"authorization")
-            expected = os.environ.get("GITDASH_AGENT_TOKEN")
-            if not expected:
-                await _send_json(send, 503, {"detail": "agent event integration unavailable"})
-                return
-            if authorization != f"Bearer {expected}".encode():
-                await _send_json(send, 401, {"detail": "invalid bearer token"})
-                return
-        await self.wrapped(scope, receive, send)
-
-
-async def _send_json(send: Any, status: int, body: dict[str, Any]) -> None:
-    encoded = json.dumps(body).encode()
-    await send({"type": "http.response.start", "status": status, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(encoded)).encode())]})
-    await send({"type": "http.response.body", "body": encoded})
-
-
 mcp_http_app = mcp_server.mcp.streamable_http_app()
-app.mount("/mcp", _MCPBearer(mcp_http_app), name="mcp")
+app.mount("/mcp", mcp_http_app, name="mcp")
 
 
 def _state_snapshot() -> dict[str, dict[str, Any]]:
     with STATE_LOCK:
         return {path: dict(row) for path, row in STATE.items()}
-
-
-def _agent_token_valid(authorization: str | None) -> bool:
-    """Require an explicitly configured bearer token for agent integration."""
-    expected = os.environ.get("GITDASH_AGENT_TOKEN")
-    if not expected:
-        return False
-    return authorization == f"Bearer {expected}"
 
 
 @app.post(
@@ -1009,19 +975,14 @@ def _agent_token_valid(authorization: str | None) -> bool:
 )
 async def report_agent_status(
     request: agent_events.AgentEventRequest,
-    authorization: str | None = Header(default=None),
 ) -> agent_events.ReportAgentStatusResponse:
-    """Persist an agent event after bearer authentication and exact-worktree validation.
+    """Persist an agent event after exact-worktree validation.
 
     This endpoint has a side effect: accepted events are appended to the
     agent-event SQLite log and published to SSE after the database commit.
     Lifecycle events alter only ``run_state``; semantic status events must set
     all semantic fields explicitly, including nulls used for clearing.
     """
-    if not _agent_token_valid(authorization):
-        if not os.environ.get("GITDASH_AGENT_TOKEN"):
-            raise HTTPException(status_code=503, detail="agent event integration unavailable")
-        raise HTTPException(status_code=401, detail="invalid bearer token")
     try:
         response = agent_events.append(request, _state_snapshot())
     except agent_events.DuplicateEventConflict as exc:
@@ -1040,13 +1001,8 @@ async def list_agent_events(
     project_id: str | None = None,
     worktree: str | None = None,
     as_of: datetime | None = None,
-    authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Read the append-only agent history, optionally replayed as-of a time."""
-    if not _agent_token_valid(authorization):
-        if not os.environ.get("GITDASH_AGENT_TOKEN"):
-            raise HTTPException(status_code=503, detail="agent event integration unavailable")
-        raise HTTPException(status_code=401, detail="invalid bearer token")
     if as_of is not None and (as_of.tzinfo is None or as_of.utcoffset() is None):
         raise HTTPException(status_code=422, detail="as_of must include a timezone")
     try:

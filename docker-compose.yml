@@ -27,7 +27,6 @@ services:
       GITDASH_FETCH_WORKERS: ${GITDASH_FETCH_WORKERS:-4}
       GITDASH_FETCH_INTERVAL_SEC: ${GITDASH_FETCH_INTERVAL_SEC:-300}
       GITDASH_WATCH: ${GITDASH_WATCH:-true}
-      GITDASH_AGENT_TOKEN: ${GITDASH_AGENT_TOKEN}
       HOME: /home/host
     volumes:
       # fetch が .git に書き込むため rw。アプリは fetch 以外書き込まない
