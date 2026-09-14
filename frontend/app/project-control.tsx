@@ -391,6 +391,7 @@ function FlowEventButton({
       {hasLeader && <span className="flow-event-leader" aria-hidden="true" style={{ left: `calc(50% + ${leader.left}px)`, width: `${leader.width}px` }} />}
       <button
         aria-label={`${laneLabel(event.lane)} ${shortHash(event.row.hash)} ${event.row.subject}`}
+        aria-pressed={selected}
         aria-describedby={preview ? flowPopoverId(event.id) : undefined}
         className={`flow-event-button${selected ? " is-selected" : ""}`}
         data-flow-event-key={event.id}
@@ -647,13 +648,13 @@ function FlowMap({
     }
   }, [eventsByLane, lanes]);
   const defaultIndex = lanes.findIndex((lane) => lane.branch === project.default_branch);
-  const rowHeight = 72;
+  const rowHeight = 88;
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
 
   return (
     <section className="flow-section" aria-labelledby="flow-map-title">
       <div className="flow-controls">
-        <h3 id="flow-map-title">ブランチの分岐と合流</h3>
+        <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチ名で作業詳細、点でコミット詳細を開きます。</p></div><span className="flow-direction">過去 → 現在</span></div>
         <div className="flow-toolbar">
           <div className="range-tabs" role="group" aria-label="表示するコミット">
             <span className="flow-control-label">表示範囲</span>
@@ -677,15 +678,6 @@ function FlowMap({
         </div>
       </details>
       {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・agent履歴を表示中。ブランチ名とGit作業状態、作業詳細は現在の情報です。</p>}
-      <div className="flow-legend" aria-label="フロー凡例">
-        <span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span>
-        <span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span>
-        <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span>
-        <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
-        <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
-        <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
-        <span className="flow-time-direction">時間 →</span>
-      </div>
       {lanes.length === 0 ? (
         <div className="empty-flow">表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。</div>
       ) : (
@@ -764,7 +756,7 @@ function FlowMap({
             const snapshot = laneAgentSnapshotAt(lane, observedAgentEvents, observationTime)[0]
               ?? (timeline === 100 ? currentLaneAgent(lane) : null);
             return (
-              <div className={`flow-row${selectedLane === lane.id ? " is-selected" : ""}`} key={lane.id}>
+              <div className={`flow-row${lane.branch === project.default_branch ? " is-default" : ""}${selectedLane === lane.id ? " is-selected" : ""}`} key={lane.id}>
                 <div className="flow-lane-label" ref={index === 0 ? firstLaneLabelRef : undefined}>
                   <div className="flow-lane-title">
                     <span className="lane-shape" aria-hidden="true" />
@@ -797,7 +789,7 @@ function FlowMap({
                     );
                   })}
                   {laneEvents.length > 0 && <div className="flow-latest-visible">
-                    <span title={laneEvents[laneEvents.length - 1].row.subject}>{laneEvents[laneEvents.length - 1].row.subject}</span>
+                    <span className="flow-latest-caption">最新</span><span title={laneEvents[laneEvents.length - 1].row.subject}>{laneEvents[laneEvents.length - 1].row.subject}</span>
                     <time dateTime={laneEvents[laneEvents.length - 1].row.date}>{axisLabel(eventDate(laneEvents[laneEvents.length - 1].row)!)}</time>
                   </div>}
                 </div>
@@ -810,6 +802,15 @@ function FlowMap({
           </div>
         </div>
       )}
+      <div className="flow-legend" aria-label="フロー凡例">
+        <span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span>
+        <span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span>
+        <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span>
+        <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
+        <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
+        <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
+        <span className="flow-time-direction">時間 →</span>
+      </div>
       {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
       {unresolvedMergeCount > 0 && (
         <div className="inline-note" role="status">
@@ -865,7 +866,7 @@ function WorkLanes({
     <section className="lanes-section" aria-labelledby="lanes-title">
       <div className="section-heading-row">
         <div>
-          <p className="eyebrow">LANE REGISTER</p>
+
           <h3 id="lanes-title">作業一覧</h3>
           <p className="section-copy">Git の状態と agent の明示した現在地、次の判断を一覧します。</p>
         </div>
@@ -941,7 +942,7 @@ function ActivityView({
   return (
     <section className="activity-section" aria-labelledby="activity-title">
       <div className="section-heading-row">
-        <div><p className="eyebrow">EVENT STREAM</p><h3 id="activity-title">アクティビティ</h3><p className="section-copy">Git と agent のイベントを絶対時刻順に表示します。発生元と状態は文字でも確認できます。</p></div>
+        <div><h3 id="activity-title">アクティビティ</h3><p className="section-copy">Git と agent のイベントを絶対時刻順に表示します。発生元と状態は文字でも確認できます。</p></div>
       </div>
       <div className="activity-filters" role="toolbar" aria-label="イベント種別">
         {activityFilters.map((item) => (
@@ -971,7 +972,7 @@ function ActivityView({
 function ProjectInfo({ project }: { project: ProjectResponse }) {
   return (
     <section className="info-section" aria-labelledby="info-title">
-      <div className="section-heading-row"><div><p className="eyebrow">PROJECT RECORD</p><h3 id="info-title">プロジェクト情報</h3><p className="section-copy">Git と明示的に取得できた保守情報だけを表示します。</p></div></div>
+      <div className="section-heading-row"><div><h3 id="info-title">プロジェクト情報</h3><p className="section-copy">Git と明示的に取得できた保守情報だけを表示します。</p></div></div>
       <div className="info-grid">
         <div className="info-card info-card-wide"><span className="eyebrow">説明</span><p>{project.description || "説明なし"}</p></div>
         <InfoField label="リモート URL" value={project.remote} code />
@@ -1017,7 +1018,7 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
         <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</dd></div>
       </dl>
       {lane.next_command && <div className="selection-command"><span>Git 次コマンド</span><code>{lane.next_command.command}</code><small>{lane.next_command.reason}</small></div>}
-      <button className="primary-action" type="button" onClick={() => onOpenGit(lane)}>既存の Git 詳細を開く</button>
+      <button className="primary-action" type="button" onClick={() => onOpenGit(lane)}>Git 詳細を開く</button>
     </div>
   );
 }
@@ -1161,7 +1162,7 @@ function SelectionPane({
   const lane = project.lanes.find((item) => item.id === selectedLane) ?? (selectedEvent && "lane" in selectedEvent ? selectedEvent.lane : null);
   return (
     <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal={modal ? true : undefined} role={modal ? "dialog" : "complementary"} tabIndex={-1}>
-      <div className="selection-head"><span className="eyebrow">DETAIL</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
+      <div className="selection-head"><span className="selection-title">選択した項目の詳細</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
       {selectedEvent && selectedHash ? <CommitDetail event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail defaultBranch={project.default_branch} lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
     </aside>
   );
@@ -1355,14 +1356,21 @@ export default function ProjectControl() {
         <button className="rescan-button" disabled={scanning} type="button" onClick={() => void fetch("/api/rescan", { method: "POST" })}>{scanning ? "走査中…" : "再走査"}</button>
       </header>
       <section className="control-hero" aria-labelledby="project-title">
-        <div className="control-hero-main"><h1 id="project-title">{project.name}</h1><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div></div>
-        <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>統合可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div>
+        <div className="control-hero-main"><div className="project-identity"><h1 id="project-title">{project.name}</h1><span className="project-baseline">既定 <strong>{project.default_branch ?? "未取得"}</strong></span><span className="project-lane-count">{project.lanes.length} ブランチ</span></div><details className="project-context"><summary>プロジェクトの概要・集計</summary><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div>
+        <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>統合可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div></details></div>
       </section>
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">
-        {tabs.map((tab) => <button aria-selected={urlState.tab === tab.id} className="control-tab" key={tab.id} role="tab" type="button" onClick={() => updateUrl({ tab: tab.id })}><span>{tab.label}</span><small>{tab.short}</small></button>)}
+        {tabs.map((tab) => <button aria-selected={urlState.tab === tab.id} className="control-tab" key={tab.id} role="tab" id={`project-tab-${tab.id}`} aria-controls={`project-panel-${tab.id}`} tabIndex={urlState.tab === tab.id ? 0 : -1} type="button" onKeyDown={(event) => {
+          const index = tabs.findIndex((item) => item.id === tab.id);
+          const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : null;
+          if (next === null) return;
+          event.preventDefault();
+          updateUrl({ tab: tabs[next].id });
+          document.getElementById(`project-tab-${tabs[next].id}`)?.focus();
+        }} onClick={() => updateUrl({ tab: tab.id })}><span>{tab.label}</span></button>)}
       </nav>
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
-        <section className="control-main">
+        <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
           {urlState.tab === "flow" && <FlowMap selectedLane={selectedLane} onSelectLane={selectLane} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
           {urlState.tab === "lanes" && <WorkLanes onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView filter={activityFilter} onFilter={(filter) => { setActivityFilter(filter); updateUrl({ event: null }); }} onSelect={selectEvent} project={project} /></>}
