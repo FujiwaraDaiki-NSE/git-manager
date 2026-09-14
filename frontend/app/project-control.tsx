@@ -4,13 +4,14 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
-import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mobileEventAction, parseProjectUrl, popoverPlacement, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mergeRelationInWindow, mergeRelationLinks, mobileEventAction, parseProjectUrl, popoverPlacement, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
   GraphRow,
   ProjectEvent,
   ProjectLane,
+  ProjectMergeRelation,
   ProjectResponse,
   Repo,
   AgentTask,
@@ -69,6 +70,12 @@ function shortHash(hash: string | null | undefined) {
 
 function laneLabel(lane: ProjectLane) {
   return lane.branch || "detached HEAD";
+}
+
+function laneMergeSummary(lane: ProjectLane) {
+  const outgoing = lane.merge_sources.map((relation) => `→ ${relation.target_branch ?? "不明"}`);
+  const incoming = lane.merge_targets.map((relation) => `${relation.source_branch ?? "不明"} →`);
+  return [...outgoing, ...incoming].join(" / ") || "合流関係なし / 不明";
 }
 
 function laneState(lane: ProjectLane, defaultBranch: string | null = null) {
@@ -378,8 +385,11 @@ function FlowMap({
   const [renderedLabelWidth, setRenderedLabelWidth] = useState(220);
   const [flowViewport, setFlowViewport] = useState<FlowViewport | null>(null);
   const graphRows = project.graph?.rows ?? [];
+  const relationLaneIds = useMemo(() => new Set(project.merge_relations.flatMap((relation) => (
+    [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
+  ))), [project.merge_relations]);
   const lanes = useMemo(() => {
-    const source = project.lanes.filter((lane) => showMerged || lane.branch === project.default_branch || !isFoldedMerged(lane));
+    const source = project.lanes.filter((lane) => showMerged || relationLaneIds.has(lane.id) || lane.branch === project.default_branch || !isFoldedMerged(lane));
     const defaultBranch = project.default_branch;
     return [...source].sort((a, b) => {
       if (a.branch === defaultBranch && b.branch !== defaultBranch) return -1;
@@ -391,7 +401,7 @@ function FlowMap({
       const bDate = b.last_commit?.date ?? "";
       return bDate.localeCompare(aDate);
     });
-  }, [project.default_branch, project.lanes, showMerged]);
+  }, [project.default_branch, project.lanes, relationLaneIds, showMerged]);
 
   const laneRows = useMemo(
     () => new Map(lanes.map((lane) => [lane.id, ancestryRows(graphRows, lane.head, lane.merge_base)])),
@@ -511,6 +521,10 @@ function FlowMap({
       date: mergeBaseRow?.date ?? null,
     }];
   }));
+  const mergeLinks = mergeRelationLinks(project.merge_relations, lanes, minTime, maxTime, observationTime);
+  const visibleMergeKeys = new Set(project.merge_relations
+    .filter((relation) => mergeRelationInWindow(relation, minTime, maxTime, observationTime))
+    .map((relation) => `${relation.commit_hash}:${relation.source_parent}`));
   const registerEventButton = useCallback((id: string, node: HTMLButtonElement | null) => {
     if (node) eventButtonRefs.current.set(id, node);
     else eventButtonRefs.current.delete(id);
@@ -544,7 +558,7 @@ function FlowMap({
   }, [eventsByLane, lanes, measureFlowViewport]);
   const defaultIndex = lanes.findIndex((lane) => lane.branch === project.default_branch);
   const rowHeight = 72;
-  const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && isFoldedMerged(lane)).length;
+  const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
   const nowX = Math.min(100, Math.max(0, ((now - minTime) / (maxTime - minTime)) * 100));
 
   return (
@@ -553,7 +567,7 @@ function FlowMap({
         <div>
           <p className="eyebrow">DEVELOPMENT FLOW</p>
           <h3 id="flow-map-title">Git から観測した作業レーン</h3>
-          <p className="section-copy">分岐点は実際の merge-base、イベントはコミットです。agent の工程は推測しません。</p>
+          <p className="section-copy">分岐点は実際の merge-base、矢印はGitの親履歴から特定できた合流元 → 合流先です。agent の工程は推測しません。</p>
         </div>
         <div className="flow-control-actions">
           {mergedCount > 0 && (
@@ -583,6 +597,7 @@ function FlowMap({
         <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> merge</span>
         <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
         <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
+        <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
         <span><i className="legend-dot legend-dot-unknown" aria-hidden="true" /> agent 状態不明</span>
       </div>
       {lanes.length === 0 ? (
@@ -611,6 +626,11 @@ function FlowMap({
             preserveAspectRatio="none"
             viewBox={`0 0 1000 ${lanes.length * rowHeight}`}
           >
+            <defs>
+              <marker id="flow-merge-arrow" markerHeight="6" markerWidth="7" orient="auto" refX="6" refY="3" viewBox="0 0 7 6">
+                <path className="flow-merge-arrow" d="M 0 0 L 7 3 L 0 6 z" />
+              </marker>
+            </defs>
             <line className="flow-now-line" x1={nowX * 10} x2={nowX * 10} y1="0" y2={lanes.length * rowHeight} />
             {lanes.map((lane, index) => {
               const laneEvents = eventsByLane.get(lane.id) ?? [];
@@ -628,6 +648,22 @@ function FlowMap({
                     <line className={lane.merge_base ? "flow-branch-link" : "flow-branch-link flow-branch-link-unknown"} x1={startX} x2={startX} y1={baseline} y2={y} />
                   )}
                 </g>
+              );
+            })}
+            {mergeLinks.map((link: ProjectMergeRelation & { x: number; outside: boolean; sourceIndex: number; targetIndex: number }) => {
+              const x = link.x * 10;
+              const sourceY = link.sourceIndex * rowHeight + rowHeight / 2;
+              const targetY = link.targetIndex * rowHeight + rowHeight / 2;
+              const approachX = Math.max(0, x - 24);
+              return (
+                <path
+                  className={`flow-merge-link${link.outside ? " flow-merge-link-outside" : ""}`}
+                  d={`M ${approachX} ${sourceY} C ${x - 8} ${sourceY}, ${x - 8} ${targetY}, ${x} ${targetY}`}
+                  key={`${link.commit_hash}:${link.source_parent}`}
+                  markerEnd="url(#flow-merge-arrow)"
+                >
+                  <title>{`${link.source_branch} → ${link.target_branch} · ${shortHash(link.commit_hash)}`}</title>
+                </path>
               );
             })}
           </svg>
@@ -649,6 +685,8 @@ function FlowMap({
                     <AgentFact task={snapshot} />
                     <span title={lane.path ?? undefined}>{lane.path ?? "パス未取得"}</span>
                     <span className={mergeBase?.outside ? "flow-range-note" : undefined}>{!lane.merge_base ? "分岐点 未取得" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点 表示範囲外" : "分岐点 表示中"}</span>
+                    {lane.merge_sources.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => <span className="flow-merge-fact" key={`source:${relation.commit_hash}:${relation.source_parent}`}>{`合流元 → ${relation.target_branch ?? "不明"}`}</span>)}
+                    {lane.merge_targets.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => <span className="flow-merge-fact" key={`target:${relation.commit_hash}:${relation.source_parent}`}>{`${relation.source_branch ?? "不明"} → 合流先`}</span>)}
                   </div>
                 </div>
                 <div className="flow-track">
@@ -727,8 +765,11 @@ function WorkLanes({
   showMerged: boolean;
   onShowMergedChange: (value: boolean) => void;
 }) {
-  const lanes = project.lanes.filter((lane) => showMerged || lane.branch === project.default_branch || !isFoldedMerged(lane));
-  const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && isFoldedMerged(lane)).length;
+  const relationLaneIds = new Set(project.merge_relations.flatMap((relation) => (
+    [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
+  )));
+  const lanes = project.lanes.filter((lane) => showMerged || relationLaneIds.has(lane.id) || lane.branch === project.default_branch || !isFoldedMerged(lane));
+  const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
   return (
     <section className="lanes-section" aria-labelledby="lanes-title">
       <div className="section-heading-row">
@@ -742,7 +783,7 @@ function WorkLanes({
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
-            <tr><th>作業</th><th>状態 / agent</th><th>最終活動</th><th>既定ブランチとの差</th><th>最新メッセージ</th><th>合流先</th><th>次の工程 / 注意</th><th aria-label="操作" /></tr>
+            <tr><th>作業</th><th>状態 / agent</th><th>最終活動</th><th>既定ブランチとの差</th><th>最新メッセージ</th><th>合流関係</th><th>次の工程 / 注意</th><th aria-label="操作" /></tr>
           </thead>
           <tbody>
             {lanes.map((lane) => (
@@ -761,7 +802,7 @@ function WorkLanes({
                 </td>
                 <td className="mono-cell">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
                 <td className="unknown-cell">{currentLaneAgent(lane)?.summary || "報告内容なし"}</td>
-                <td className="unknown-cell">{lane.merge_target || "合流先不明"}</td>
+                <td className="unknown-cell">{laneMergeSummary(lane)}</td>
                 <td className="unknown-cell">{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</td>
                 <td><button className="table-action" type="button" onClick={() => onOpenGit(lane)}>Git詳細</button></td>
               </tr>
@@ -879,7 +920,8 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
         <div><dt>最終イベント</dt><dd>{lane.last_commit?.subject ?? "未取得"}<small>{exactDate(lane.last_commit?.date)}</small></dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
         <div><dt>担当 agent</dt><dd>{currentLaneAgent(lane)?.agent_id || "未関連付け"}</dd></div>
-        <div><dt>合流先</dt><dd>{lane.merge_target || "合流先不明"}</dd></div>
+        <div><dt>このブランチからの合流</dt><dd>{lane.merge_sources.length ? lane.merge_sources.map((relation) => `${relation.target_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
+        <div><dt>このブランチへの合流</dt><dd>{lane.merge_targets.length ? lane.merge_targets.map((relation) => `${relation.source_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
         <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</dd></div>
       </dl>
       {lane.next_command && <div className="selection-command"><span>Git 次コマンド</span><code>{lane.next_command.command}</code><small>{lane.next_command.reason}</small></div>}

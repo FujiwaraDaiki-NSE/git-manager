@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,6 +18,25 @@ def git(repo: Path, *args: str) -> str:
 
 def commit(repo: Path, subject: str) -> None:
     git(repo, "commit", "--allow-empty", "-qm", subject)
+
+
+def git_at(repo: Path, date: str, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
+    )
+    return result.stdout
+
+
+def init_repo(repo: Path) -> None:
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.com")
+    commit(repo, "base")
 
 
 def test_build_keeps_git_facts_separate_and_resolves_linked_lane(tmp_path: Path) -> None:
@@ -188,6 +208,299 @@ def test_branch_merge_and_summary_lane_count_use_project_git_facts(tmp_path: Pat
     all_history = project.build(str(repo), str(repo), state, range_name="all")
     assert all_history is not None
     assert len(all_history["events"]) > len(result["events"])
+
+
+def test_project_reports_non_default_merge_source_and_target_relations(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    git(repo, "switch", "-q", "-c", "feature")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    git(repo, "add", "feature.txt")
+    commit(repo, "feature")
+    feature_head = git(repo, "rev-parse", "HEAD").strip()
+
+    git(repo, "switch", "-q", "-c", "release", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge feature into release")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    merge_date = git(repo, "show", "-s", "--format=%cI", merge_hash).strip()
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relation = next(item for item in result["merge_relations"] if item["commit_hash"] == merge_hash)
+    assert relation == {
+        "commit_hash": merge_hash,
+        "occurred_at": merge_date,
+        "source_parent": feature_head,
+        "source_branch": "feature",
+        "source_lane_id": "branch:feature",
+        "target_branch": "release",
+        "target_lane_id": "branch:release",
+    }
+
+    feature = next(lane for lane in result["lanes"] if lane["branch"] == "feature")
+    release = next(lane for lane in result["lanes"] if lane["branch"] == "release")
+    assert feature["merge_sources"] == [relation]
+    assert feature["merge_targets"] == []
+    assert feature["merge_target"] == "release"
+    assert release["merge_sources"] == []
+    assert release["merge_targets"] == [relation]
+    assert release["merge_target"] is None
+    assert result["merge_target"] is None
+
+
+def test_project_preserves_each_octopus_source_parent_as_a_relation(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    base = git(repo, "rev-parse", "HEAD").strip()
+
+    git(repo, "switch", "-q", "-c", "feature-a")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    git(repo, "add", "a.txt")
+    commit(repo, "feature a")
+    feature_a_head = git(repo, "rev-parse", "HEAD").strip()
+
+    git(repo, "switch", "-q", "-c", "feature-b", base)
+    (repo / "b.txt").write_text("b\n", encoding="utf-8")
+    git(repo, "add", "b.txt")
+    commit(repo, "feature b")
+    feature_b_head = git(repo, "rev-parse", "HEAD").strip()
+
+    git(repo, "switch", "-q", "-c", "release", base)
+    git(repo, "merge", "--no-ff", "-q", "feature-a", "feature-b", "-m", "octopus into release")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relations = [item for item in result["merge_relations"] if item["commit_hash"] == merge_hash]
+    assert len(relations) == 2
+    assert {item["source_parent"] for item in relations} == {feature_a_head, feature_b_head}
+    assert {item["source_branch"] for item in relations} == {"feature-a", "feature-b"}
+    assert {item["target_branch"] for item in relations} == {"release"}
+    assert all(item["target_lane_id"] == "branch:release" for item in relations)
+
+    for branch in ("feature-a", "feature-b"):
+        lane = next(item for item in result["lanes"] if item["branch"] == branch)
+        assert len(lane["merge_sources"]) == 1
+        assert lane["merge_sources"][0]["commit_hash"] == merge_hash
+    release = next(item for item in result["lanes"] if item["branch"] == "release")
+    assert len(release["merge_targets"]) == 2
+
+
+def test_project_keeps_multiple_merges_on_one_source_lane(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    base = git(repo, "rev-parse", "HEAD").strip()
+
+    git(repo, "switch", "-q", "-c", "feature")
+    (repo / "feature-v1.txt").write_text("v1\n", encoding="utf-8")
+    git(repo, "add", "feature-v1.txt")
+    commit(repo, "feature v1")
+
+    git(repo, "switch", "-q", "-c", "release", base)
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge v1 into release")
+    first_merge = git(repo, "rev-parse", "HEAD").strip()
+
+    git(repo, "switch", "-q", "feature")
+    (repo / "feature-v2.txt").write_text("v2\n", encoding="utf-8")
+    git(repo, "add", "feature-v2.txt")
+    commit(repo, "feature v2")
+
+    git(repo, "switch", "-q", "-c", "staging", base)
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge v2 into staging")
+    second_merge = git(repo, "rev-parse", "HEAD").strip()
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    feature = next(lane for lane in result["lanes"] if lane["branch"] == "feature")
+    assert {item["commit_hash"] for item in feature["merge_sources"]} == {second_merge}
+    assert {item["target_branch"] for item in feature["merge_sources"]} == {"staging"}
+    assert len(result["merge_relations"]) == 2
+    first_relation = next(item for item in result["merge_relations"] if item["commit_hash"] == first_merge)
+    assert first_relation["source_branch"] is None
+    assert first_relation["source_lane_id"] is None
+
+
+def test_project_ignores_later_branch_aliases_at_merge_commits(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    git(repo, "switch", "-q", "-c", "feature")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    git(repo, "add", "feature.txt")
+    commit(repo, "feature")
+    git(repo, "branch", "feature-copy")
+
+    git(repo, "switch", "-q", "-c", "release", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "ambiguous merge")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "branch", "release-copy")
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relation = next(item for item in result["merge_relations"] if item["commit_hash"] == merge_hash)
+    assert relation["source_branch"] == "feature"
+    assert relation["source_lane_id"] == "branch:feature"
+    assert relation["target_branch"] == "release"
+    assert relation["target_lane_id"] == "branch:release"
+    assert next(lane for lane in result["lanes"] if lane["branch"] == "feature-copy")["merge_sources"] == []
+    assert next(lane for lane in result["lanes"] if lane["branch"] == "release-copy")["merge_targets"] == []
+
+
+def test_project_leaves_deleted_source_branch_unresolved(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    git(repo, "switch", "-q", "-c", "feature")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    git(repo, "add", "feature.txt")
+    commit(repo, "feature")
+    git(repo, "switch", "-q", "-c", "release", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge before deleting source")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "branch", "-D", "feature")
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relation = next(item for item in result["merge_relations"] if item["commit_hash"] == merge_hash)
+    assert relation["source_branch"] is None
+    assert relation["source_lane_id"] is None
+    assert relation["target_branch"] == "release"
+    assert relation["target_lane_id"] == "branch:release"
+    release = next(lane for lane in result["lanes"] if lane["branch"] == "release")
+    assert release["merge_targets"] == [relation]
+
+
+def test_project_does_not_misname_a_deleted_source_as_a_later_descendant(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    git(repo, "switch", "-q", "-c", "feature")
+    commit(repo, "feature")
+    source_parent = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "-q", "-c", "release", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge feature")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "branch", "-D", "feature")
+    git(repo, "switch", "-q", "-c", "feature-next", source_parent)
+    commit(repo, "later descendant")
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relation = next(item for item in result["merge_relations"] if item["commit_hash"] == merge_hash)
+    assert relation["source_branch"] is None
+    assert relation["source_lane_id"] is None
+
+
+def test_project_does_not_misname_a_later_branch_as_the_merge_target(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    git(repo, "switch", "-q", "-c", "feature")
+    commit(repo, "feature")
+    git(repo, "switch", "-q", "-c", "release", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge feature")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "-q", "-c", "deploy")
+    commit(repo, "deploy work")
+    git(repo, "switch", "-q", "release")
+    commit(repo, "release work")
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relation = next(item for item in result["merge_relations"] if item["commit_hash"] == merge_hash)
+    assert relation["target_branch"] is None
+    assert relation["target_lane_id"] is None
+
+
+def test_project_rejects_a_later_branch_pointing_exactly_at_a_merge_parent(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    git(repo, "switch", "-q", "-c", "feature")
+    commit(repo, "feature")
+    source_parent = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "-q", "-c", "release", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge feature")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "branch", "-D", "feature")
+    git(repo, "branch", "replacement-source", source_parent)
+    commit(repo, "release advances")
+    git(repo, "branch", "replacement-target", merge_hash)
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relation = next(item for item in result["merge_relations"] if item["commit_hash"] == merge_hash)
+    assert relation["source_branch"] is None
+    assert relation["source_lane_id"] is None
+    assert relation["target_branch"] is None
+    assert relation["target_lane_id"] is None
+
+
+def test_project_rejects_a_later_branch_reset_to_a_merge_parent(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    git(repo, "switch", "-q", "-c", "feature")
+    commit(repo, "feature")
+    source_parent = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "-q", "-c", "release", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge feature")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "branch", "-D", "feature")
+    git(repo, "switch", "-q", "-c", "replacement-source", "main")
+    commit(repo, "replacement advances")
+    git(repo, "reset", "--hard", "-q", source_parent)
+    git(repo, "switch", "-q", "release")
+    commit(repo, "release advances")
+    git(repo, "switch", "-q", "-c", "replacement-target")
+    git(repo, "reset", "--hard", "-q", merge_hash)
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relation = next(item for item in result["merge_relations"] if item["commit_hash"] == merge_hash)
+    assert relation["source_branch"] is None
+    assert relation["source_lane_id"] is None
+    assert relation["target_branch"] is None
+    assert relation["target_lane_id"] is None
+
+
+def test_project_rejects_later_branches_fast_forwarded_to_merge_commits(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    git(repo, "switch", "-q", "-c", "feature")
+    git_at(repo, "2000-01-01T00:00:00+00:00", "commit", "--allow-empty", "-qm", "feature")
+    source_parent = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "-q", "-c", "release", "main")
+    git_at(repo, "2000-01-02T00:00:00+00:00", "merge", "--no-ff", "-q", "feature", "-m", "merge feature")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "branch", "-D", "feature")
+
+    git(repo, "switch", "-q", "-c", "replacement-source", "main")
+    git(repo, "merge", "--ff-only", "-q", source_parent)
+    git(repo, "switch", "-q", "release")
+    commit(repo, "release advances")
+    git(repo, "switch", "-q", "-c", "replacement-target", "main")
+    git(repo, "merge", "--ff-only", "-q", merge_hash)
+
+    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+
+    assert result is not None
+    relation = next(item for item in result["merge_relations"] if item["commit_hash"] == merge_hash)
+    assert relation["source_branch"] is None
+    assert relation["source_lane_id"] is None
+    assert relation["target_branch"] is None
+    assert relation["target_lane_id"] is None
 
 
 def test_project_maintenance_excludes_the_default_branch_from_merged_count(tmp_path: Path) -> None:

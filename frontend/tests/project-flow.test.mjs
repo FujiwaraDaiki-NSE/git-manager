@@ -8,6 +8,8 @@ import {
   flowKeyboardAction,
   layoutFlowEvents,
   mergeBasePosition,
+  mergeRelationInWindow,
+  mergeRelationLinks,
   mobileEventAction,
   parseProjectUrl,
   popoverPlacement,
@@ -166,6 +168,57 @@ test("merge-base remains anchored at the range edge when its commit is hidden", 
     mergeBasePosition("2026-09-03T12:00:00+09:00", start, end),
     { x: 50, outside: false, available: true },
   );
+});
+
+test("merge links preserve source and non-default target direction", () => {
+  const relation = {
+    commit_hash: "merge",
+    occurred_at: "2026-09-03T12:00:00+09:00",
+    source_parent: "feature-head",
+    source_branch: "feature",
+    source_lane_id: "branch:feature",
+    target_branch: "release",
+    target_lane_id: "branch:release",
+  };
+  const links = mergeRelationLinks(
+    [relation],
+    [{ id: "branch:main" }, { id: "branch:release" }, { id: "branch:feature" }],
+    Date.parse("2026-09-03T00:00:00+09:00"),
+    Date.parse("2026-09-04T00:00:00+09:00"),
+    Date.parse("2026-09-04T00:00:00+09:00"),
+  );
+
+  assert.equal(links.length, 1);
+  assert.equal(links[0].sourceIndex, 2);
+  assert.equal(links[0].targetIndex, 1);
+  assert.equal(links[0].x, 50);
+  assert.equal(links[0].target_branch, "release");
+});
+
+test("merge links omit unresolved, folded, and future relations", () => {
+  const base = {
+    commit_hash: "merge",
+    occurred_at: "2026-09-03T12:00:00+09:00",
+    source_parent: "feature-head",
+    source_branch: "feature",
+    source_lane_id: "branch:feature",
+    target_branch: "release",
+    target_lane_id: "branch:release",
+  };
+  const args = [
+    [{ id: "branch:release" }, { id: "branch:feature" }],
+    Date.parse("2026-09-03T00:00:00+09:00"),
+    Date.parse("2026-09-04T00:00:00+09:00"),
+  ];
+  assert.deepEqual(mergeRelationLinks([{ ...base, source_lane_id: null }], ...args, Date.parse("2026-09-04T00:00:00+09:00")), []);
+  assert.deepEqual(mergeRelationLinks([base], [{ id: "branch:release" }], args[1], args[2], Date.parse("2026-09-04T00:00:00+09:00")), []);
+  assert.deepEqual(mergeRelationLinks([base], ...args, Date.parse("2026-09-03T00:00:00+09:00")), []);
+  assert.equal(mergeRelationInWindow(
+    { ...base, occurred_at: "2026-09-01T00:00:00+09:00" },
+    args[1],
+    args[2],
+    Date.parse("2026-09-04T00:00:00+09:00"),
+  ), false);
 });
 
 test("arrow keys only move focus while Enter and Space select", () => {
