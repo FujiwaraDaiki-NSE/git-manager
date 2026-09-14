@@ -536,7 +536,9 @@ function FlowMap({
     const updateWidth = () => {
       const labelWidth = Math.round(label.getBoundingClientRect().width);
       setRenderedLabelWidth((current) => current === labelWidth ? current : labelWidth);
-      const next = Math.max(0, Math.round(scroll.clientWidth - labelWidth));
+      const scrollStyle = getComputedStyle(scroll);
+      const horizontalPadding = parseFloat(scrollStyle.paddingLeft) + parseFloat(scrollStyle.paddingRight);
+      const next = Math.max(0, Math.round(scroll.clientWidth - horizontalPadding - labelWidth));
       setAvailableTrackWidth((current) => current === next ? current : next);
     };
     updateWidth();
