@@ -11,6 +11,7 @@ import {
   mergeBasePosition,
   recentTimePosition,
   recentTimeAt,
+  graphTimeTicks,
   mergeRelationInWindow,
   mergeRelationLinks,
   routeMergeLinks,
@@ -408,4 +409,35 @@ test("logarithmic slider preserves the URL's elapsed-time percentage", () => {
   assert.equal(recentTimePosition(min-1000,min,max),0);
   assert.equal(recentTimePosition(max+1000,min,max),100);
   assert.throws(()=>recentTimePosition(max,min,min),RangeError);
+});
+
+
+test("adaptive ticks add detail without crowding across widths and durations", () => {
+  const end = new Date(2026,8,14,20,56,37).getTime();
+  for (const width of [440, 860, 1500, 5000]) {
+    for (const duration of [60000,3600000,86400000,18*86400000,365*86400000]) {
+      const ticks = graphTimeTicks(end-duration,end,width);
+      assert.ok(ticks.length >= 5 && ticks.length <= 9, `${width}/${duration}: ${ticks.length}`);
+      assert.equal(ticks[0].time,end-duration);
+      assert.equal(ticks.at(-1).time,end);
+      for (let i=1;i<ticks.length;i++) {
+        assert.ok(ticks[i].time>ticks[i-1].time);
+        assert.ok((ticks[i].position-ticks[i-1].position)*width/100 >= 90-1e-8);
+        assert.equal(ticks[i].position,recentTimePosition(ticks[i].time,end-duration,end));
+      }
+      for (const tick of ticks.slice(1,-1)) assert.equal(new Date(tick.time).getMilliseconds(),0);
+    }
+  }
+});
+
+test("tick labels retain day context and handle tiny windows", () => {
+  const end = new Date(2026,8,14,20,56,37).getTime();
+  const ticks = graphTimeTicks(end-18*86400000,end,860);
+  for (let i=0;i<ticks.length;i++) {
+    const day=new Date(ticks[i].time).toDateString();
+    assert.equal(ticks[i].dateLabel !== null, i===0 || day!==new Date(ticks[i-1].time).toDateString());
+  }
+  const tiny=graphTimeTicks(end-1,end,440);
+  assert.equal(tiny.length,2);
+  assert.ok(tiny.every(tick=>Number.isFinite(tick.position)));
 });
