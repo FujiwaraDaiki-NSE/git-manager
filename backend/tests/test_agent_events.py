@@ -404,5 +404,5 @@ def test_project_local_mcp_config_and_hooks_shape() -> None:
     config = tomllib.loads((root / ".codex/config.toml").read_text())
     server = config["mcp_servers"]["gitdash-agent-events"]
     assert set(server) == {"url", "enabled"}
-    assert server["url"].endswith("/mcp")
+    assert server["url"] == "http://127.0.0.1:8762/mcp"
     assert server["enabled"] is False

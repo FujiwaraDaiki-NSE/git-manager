@@ -123,8 +123,8 @@ XY コードにはツールチップを付け、状態は色だけでなく `ahe
 | `GITDASH_FETCH_WORKERS`       | 4    | fetch の並列数                       |
 | `GITDASH_FETCH_INTERVAL_SEC`  | 300  | 同一リポジトリの fetch 間隔          |
 | `GITDASH_WATCH`               | true | inotify を使うか                     |
-| `GITDASH_AGENT_PORT`           | —    | agent REST/MCP を bind する localhost ポート（必須） |
-| `GITDASH_AGENT_ENDPOINT`       | —    | host-side command hook の REST endpoint（必須。ポートを合わせる） |
+| `GITDASH_AGENT_PORT`           | 8762 | agent REST/MCP を bind する localhost ポート（必須） |
+| `GITDASH_AGENT_ENDPOINT`       | `http://127.0.0.1:8762/api/agent-events` | host-side command hook の REST endpoint（必須） |
 
 除外ディレクトリは `backend/app/scanner.py` の `SKIP_NAMES`。
 `node_modules` `.venv` `.cargo` `go/pkg` などは登録済み。
@@ -182,10 +182,10 @@ codex --config mcp_servers.gitdash-agent-events.enabled=true
 cd backend
 uv venv && uv pip install -r requirements.txt
 GITDASH_SCAN_ROOT=$HOME GITDASH_HOST_PREFIX=$HOME GITDASH_DATA_DIR=/tmp/gitdash \
-  uv run uvicorn app.main:app --port 8000
+  uv run uvicorn app.main:app --port 8762
 
 # frontend
 cd frontend
 npm install
-BACKEND_ORIGIN=http://127.0.0.1:8000 npm run dev
+BACKEND_ORIGIN=http://127.0.0.1:8762 npm run dev
 ```
