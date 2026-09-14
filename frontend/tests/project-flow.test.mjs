@@ -11,6 +11,7 @@ import {
   mergeBasePosition,
   mergeRelationInWindow,
   mergeRelationLinks,
+  routeMergeLinks,
   mergeRelationTimes,
   mobileEventAction,
   parseProjectUrl,
@@ -309,4 +310,35 @@ test("merged folding keeps active lanes visible but folds prunable worktrees", (
   assert.equal(shouldFoldMergedLane({ merged: null, worktree_state: "prunable", is_worktree: true, dirty: false, conflict: false }), true);
   assert.equal(shouldFoldMergedLane({ merged: null, worktree_state: "prunable", is_worktree: true, dirty: true, conflict: false }), false);
   assert.equal(shouldFoldMergedLane({ merged: null, worktree_state: "locked", is_worktree: false, dirty: false, conflict: false }), false);
+});
+
+
+test("dense merges keep distinct routes and observed endpoints", () => {
+  const links = Array.from({ length: 30 }, (_, index) => ({
+    x: index < 15 ? 0 : 100, sourceIndex: index + 1, targetIndex: 0,
+    commit_hash: `merge-${index}`, source_parent: `parent-${index}`,
+  }));
+  const width = links.length * 16 + 48;
+  const routes = routeMergeLinks(links, width, 88);
+  assert.equal(routes.length, links.length);
+  assert.equal(new Set(routes.map((route) => route.channel)).size, links.length);
+  for (const route of routes) {
+    assert.ok(route.channel >= 12 && route.channel <= width - 12);
+    assert.ok(route.path.startsWith(`M ${route.x * width / 100} ${(route.sourceIndex + .5) * 88}`));
+    assert.ok(route.path.endsWith(`H ${route.x * width / 100}`));
+    assert.ok(!route.path.includes("NaN"));
+  }
+  assert.deepEqual(routeMergeLinks([...links].reverse(), width, 88), routes);
+});
+
+test("routing retains both merge directions and reuses disjoint columns", () => {
+  const links = [
+    { x: 50, sourceIndex: 0, targetIndex: 1, commit_hash: "a", source_parent: "a" },
+    { x: 50, sourceIndex: 3, targetIndex: 2, commit_hash: "b", source_parent: "b" },
+  ];
+  const [down, up] = routeMergeLinks(links, 440, 88);
+  assert.equal(down.channel, up.channel);
+  assert.equal(down.arrow, `M ${down.channel - 4} 84 L ${down.channel} 91 L ${down.channel + 4} 84`);
+  assert.equal(up.arrow, `M ${up.channel - 4} 268 L ${up.channel} 261 L ${up.channel + 4} 268`);
+  assert.throws(() => routeMergeLinks(links, 10, 88), RangeError);
 });

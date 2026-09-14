@@ -2574,18 +2574,20 @@ body {
 
 .flow-merge-link {
   fill: none;
-  marker-end: url(#flow-merge-arrow);
   stroke: var(--control-purple);
-  stroke-width: 2.5;
+  stroke-width: 1.5;
 }
 
 .flow-merge-link-outside {
   stroke-dasharray: 4 3;
 }
 
-.flow-merge-arrow {
-  fill: var(--control-purple);
-}
+.flow-merge-route { opacity: .65; }
+.flow-merge-route.is-emphasized { opacity: 1; }
+.flow-merge-route.is-muted { opacity: .12; }
+.flow-merge-direction { fill: none; stroke: var(--control-purple); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.flow-merge-route.is-emphasized .flow-merge-link { stroke-width: 2; }
+
 
 .flow-merge-fact {
   color: var(--control-purple) !important;
