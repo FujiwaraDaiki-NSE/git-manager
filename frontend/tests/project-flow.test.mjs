@@ -231,12 +231,14 @@ test("merge links preserve source and non-default target direction", () => {
     Date.parse("2026-09-03T00:00:00+09:00"),
     Date.parse("2026-09-04T00:00:00+09:00"),
     Date.parse("2026-09-04T00:00:00+09:00"),
+    [{hash:"feature-head",date:"2026-09-03T06:00:00+09:00"}],
   );
 
   assert.equal(links.length, 1);
   assert.equal(links[0].sourceIndex, 2);
   assert.equal(links[0].targetIndex, 1);
   assert.equal(links[0].x, 50);
+  assert.equal(links[0].sourceX, 25);
   assert.equal(links[0].target_branch, "release");
 });
 
@@ -256,9 +258,9 @@ test("merge links omit unresolved, folded, and future relations", () => {
     Date.parse("2026-09-03T00:00:00+09:00"),
     Date.parse("2026-09-04T00:00:00+09:00"),
   ];
-  assert.deepEqual(mergeRelationLinks([{ ...base, source_lane_id: null }], ...args, Date.parse("2026-09-04T00:00:00+09:00")), []);
-  assert.deepEqual(mergeRelationLinks([base], [{ id: "branch:release" }], args[1], args[2], Date.parse("2026-09-04T00:00:00+09:00")), []);
-  assert.deepEqual(mergeRelationLinks([base], ...args, Date.parse("2026-09-03T00:00:00+09:00")), []);
+  assert.deepEqual(mergeRelationLinks([{ ...base, source_lane_id: null }], ...args, Date.parse("2026-09-04T00:00:00+09:00"), []), []);
+  assert.deepEqual(mergeRelationLinks([base], [{ id: "branch:release" }], args[1], args[2], Date.parse("2026-09-04T00:00:00+09:00"), []), []);
+  assert.deepEqual(mergeRelationLinks([base], ...args, Date.parse("2026-09-03T00:00:00+09:00"), []), []);
   assert.equal(mergeRelationInWindow(
     { ...base, occurred_at: "2026-09-01T00:00:00+09:00" },
     args[1],
@@ -315,7 +317,7 @@ test("merged folding keeps active lanes visible but folds prunable worktrees", (
 
 test("dense merges keep distinct routes and observed endpoints", () => {
   const links = Array.from({ length: 30 }, (_, index) => ({
-    x: index < 15 ? 0 : 100, sourceIndex: index + 1, targetIndex: 0,
+    sourceX: 0, x: 100, sourceIndex: index + 1, targetIndex: 0,
     commit_hash: `merge-${index}`, source_parent: `parent-${index}`,
   }));
   const width = links.length * 16 + 48;
@@ -323,8 +325,8 @@ test("dense merges keep distinct routes and observed endpoints", () => {
   assert.equal(routes.length, links.length);
   assert.equal(new Set(routes.map((route) => route.channel)).size, links.length);
   for (const route of routes) {
-    assert.ok(route.channel >= 12 && route.channel <= width - 12);
-    assert.ok(route.path.startsWith(`M ${route.x * width / 100} ${(route.sourceIndex + .5) * 88}`));
+    assert.ok(route.channel >= route.startX && route.channel <= route.endX);
+    assert.ok(route.path.startsWith(`M ${route.sourceX * width / 100} ${(route.sourceIndex + .5) * 88}`));
     assert.ok(route.path.endsWith(`H ${route.x * width / 100}`));
     assert.ok(!route.path.includes("NaN"));
   }
@@ -333,12 +335,43 @@ test("dense merges keep distinct routes and observed endpoints", () => {
 
 test("routing retains both merge directions and reuses disjoint columns", () => {
   const links = [
-    { x: 50, sourceIndex: 0, targetIndex: 1, commit_hash: "a", source_parent: "a" },
-    { x: 50, sourceIndex: 3, targetIndex: 2, commit_hash: "b", source_parent: "b" },
+    { sourceX: 20, x: 50, sourceIndex: 0, targetIndex: 1, commit_hash: "a", source_parent: "a" },
+    { sourceX: 20, x: 50, sourceIndex: 3, targetIndex: 2, commit_hash: "b", source_parent: "b" },
   ];
   const [down, up] = routeMergeLinks(links, 440, 88);
   assert.equal(down.channel, up.channel);
   assert.equal(down.arrow, `M ${down.channel - 4} 84 L ${down.channel} 91 L ${down.channel + 4} 84`);
   assert.equal(up.arrow, `M ${up.channel - 4} 268 L ${up.channel} 261 L ${up.channel + 4} 268`);
-  assert.throws(() => routeMergeLinks(links, 10, 88), RangeError);
+  assert.throws(() => routeMergeLinks(links, 0, 88), RangeError);
+});
+
+
+test("short and equal-time routes never turn back along the time axis", () => {
+  for (const end of [50, 50.001, 51]) {
+    const links = Array.from({length: 20}, (_, i) => ({sourceX:50, x:end,sourceIndex:i+1,targetIndex:0,commit_hash:String(i),source_parent:String(i)}));
+    const routes = routeMergeLinks(links, 440, 88);
+    assert.equal(routes.length, 20);
+    for (const route of routes) {
+      const coordinates = [...route.path.matchAll(/[MHVQ] ([^MHVQ]+)/g)].flatMap(([_, part], index) => {
+        const values = part.trim().split(/\s+/).map(Number);
+        return values.length === 1 ? (route.path.match(/[MHVQ]/g)[index] === "H" ? values : []) : values.filter((_, i) => i % 2 === 0);
+      });
+      assert.ok(coordinates.every((x,i) => i === 0 || x >= coordinates[i-1]), route.path);
+      assert.equal(coordinates[0], 220);
+      assert.equal(coordinates.at(-1), end * 440 / 100);
+    }
+  }
+});
+
+test("missing or inverted source dates are explicit and never fabricated", () => {
+  const relation = {source_lane_id:"s",target_lane_id:"t",source_parent:"parent",commit_hash:"merge",occurred_at:"2026-09-03T12:00:00Z"};
+  const args = [[relation],[{id:"s"},{id:"t"}],Date.parse("2026-09-03T00:00:00Z"),Date.parse("2026-09-04T00:00:00Z"),Date.parse("2026-09-04T00:00:00Z")];
+  for (const rows of [[],[{hash:"parent",date:"2026-09-03T13:00:00Z"}]]) {
+    const links = mergeRelationLinks(...args, rows);
+    assert.equal(links[0].sourceX, null);
+    assert.deepEqual(routeMergeLinks(links,440,88),[]);
+  }
+  const [clipped] = mergeRelationLinks(...args,[{hash:"parent",date:"2026-09-02T00:00:00Z"}]);
+  assert.equal(clipped.sourceX,0);
+  assert.equal(clipped.sourceOutside,true);
 });

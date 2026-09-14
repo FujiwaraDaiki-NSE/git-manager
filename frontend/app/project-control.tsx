@@ -593,8 +593,8 @@ function FlowMap({
       pointOffset: 0,
       id: flowEventKey(lane.id, row.hash),
     }));
-  const mergeLinks = mergeRelationLinks(project.merge_relations, lanes, minTime, maxTime, observationTime);
-  const minimumTrackWidth = Math.max(440, mergeLinks.length * 16 + 48, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
+  const mergeLinks = mergeRelationLinks(project.merge_relations, lanes, minTime, maxTime, observationTime, graphRows);
+  const minimumTrackWidth = Math.max(440, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
   // A track grows to the available viewport width when it fits, and becomes
   // horizontally scrollable when 44px hit areas need more room.  The same
   // resolved width is passed to the per-lane layout and rendered as the
@@ -614,6 +614,7 @@ function FlowMap({
       afterObservation: mergeBaseRow !== undefined && eventDate(mergeBaseRow) !== null && eventDate(mergeBaseRow)! > observationTime,
     }];
   }));
+  const unavailableMergeTimeCount = mergeLinks.filter((link: { sourceX: number | null }) => link.sourceX === null).length;
   const visibleMergeKeys = new Set(project.merge_relations
     .filter((relation) => mergeRelationInWindow(relation, minTime, maxTime, observationTime))
     .map((relation) => `${relation.commit_hash}:${relation.source_parent}`));
@@ -730,7 +731,7 @@ function FlowMap({
               return (
                 <g className={`flow-merge-route${selectedLane ? related ? " is-emphasized" : " is-muted" : ""}`} key={`${link.commit_hash}:${link.source_parent}`}>
                   <title>{`${link.source_branch} → ${link.target_branch} · ${shortHash(link.commit_hash)}`}</title>
-                  <path className={`flow-merge-link${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />
+                  <path className={`flow-merge-link${link.outside || link.sourceOutside ? " flow-merge-link-outside" : ""}`} d={link.path} />
                   <path className="flow-merge-direction" d={link.arrow} />
                 </g>
               );
@@ -802,6 +803,7 @@ function FlowMap({
         <span className="flow-time-direction">時間 →</span>
       </div>
       {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
+      {unavailableMergeTimeCount > 0 && <div className="inline-note" role="status">合流関係 {unavailableMergeTimeCount} 件は、合流元コミットの日時が未取得または合流日時より後のため、線を表示していません。</div>}
       {unresolvedMergeCount > 0 && (
         <div className="inline-note" role="status">
           {`合流関係 ${unresolvedMergeCount} 件はブランチを特定できないため、線を表示していません。`}
@@ -811,7 +813,7 @@ function FlowMap({
         <summary>グラフの見方・キーボード操作</summary>
         <p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進みます。</p>
         <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
-        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は重なりを避けて迂回し、線の途中の矢印で合流方向を示します。線の両端が合流日時を表し、迂回部分は時刻を表しません。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
+        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は合流元コミットの日時から合流コミットの日時へ進み、途中の矢印で合流方向を示します。その日時の間で線を分け、同時刻の場合は垂直に接続します。破線は合流元が表示範囲外です。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
       </details>
       {project.graph?.truncated && <div className="inline-note">全履歴の取得上限は 200 件です。表示範囲外の履歴は未取得です。</div>}
     </section>
