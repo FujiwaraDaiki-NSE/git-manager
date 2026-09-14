@@ -137,6 +137,23 @@ export function mergeRelationInWindow(relation, minTime, maxTime, observationTim
     && occurredAt <= observationTime;
 }
 
+export function mergeRelationTimes(relations, range, observationTime) {
+  if (range === "current") return [];
+  const cutoff = range === "24h"
+    ? observationTime - 86_400_000
+    : range === "7d"
+      ? observationTime - 604_800_000
+      : null;
+  return relations.flatMap((relation) => {
+    const occurredAt = new Date(relation.occurred_at || "").getTime();
+    return Number.isFinite(occurredAt)
+      && occurredAt <= observationTime
+      && (cutoff === null || occurredAt >= cutoff)
+      ? [occurredAt]
+      : [];
+  });
+}
+
 export function flowKeyboardAction(key) {
   if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) return "move";
   if (key === "Enter" || key === " " || key === "Spacebar") return "select";

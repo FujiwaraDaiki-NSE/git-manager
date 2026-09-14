@@ -11,6 +11,7 @@ import {
   mergeBasePosition,
   mergeRelationInWindow,
   mergeRelationLinks,
+  mergeRelationTimes,
   mobileEventAction,
   parseProjectUrl,
   shouldFoldMergedLane,
@@ -216,6 +217,7 @@ test("merge links preserve source and non-default target direction", () => {
   const relation = {
     commit_hash: "merge",
     occurred_at: "2026-09-03T12:00:00+09:00",
+    target_parent: "release-before-merge",
     source_parent: "feature-head",
     source_branch: "feature",
     source_lane_id: "branch:feature",
@@ -241,6 +243,7 @@ test("merge links omit unresolved, folded, and future relations", () => {
   const base = {
     commit_hash: "merge",
     occurred_at: "2026-09-03T12:00:00+09:00",
+    target_parent: "release-before-merge",
     source_parent: "feature-head",
     source_branch: "feature",
     source_lane_id: "branch:feature",
@@ -261,6 +264,27 @@ test("merge links omit unresolved, folded, and future relations", () => {
     args[2],
     Date.parse("2026-09-04T00:00:00+09:00"),
   ), false);
+});
+
+test("merge relation times extend bounded and all-history flow windows", () => {
+  const observedAt = Date.parse("2026-09-08T00:00:00+09:00");
+  const relations = [
+    { occurred_at: "2026-09-07T12:00:00+09:00" },
+    { occurred_at: "2026-09-01T12:00:00+09:00" },
+    { occurred_at: "invalid" },
+    { occurred_at: "2026-09-09T00:00:00+09:00" },
+  ];
+
+  assert.deepEqual(mergeRelationTimes(relations, "current", observedAt), []);
+  assert.deepEqual(mergeRelationTimes(relations, "24h", observedAt), [Date.parse(relations[0].occurred_at)]);
+  assert.deepEqual(mergeRelationTimes(relations, "7d", observedAt), [
+    Date.parse(relations[0].occurred_at),
+    Date.parse(relations[1].occurred_at),
+  ]);
+  assert.deepEqual(mergeRelationTimes(relations, "all", observedAt), [
+    Date.parse(relations[0].occurred_at),
+    Date.parse(relations[1].occurred_at),
+  ]);
 });
 
 test("arrow keys only move focus while Enter and Space select", () => {

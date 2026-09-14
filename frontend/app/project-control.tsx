@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
-import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, mergeRelationInWindow, mergeRelationLinks, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, mergeRelationInWindow, mergeRelationLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -544,7 +544,7 @@ function FlowMap({
     };
   }, [lanes.length]);
   const allTimes = allEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
-  const now = Date.now();
+  const now = project.observed_at * 1000;
   const rangeCutoff = range === "24h" ? now - 86_400_000 : range === "7d" ? now - 604_800_000 : null;
   const rangeEvents = allEvents.filter(({ row, lane }) => {
     if (range === "current") {
@@ -554,8 +554,10 @@ function FlowMap({
     return value !== null && (rangeCutoff === null || value >= rangeCutoff);
   });
   const rangeTimes = rangeEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
-  const minTime = Math.min(...(rangeTimes.length ? rangeTimes : allTimes.length ? allTimes : [now]));
-  const maxCandidate = Math.max(...(rangeTimes.length ? rangeTimes : [now]));
+  const relationTimes = mergeRelationTimes(project.merge_relations, range, now);
+  const displayedTimes = [...rangeTimes, ...relationTimes];
+  const minTime = Math.min(...(displayedTimes.length ? displayedTimes : allTimes.length ? allTimes : [now]));
+  const maxCandidate = Math.max(now, ...(displayedTimes.length ? displayedTimes : [now]));
   const maxTime = Math.max(minTime + 3_600_000, maxCandidate);
   const observationTime = minTime + ((maxTime - minTime) * timeline) / 100;
   // Agent history is resolved against the same observation point as the Git
@@ -600,6 +602,10 @@ function FlowMap({
   const visibleMergeKeys = new Set(project.merge_relations
     .filter((relation) => mergeRelationInWindow(relation, minTime, maxTime, observationTime))
     .map((relation) => `${relation.commit_hash}:${relation.source_parent}`));
+  const unresolvedMergeCount = project.merge_relations.filter((relation) => (
+    mergeRelationInWindow(relation, minTime, maxTime, observationTime)
+    && (!relation.source_lane_id || !relation.target_lane_id)
+  )).length;
   const registerEventButton = useCallback((id: string, node: HTMLButtonElement | null) => {
     if (node) eventButtonRefs.current.set(id, node);
     else eventButtonRefs.current.delete(id);
@@ -661,6 +667,11 @@ function FlowMap({
         </div>
       </div>
       {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
+      {unresolvedMergeCount > 0 && (
+        <div className="inline-note" role="status">
+          {`合流関係 ${unresolvedMergeCount} 件はブランチを特定できないため、線を表示していません。`}
+        </div>
+      )}
       <div className="flow-legend" aria-label="フロー凡例">
         <span><i className="legend-dot legend-dot-head" aria-hidden="true" /> HEAD</span>
         <span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span>

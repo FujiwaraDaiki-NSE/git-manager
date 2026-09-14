@@ -156,6 +156,7 @@ export type AgentPriorityCounts = {
 export type ProjectMergeRelation = {
   commit_hash: string;
   occurred_at: string | null;
+  target_parent: string;
   source_parent: string;
   source_branch: string | null;
   source_lane_id: string | null;
