@@ -1,10 +1,11 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
-import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, layoutFlowEvents, mergeBasePosition, mergeRelationInWindow, mergeRelationLinks, mobileEventAction, parseProjectUrl, popoverPlacement, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, mergeRelationInWindow, mergeRelationLinks, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -209,12 +210,6 @@ type FlowEvent = {
   id: string;
 };
 
-type FlowViewport = {
-  left: number;
-  right: number;
-  scrollLeft: number;
-};
-
 function eventDate(row: GraphRow) {
   const value = new Date(row.date).getTime();
   return Number.isNaN(value) ? null : value;
@@ -222,6 +217,115 @@ function eventDate(row: GraphRow) {
 
 function eventsByLaneCount(events: { lane: ProjectLane }[], laneId: string) {
   return events.reduce((count, event) => count + (event.lane.id === laneId ? 1 : 0), 0);
+}
+
+function flowPopoverId(eventId: string) {
+  return `flow-popover-${encodeURIComponent(eventId)}`;
+}
+
+function FlowEventPopover({
+  buttonRef,
+  event,
+  onPreviewEnter,
+  onPreviewLeave,
+  onSelect,
+  popoverBelow,
+}: {
+  buttonRef: React.MutableRefObject<HTMLButtonElement | null>;
+  event: FlowEvent;
+  onPreviewEnter: () => void;
+  onPreviewLeave: () => void;
+  onSelect: () => void;
+  popoverBelow: boolean;
+}) {
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<ReturnType<typeof flowPopoverPlacement> | null>(null);
+  const updatePlacement = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const button = buttonRef.current;
+    const popover = popoverRef.current;
+    if (!button || !popover) return;
+    const anchor = button.getBoundingClientRect();
+    const next = flowPopoverPlacement({
+      anchorLeft: anchor.left,
+      anchorRight: anchor.right,
+      anchorTop: anchor.top,
+      anchorBottom: anchor.bottom,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      preferredWidth: popover.offsetWidth,
+      preferredHeight: popover.offsetHeight,
+      margin: 8,
+      gap: 12,
+      preferBelow: popoverBelow,
+    });
+    setPlacement((current) => current
+      && current.left === next.left
+      && current.top === next.top
+      && current.width === next.width
+      && current.height === next.height
+      && current.side === next.side
+      ? current
+      : next);
+  }, [buttonRef, popoverBelow]);
+  useLayoutEffect(() => {
+    updatePlacement();
+    window.addEventListener("resize", updatePlacement);
+    window.addEventListener("scroll", updatePlacement, true);
+    return () => {
+      window.removeEventListener("resize", updatePlacement);
+      window.removeEventListener("scroll", updatePlacement, true);
+    };
+  }, [buttonRef, updatePlacement]);
+  if (typeof document === "undefined") return null;
+  const side = placement?.side ?? (popoverBelow ? "below" : "above");
+  const width = placement?.width ?? 290;
+  return createPortal(
+    <div
+      className={`flow-event-popover${side === "below" ? " flow-event-popover-below" : ""}`}
+      id={flowPopoverId(event.id)}
+      onFocus={onPreviewEnter}
+      onBlur={(focusEvent) => {
+        const next = focusEvent.relatedTarget;
+        if (!(next instanceof Node) || !focusEvent.currentTarget.contains(next)) onPreviewLeave();
+      }}
+      onMouseEnter={onPreviewEnter}
+      onMouseLeave={onPreviewLeave}
+      ref={popoverRef}
+      role="tooltip"
+      style={{
+        "--flow-popover-width": `${width}px`,
+        left: `${placement?.left ?? 0}px`,
+        maxHeight: placement ? `${placement.height}px` : undefined,
+        top: `${placement?.top ?? 0}px`,
+        visibility: placement ? "visible" : "hidden",
+        width: `${width}px`,
+      } as React.CSSProperties}
+    >
+      <span className="flow-popover-type">Git · コミット</span>
+      <strong>{event.row.subject || "(no subject)"}</strong>
+      <span>{shortHash(event.row.hash)} · {event.row.author}</span>
+      <time dateTime={event.row.date}>{relativeTime(event.row.date)} · {exactDate(event.row.date)}</time>
+      <span>
+        変更 {event.row.stats ? `${event.row.stats.files} ファイル · +${event.row.stats.additions ?? "?"} / -${event.row.stats.deletions ?? "?"}` : "未取得"}
+      </span>
+      <span>
+        {event.row.stats?.paths.length ? `変更ファイル ${event.row.stats.paths.join(" · ")}` : "変更ファイル 未取得"}
+      </span>
+      <span>
+        branch {event.lane.branch ?? "未取得"} · {event.row.is_head ? "HEAD" : "HEAD ではない"}
+      </span>
+      <span>
+        refs {event.row.refs.length ? event.row.refs.map((ref) => `${ref.kind}:${ref.name}`).join(", ") : "未取得"}
+      </span>
+      <span>
+        {upstreamLabel(event.lane)}
+      </span>
+      {event.row.is_merge && <span>親 {event.row.parents.length ? event.row.parents.map(shortHash).join(", ") : "未取得"}</span>}
+      <button type="button" onClick={onSelect}>詳細を開く</button>
+    </div>,
+    document.body,
+  );
 }
 
 function FlowEventButton({
@@ -234,8 +338,6 @@ function FlowEventButton({
   onPreview,
   onSelect,
   trackWidth,
-  popoverShift,
-  popoverWidth,
 }: {
   event: FlowEvent;
   selected: boolean;
@@ -243,19 +345,37 @@ function FlowEventButton({
   popoverBelow: boolean;
   onNavigate: (event: FlowEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => void;
   onRegister: (id: string, node: HTMLButtonElement | null) => void;
-  onPreview: (id: string | null) => void;
+  onPreview: React.Dispatch<React.SetStateAction<string | null>>;
   onSelect: (event: FlowEvent) => void;
   trackWidth: number;
-  popoverShift: number;
-  popoverWidth: number;
 }) {
   const touchPreviewRef = useRef(false);
   const touchPointerRef = useRef(false);
   const touchPreviewOpenRef = useRef(false);
+  const previewCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const xClass = event.hitX < 24 ? "flow-event-left" : event.hitX > 76 ? "flow-event-right" : "";
   const leader = eventLeaderGeometry(event.timestampX, event.hitX, trackWidth);
   const hasLeader = leader.width > 0.5;
+  useEffect(() => () => {
+    if (previewCloseTimerRef.current) clearTimeout(previewCloseTimerRef.current);
+  }, []);
+  const keepPreview = () => {
+    if (previewCloseTimerRef.current) clearTimeout(previewCloseTimerRef.current);
+    previewCloseTimerRef.current = null;
+    onPreview(event.id);
+  };
+  const schedulePreviewClose = () => {
+    if (touchPreviewOpenRef.current) return;
+    if (previewCloseTimerRef.current) clearTimeout(previewCloseTimerRef.current);
+    previewCloseTimerRef.current = setTimeout(() => {
+      previewCloseTimerRef.current = null;
+      onPreview((current) => current === event.id ? null : current);
+    }, 160);
+  };
   const select = () => {
+    if (previewCloseTimerRef.current) clearTimeout(previewCloseTimerRef.current);
+    previewCloseTimerRef.current = null;
     touchPreviewOpenRef.current = false;
     onPreview(null);
     onSelect(event);
@@ -265,15 +385,19 @@ function FlowEventButton({
       className={`flow-event-hit ${xClass}`}
       data-flow-event-key={event.id}
       style={{ left: `${event.hitX}%`, "--flow-point-offset": `${event.pointOffset}px` } as React.CSSProperties}
-      onMouseEnter={() => onPreview(event.id)}
-      onMouseLeave={() => { if (!touchPreviewOpenRef.current) onPreview(null); }}
+      onMouseEnter={keepPreview}
+      onMouseLeave={schedulePreviewClose}
     >
       {hasLeader && <span className="flow-event-leader" aria-hidden="true" style={{ left: `calc(50% + ${leader.left}px)`, width: `${leader.width}px` }} />}
       <button
         aria-label={`${laneLabel(event.lane)} ${shortHash(event.row.hash)} ${event.row.subject}`}
+        aria-describedby={preview ? flowPopoverId(event.id) : undefined}
         className={`flow-event-button${selected ? " is-selected" : ""}`}
         data-flow-event-key={event.id}
-        ref={(node) => onRegister(event.id, node)}
+        ref={(node) => {
+          buttonRef.current = node;
+          onRegister(event.id, node);
+        }}
         onPointerDown={(pointerEvent) => {
           if (pointerEvent.pointerType !== "touch") return;
           touchPointerRef.current = true;
@@ -312,11 +436,12 @@ function FlowEventButton({
             select();
           }
         }}
-        onFocus={() => onPreview(event.id)}
+        onFocus={keepPreview}
         onBlur={(focusEvent) => {
           if (touchPreviewOpenRef.current) return;
           const next = focusEvent.relatedTarget;
-          if (!(next instanceof Node) || !focusEvent.currentTarget.parentElement?.contains(next)) onPreview(null);
+          const popover = typeof document === "undefined" ? null : document.getElementById(flowPopoverId(event.id));
+          if (!(next instanceof Node) || (!focusEvent.currentTarget.parentElement?.contains(next) && !popover?.contains(next))) schedulePreviewClose();
         }}
         type="button"
       >
@@ -325,35 +450,7 @@ function FlowEventButton({
           aria-hidden="true"
         />
       </button>
-      {preview && (
-        <div
-          className={`flow-event-popover${popoverBelow ? " flow-event-popover-below" : ""}`}
-          role="tooltip"
-          style={{ "--flow-popover-shift": `${popoverShift}px`, "--flow-popover-width": `${popoverWidth}px` } as React.CSSProperties}
-        >
-          <span className="flow-popover-type">Git · コミット</span>
-          <strong>{event.row.subject || "(no subject)"}</strong>
-          <span>{shortHash(event.row.hash)} · {event.row.author}</span>
-          <time dateTime={event.row.date}>{relativeTime(event.row.date)} · {exactDate(event.row.date)}</time>
-          <span>
-            変更 {event.row.stats ? `${event.row.stats.files} ファイル · +${event.row.stats.additions ?? "?"} / -${event.row.stats.deletions ?? "?"}` : "未取得"}
-          </span>
-          <span>
-            {event.row.stats?.paths.length ? `変更ファイル ${event.row.stats.paths.join(" · ")}` : "変更ファイル 未取得"}
-          </span>
-          <span>
-            branch {event.lane.branch ?? "未取得"} · {event.row.is_head ? "HEAD" : "HEAD ではない"}
-          </span>
-          <span>
-            refs {event.row.refs.length ? event.row.refs.map((ref) => `${ref.kind}:${ref.name}`).join(", ") : "未取得"}
-          </span>
-          <span>
-            {upstreamLabel(event.lane)}
-          </span>
-          {event.row.is_merge && <span>親 {event.row.parents.length ? event.row.parents.map(shortHash).join(", ") : "未取得"}</span>}
-          <button type="button" onClick={select}>詳細を開く</button>
-        </div>
-      )}
+      {preview && <FlowEventPopover buttonRef={buttonRef} event={event} onPreviewEnter={keepPreview} onPreviewLeave={schedulePreviewClose} onSelect={select} popoverBelow={popoverBelow} />}
     </div>
   );
 }
@@ -383,7 +480,6 @@ function FlowMap({
   const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
   const [renderedLabelWidth, setRenderedLabelWidth] = useState(220);
-  const [flowViewport, setFlowViewport] = useState<FlowViewport | null>(null);
   const graphRows = project.graph?.rows ?? [];
   const relationLaneIds = useMemo(() => new Set(project.merge_relations.flatMap((relation) => (
     [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
@@ -422,20 +518,6 @@ function FlowMap({
     }
     return events;
   }, [laneRows, lanes, visibleEventHashes]);
-  const measureFlowViewport = useCallback(() => {
-    const scroll = flowScrollRef.current;
-    if (!scroll) return;
-    const rect = scroll.getBoundingClientRect();
-    const nextViewport = { left: rect.left, right: rect.right, scrollLeft: scroll.scrollLeft };
-    setFlowViewport((current) => (
-      current
-      && current.left === nextViewport.left
-      && current.right === nextViewport.right
-      && current.scrollLeft === nextViewport.scrollLeft
-        ? current
-        : nextViewport
-    ));
-  }, []);
   useEffect(() => {
     const scroll = flowScrollRef.current;
     const label = firstLaneLabelRef.current;
@@ -445,17 +527,12 @@ function FlowMap({
       setRenderedLabelWidth((current) => current === labelWidth ? current : labelWidth);
       const next = Math.max(0, Math.round(scroll.clientWidth - labelWidth));
       setAvailableTrackWidth((current) => current === next ? current : next);
-      measureFlowViewport();
     };
     updateWidth();
-    scroll.addEventListener("scroll", updateWidth, { passive: true });
     window.addEventListener("resize", updateWidth);
-    window.addEventListener("scroll", updateWidth, { passive: true });
     if (typeof ResizeObserver === "undefined") {
       return () => {
-        scroll.removeEventListener("scroll", updateWidth);
         window.removeEventListener("resize", updateWidth);
-        window.removeEventListener("scroll", updateWidth);
       };
     }
     const observer = new ResizeObserver(updateWidth);
@@ -463,11 +540,9 @@ function FlowMap({
     observer.observe(label);
     return () => {
       observer.disconnect();
-      scroll.removeEventListener("scroll", updateWidth);
       window.removeEventListener("resize", updateWidth);
-      window.removeEventListener("scroll", updateWidth);
     };
-  }, [lanes.length, measureFlowViewport]);
+  }, [lanes.length]);
   const allTimes = allEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
   const now = Date.now();
   const rangeCutoff = range === "24h" ? now - 86_400_000 : range === "7d" ? now - 604_800_000 : null;
@@ -548,14 +623,9 @@ function FlowMap({
     if (target) {
       const button = eventButtonRefs.current.get(target.id);
       if (!button) return;
-      // Focusing an offscreen target may synchronously scroll the map. Measure
-      // that new scrollLeft in the same key event and once after the browser's
-      // focus scroll has settled, so the preview never uses stale geometry.
       button.focus();
-      measureFlowViewport();
-      window.requestAnimationFrame(measureFlowViewport);
     }
-  }, [eventsByLane, lanes, measureFlowViewport]);
+  }, [eventsByLane, lanes]);
   const defaultIndex = lanes.findIndex((lane) => lane.branch === project.default_branch);
   const rowHeight = 72;
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
@@ -692,13 +762,6 @@ function FlowMap({
                 <div className="flow-track">
                   {laneEvents.length === 0 && <span className="flow-track-empty">イベント未取得</span>}
                   {laneEvents.map((event) => {
-                    const popover = flowViewport
-                      ? popoverPlacement({
-                        pointX: flowViewport.left + renderedLabelWidth + (event.hitX * trackWidth) / 100 - flowViewport.scrollLeft,
-                        viewportLeft: flowViewport.left,
-                        viewportRight: flowViewport.right,
-                      })
-                      : { width: 290, offset: 0 };
                     return (
                       <FlowEventButton
                         event={event}
@@ -711,8 +774,6 @@ function FlowMap({
                         preview={previewId === event.id}
                         selected={selectedKey === event.id}
                         trackWidth={trackWidth}
-                        popoverShift={popover.offset}
-                        popoverWidth={popover.width}
                       />
                     );
                   })}

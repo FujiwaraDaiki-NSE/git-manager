@@ -6,13 +6,13 @@ import {
   eventLeaderGeometry,
   flowEventKey,
   flowKeyboardAction,
+  flowPopoverPlacement,
   layoutFlowEvents,
   mergeBasePosition,
   mergeRelationInWindow,
   mergeRelationLinks,
   mobileEventAction,
   parseProjectUrl,
-  popoverPlacement,
   shouldFoldMergedLane,
   updateProjectUrl,
 } from "../app/project-flow.mjs";
@@ -141,16 +141,58 @@ test("dense edge events move the interaction point inward and retain timestamp l
   }
 });
 
-test("popover placement keeps dense points inside the horizontal scroll viewport", () => {
-  const viewportLeft = 14;
-  const viewportRight = 361;
-  const centers = Array.from({ length: 10 }, (_, index) => 14 + index * 44);
-  for (const pointX of centers) {
-    const placement = popoverPlacement({ pointX, viewportLeft, viewportRight });
-    assert.equal(placement.width, 290);
-    assert.ok(placement.center - placement.width / 2 >= viewportLeft + 8);
-    assert.ok(placement.center + placement.width / 2 <= viewportRight - 8);
-  }
+test("body-level popover placement clamps horizontally and chooses a visible vertical side", () => {
+  const placement = flowPopoverPlacement({
+    anchorLeft: 320,
+    anchorRight: 364,
+    anchorTop: 540,
+    anchorBottom: 584,
+    viewportWidth: 360,
+    viewportHeight: 640,
+    preferredWidth: 290,
+    preferredHeight: 220,
+    margin: 8,
+    gap: 12,
+    preferBelow: true,
+  });
+  assert.equal(placement.width, 290);
+  assert.equal(placement.height, 220);
+  assert.equal(placement.side, "above");
+  assert.ok(placement.left >= 8);
+  assert.ok(placement.left + placement.width <= 352);
+  assert.ok(placement.top >= 8);
+  assert.ok(placement.top + placement.height <= 632);
+  const below = flowPopoverPlacement({
+    anchorLeft: 80,
+    anchorRight: 124,
+    anchorTop: 60,
+    anchorBottom: 104,
+    viewportWidth: 420,
+    viewportHeight: 800,
+    preferredWidth: 290,
+    preferredHeight: 220,
+    margin: 8,
+    gap: 12,
+    preferBelow: true,
+  });
+  assert.equal(below.side, "below");
+  assert.equal(below.top, 116);
+
+  const constrained = flowPopoverPlacement({
+    anchorLeft: 120,
+    anchorRight: 164,
+    anchorTop: 140,
+    anchorBottom: 184,
+    viewportWidth: 667,
+    viewportHeight: 375,
+    preferredWidth: 290,
+    preferredHeight: 500,
+    margin: 8,
+    gap: 12,
+    preferBelow: false,
+  });
+  assert.equal(constrained.height, 359);
+  assert.ok(constrained.top + constrained.height <= 367);
 });
 
 test("merge-base remains anchored at the range edge when its commit is hidden", () => {

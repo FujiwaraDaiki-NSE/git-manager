@@ -194,24 +194,45 @@ export function layoutFlowEvents(events, trackWidth = 440) {
 }
 
 /**
- * Clamp a popover around its post-collision interaction point to the visible
- * horizontal scroll viewport. The returned offset is relative to the event
- * hit center, so the arrow can still identify the event after clamping.
+ * Place a body-level flow popover around its event button.  Coordinates are
+ * viewport-relative because the caller renders the popover with position:fixed.
  */
-export function popoverPlacement({
-  pointX,
-  viewportLeft,
-  viewportRight,
-  preferredWidth = 290,
-  margin = 8,
+export function flowPopoverPlacement({
+  anchorLeft,
+  anchorRight,
+  anchorTop,
+  anchorBottom,
+  viewportWidth,
+  viewportHeight,
+  preferredWidth,
+  preferredHeight,
+  margin,
+  gap,
+  preferBelow,
 }) {
-  const viewportWidth = Math.max(0, viewportRight - viewportLeft);
   const width = Math.min(preferredWidth, Math.max(0, viewportWidth - margin * 2));
-  if (width <= 0) return { width: 0, center: pointX, offset: 0 };
-  const minCenter = viewportLeft + margin + width / 2;
-  const maxCenter = viewportRight - margin - width / 2;
-  const center = Math.min(maxCenter, Math.max(minCenter, pointX));
-  return { width, center, offset: center - pointX };
+  const height = Math.min(preferredHeight, Math.max(0, viewportHeight - margin * 2));
+  const anchorCenter = (anchorLeft + anchorRight) / 2;
+  const maxLeft = Math.max(margin, viewportWidth - margin - width);
+  const left = Math.min(maxLeft, Math.max(margin, anchorCenter - width / 2));
+  const minTop = margin;
+  const maxTop = Math.max(minTop, viewportHeight - margin - height);
+  const belowTop = anchorBottom + gap;
+  const aboveTop = anchorTop - gap - height;
+  const belowFits = belowTop <= maxTop;
+  const aboveFits = aboveTop >= minTop;
+  const side = preferBelow
+    ? (belowFits || !aboveFits ? "below" : "above")
+    : (aboveFits || !belowFits ? "above" : "below");
+  const preferredTop = side === "below" ? belowTop : aboveTop;
+  const top = Math.min(maxTop, Math.max(minTop, preferredTop));
+  return {
+    left,
+    top,
+    width,
+    height,
+    side,
+  };
 }
 
 /**
