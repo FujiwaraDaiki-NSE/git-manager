@@ -2802,7 +2802,7 @@ body {
 }
 
 .flow-event-button.is-selected .flow-event-point {
-  box-shadow: 0 0 0 3px var(--control-panel), 0 0 0 5px var(--control-red);
+  box-shadow: 0 0 0 3px var(--control-panel), 0 0 0 5px var(--control-blue);
 }
 
 .flow-event-popover {
@@ -3353,8 +3353,8 @@ body {
   }
 
   .flow-connections {
-    left: 170px;
-    width: calc(100% - 170px);
+    left: var(--control-label-width);
+    width: calc(100% - var(--control-label-width));
   }
 
   .flow-current-label {
@@ -3518,4 +3518,56 @@ body {
   .flow-toolbar .range-tabs { gap: 2px; }
   .flow-toolbar .range-tab { padding: 6px 8px; font-size: 11px; }
   .flow-lane-button { font-size: 12px; }
+}
+
+/* Keep project context compact so the graph is visible on arrival. */
+.control-hero { grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 18px 0 12px; }
+.control-hero h1 { font-size: clamp(24px, 3vw, 32px); margin: 0 0 6px; }
+.control-identifiers { margin-top: 8px; font-size: 11px; }
+.control-latest-git { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; max-width: none; margin-top: 10px; border: 0; padding: 0; }
+.control-latest-git strong { font-weight: 400; }
+.control-metrics { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.control-metrics div { display: flex; flex-direction: row; align-items: baseline; gap: 6px; }
+.control-metrics strong { font-size: 16px; }
+.control-metrics span { font-size: 11px; }
+.flow-section { padding: 18px 20px; }
+.flow-controls h3 { margin: 0 0 4px; font-size: 18px; }
+.flow-toolbar { margin-top: 12px; gap: 8px; }
+.flow-control-label { color: var(--control-muted); font: 12px var(--control-sans); margin-right: 6px; }
+.flow-toolbar .range-tabs { align-items: center; gap: 4px; }
+.flow-toolbar button { font-family: var(--control-sans); font-size: 12px; }
+.flow-history { margin-top: 8px; color: var(--control-muted); font: 12px var(--control-sans); }
+.flow-history summary { cursor: pointer; padding: 10px 0; }
+.flow-history summary > span { margin-left: 12px; font-size: 11px; }
+.flow-history[open] summary { color: var(--control-ink); }
+.flow-history summary:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
+.flow-section > .flow-legend { margin-top: 4px; padding: 10px 0; font: 11px var(--control-sans); gap: 8px 18px; }
+.flow-section > .flow-help { margin: 8px 0 0; }
+.flow-lane-label { border-right: 1px solid var(--control-border); padding-left: 8px; }
+.flow-track { border-bottom: 1px solid var(--control-border); }
+.flow-row:nth-of-type(even) .flow-track { background: color-mix(in srgb, var(--control-muted) 4%, transparent); }
+.flow-row.is-selected .flow-track { background: color-mix(in srgb, var(--control-blue) 8%, transparent); }
+.flow-lane-line { stroke: color-mix(in srgb, var(--control-green) 55%, var(--control-panel)); }
+.flow-branch-link { opacity: .55; }
+.flow-lane-relation { font: 11px var(--control-sans); }
+.flow-lane-button { min-height: 28px; }
+.flow-latest-visible { font-size: 12px; }
+.flow-axis { font: 11px var(--control-sans); }
+.flow-connections path { vector-effect: non-scaling-stroke; }
+@media (max-width: 600px) {
+  .flow-section { padding: 12px; }
+  .control-metrics { gap: 8px 16px; }
+  .flow-history summary > span { display: block; margin: 5px 0 0 14px; }
+  .flow-control-actions { gap: 6px; }
+  .flow-toolbar .range-tabs { gap: 4px; }
+  .flow-control-label { flex-basis: 100%; }
+  .flow-lane-label { padding-left: 6px; }
+}
+
+.flow-controls { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+.flow-controls h3 { flex: 0 0 auto; margin: 0; }
+.flow-controls .flow-toolbar { flex: 1 1 620px; margin-top: 0; }
+.flow-time-direction { margin-left: auto; }
+@media (max-width: 600px) {
+  .flow-axis, .flow-scroll, .flow-rows, .flow-row { --control-label-width: 150px; }
 }
