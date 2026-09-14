@@ -84,12 +84,7 @@ function connectorPath(
 ) {
   const fromX = laneX(fromLane);
   const toX = laneX(toLane);
-  if (fromLane === toLane) {
-    return `M ${fromX} ${fromY} L ${toX} ${toY}`;
-  }
-
-  const bendY = (fromY + toY) / 2;
-  return `M ${fromX} ${fromY} C ${fromX} ${bendY - 3} ${toX} ${bendY + 3} ${toX} ${toY}`;
+  return `M ${fromX} ${fromY} L ${toX} ${toY}`;
 }
 
 const svgStyle: CSSProperties = {

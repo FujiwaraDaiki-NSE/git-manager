@@ -25,7 +25,7 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 type ProjectUrlChanges = Record<string, string | number | boolean | null | undefined>;
 
 const tabs: { id: ControlTab; label: string; short: string }[] = [
-  { id: "flow", label: "フロー", short: "FLOW" },
+  { id: "flow", label: "グラフ", short: "FLOW" },
   { id: "lanes", label: "作業一覧", short: "LANES" },
   { id: "activity", label: "アクティビティ", short: "ACTIVITY" },
   { id: "info", label: "プロジェクト情報", short: "INFO" },
@@ -481,6 +481,10 @@ function FlowMap({
   onShowMergedChange: (value: boolean) => void;
 }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(timeline < 100);
+  useEffect(() => {
+    if (timeline < 100) setHistoryOpen(true);
+  }, [timeline]);
   const flowScrollRef = useRef<HTMLDivElement>(null);
   const firstLaneLabelRef = useRef<HTMLDivElement>(null);
   const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -649,48 +653,39 @@ function FlowMap({
   return (
     <section className="flow-section" aria-labelledby="flow-map-title">
       <div className="flow-controls">
-        <div>
-          <h3 id="flow-map-title">ブランチの分岐と合流</h3>
-          <p className="section-copy">左から右へ時間が進みます。ブランチ名で作業状態、点でコミットの変更内容を確認できます。</p>
+        <h3 id="flow-map-title">ブランチの分岐と合流</h3>
+        <div className="flow-toolbar">
+          <div className="range-tabs" role="group" aria-label="表示するコミット">
+            <span className="flow-control-label">表示範囲</span>
+            {ranges.map((item) => <button aria-pressed={range === item.id} className="range-tab" key={item.id} type="button" onClick={() => onRangeChange(item.id)}>{item.label}</button>)}
+          </div>
+          <div className="flow-control-actions">
+            {mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}
+            <button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: "smooth" })}>右端へ移動 →</button>
+          </div>
         </div>
       </div>
-      <div className="flow-toolbar">
-        <div className="range-tabs" role="toolbar" aria-label="表示するコミット">
-          {ranges.map((item) => <button aria-pressed={range === item.id} className="range-tab" key={item.id} type="button" onClick={() => onRangeChange(item.id)}>{item.label}</button>)}
+      <details className="flow-history" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
+        <summary>履歴をたどる <span>{timeline === 100 ? "最新の観測" : "過去を表示中"} · {observationLabel}</span></summary>
+        <div className="flow-observation">
+          <label className="timeline-control">
+            <span>表示時点</span>
+            <input aria-label="過去の観測時点" aria-valuetext={observationLabel} max="100" min="0" onChange={(event) => onTimelineChange(Number(event.target.value))} step="1" type="range" value={timeline} />
+            <output>{timeline === 100 ? "最新の観測" : "選択日時"} · {observationLabel}</output>
+          </label>
+          <button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button>
         </div>
-        <div className="flow-control-actions">
-          {mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}
-          <button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: "smooth" })}>右端へ移動 →</button>
-        </div>
-      </div>
-      <div className="flow-observation">
-        <label className="timeline-control">
-          <span>履歴をたどる</span>
-          <input aria-label="過去の観測時点" aria-valuetext={observationLabel} max="100" min="0" onChange={(event) => onTimelineChange(Number(event.target.value))} step="1" type="range" value={timeline} />
-          <output>{timeline === 100 ? "最新の観測" : "選択日時"} · {observationLabel}</output>
-        </label>
-        <button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button>
-      </div>
-      {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・agent履歴を表示中。ブランチ名とGit作業状態、作業詳細は現在の情報です。</p>}
-      {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
-      {unresolvedMergeCount > 0 && (
-        <div className="inline-note" role="status">
-          {`合流関係 ${unresolvedMergeCount} 件はブランチを特定できないため、線を表示していません。`}
-        </div>
-      )}
-      <details className="flow-help">
-        <summary>グラフの見方・キーボード操作</summary>
-        <div className="flow-legend" aria-label="フロー凡例">
-          <span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span>
-          <span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span>
-          <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span>
-          <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
-          <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
-          <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
-        </div>
-        <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
-        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。矢印はGitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
       </details>
+      {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・agent履歴を表示中。ブランチ名とGit作業状態、作業詳細は現在の情報です。</p>}
+      <div className="flow-legend" aria-label="フロー凡例">
+        <span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span>
+        <span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span>
+        <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span>
+        <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
+        <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
+        <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
+        <span className="flow-time-direction">時間 →</span>
+      </div>
       {lanes.length === 0 ? (
         <div className="empty-flow">表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。</div>
       ) : (
@@ -750,7 +745,7 @@ function FlowMap({
               return (
                 <path
                   className={`flow-merge-link${link.outside ? " flow-merge-link-outside" : ""}`}
-                  d={`M ${approachX} ${sourceY} C ${x - 8} ${sourceY}, ${x - 8} ${targetY}, ${x} ${targetY}`}
+                  d={`M ${approachX} ${sourceY} L ${x} ${targetY}`}
                   key={`${link.commit_hash}:${link.source_parent}`}
                   markerEnd="url(#flow-merge-arrow)"
                 >
@@ -815,6 +810,18 @@ function FlowMap({
           </div>
         </div>
       )}
+      {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
+      {unresolvedMergeCount > 0 && (
+        <div className="inline-note" role="status">
+          {`合流関係 ${unresolvedMergeCount} 件はブランチを特定できないため、線を表示していません。`}
+        </div>
+      )}
+      <details className="flow-help">
+        <summary>グラフの見方・キーボード操作</summary>
+        <p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進みます。</p>
+        <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
+        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。矢印はGitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
+      </details>
       {project.graph?.truncated && <div className="inline-note">全履歴の取得上限は 200 件です。表示範囲外の履歴は未取得です。</div>}
     </section>
   );
@@ -1348,7 +1355,7 @@ export default function ProjectControl() {
         <button className="rescan-button" disabled={scanning} type="button" onClick={() => void fetch("/api/rescan", { method: "POST" })}>{scanning ? "走査中…" : "再走査"}</button>
       </header>
       <section className="control-hero" aria-labelledby="project-title">
-        <div className="control-hero-main"><p className="eyebrow">PROJECT CONTROL / GIT FACTS</p><h1 id="project-title">{project.name}</h1><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">LATEST GIT FACT</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div></div>
+        <div className="control-hero-main"><h1 id="project-title">{project.name}</h1><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div></div>
         <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>統合可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div>
       </section>
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">
