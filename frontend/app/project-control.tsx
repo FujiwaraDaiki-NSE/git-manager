@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
-import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, recentTimePosition, recentTimeAt, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -567,11 +567,10 @@ function FlowMap({
   const rangeTimes = rangeEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
   const relationTimes = mergeRelationTimes(project.merge_relations, range, now);
   const displayedTimes = [...rangeTimes, ...relationTimes];
-  const minTime = Math.min(...(displayedTimes.length ? displayedTimes : allTimes.length ? allTimes : [now]));
-  const maxCandidate = Math.max(now, ...(displayedTimes.length ? displayedTimes : [now]));
-  const maxTime = Math.max(minTime + 3_600_000, maxCandidate);
+  const minTime = Math.min(now - 1, ...(displayedTimes.length ? displayedTimes : allTimes.length ? allTimes : [now]));
+  const maxTime = now;
   const observationTime = minTime + ((now - minTime) * timeline) / 100;
-  const observationX = ((observationTime - minTime) / (maxTime - minTime)) * 100;
+  const observationX = recentTimePosition(observationTime, minTime, maxTime);
   const observationLabel = exactDate(new Date(observationTime).toISOString());
   const axisLabel = (time: number) => new Date(time).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
   // Agent history is resolved against the same observation point as the Git
@@ -588,7 +587,7 @@ function FlowMap({
     .map(({ row, lane }) => ({
       row,
       lane,
-      x: Math.min(100, Math.max(0, ((eventDate(row)! - minTime) / (maxTime - minTime)) * 100)),
+      x: recentTimePosition(eventDate(row)!, minTime, maxTime),
       hitX: 0,
       pointOffset: 0,
       id: flowEventKey(lane.id, row.hash),
@@ -656,7 +655,7 @@ function FlowMap({
   return (
     <section className="flow-section" aria-labelledby="flow-map-title">
       <div className="flow-controls">
-        <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチ名で作業詳細、点でコミット詳細を開きます。</p></div><span className="flow-direction">過去 → 現在</span></div>
+        <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチ名で作業詳細、点でコミット詳細を開きます。</p></div><span className="flow-direction">過去を圧縮 → 直近を詳しく</span></div>
         <div className="flow-toolbar">
           <div className="range-tabs" role="group" aria-label="表示するコミット">
             <span className="flow-control-label">表示範囲</span>
@@ -673,7 +672,7 @@ function FlowMap({
         <div className="flow-observation">
           <label className="timeline-control">
             <span>表示時点</span>
-            <input aria-label="過去の観測時点" aria-valuetext={observationLabel} max="100" min="0" onChange={(event) => onTimelineChange(Number(event.target.value))} step="1" type="range" value={timeline} />
+            <input aria-label="過去の観測時点" aria-valuetext={observationLabel} max="100" min="0" onChange={(event) => onTimelineChange(100 * (recentTimeAt(Number(event.target.value), minTime, maxTime) - minTime) / (maxTime - minTime))} step="1" type="range" value={observationX} />
             <output>{timeline === 100 ? "最新の観測" : "選択日時"} · {observationLabel}</output>
           </label>
           <button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button>
@@ -694,9 +693,7 @@ function FlowMap({
           <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
             <span>ブランチ / 現在の作業状態</span>
             <div className="flow-axis-track">
-              <span>{axisLabel(minTime)}</span>
-              <span>{axisLabel(minTime + (maxTime - minTime) / 2)}</span>
-              <span>{axisLabel(maxTime)}</span>
+              {[0, 50, 100].map((position) => <span key={position} style={{ left: `${position}%` }}>{axisLabel(recentTimeAt(position, minTime, maxTime))}</span>)}
             </div>
           </div>
           <div className="flow-rows" style={{ "--flow-row-height": `${rowHeight}px`, "--flow-lanes": lanes.length, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
@@ -800,7 +797,7 @@ function FlowMap({
         <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
         <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
         <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
-        <span className="flow-time-direction">時間 →</span>
+        <span className="flow-time-direction">時間 →（直近ほど広く）</span>
       </div>
       {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
       {unavailableMergeTimeCount > 0 && <div className="inline-note" role="status">合流関係 {unavailableMergeTimeCount} 件は、合流元コミットの日時が未取得または合流日時より後のため、線を表示していません。</div>}
@@ -811,7 +808,7 @@ function FlowMap({
       )}
       <details className="flow-help">
         <summary>グラフの見方・キーボード操作</summary>
-        <p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進みます。</p>
+        <p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進みます。直近を広く、過去を圧縮した時間軸です。同じ横幅が同じ時間間隔を表すとは限りません。</p>
         <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
         <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は合流元コミットの日時から合流コミットの日時へ進み、途中の矢印で合流方向を示します。その日時の間で線を分け、同時刻の場合は垂直に接続します。破線は合流元が表示範囲外です。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
       </details>
