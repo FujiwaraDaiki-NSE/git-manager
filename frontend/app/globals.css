@@ -1594,12 +1594,12 @@ body {
   display: grid;
   gap: 32px;
   grid-template-columns: minmax(0, 1fr) auto;
-  padding: clamp(34px, 7vw, 86px) 0 36px;
+  padding: 28px 0;
 }
 
 .home-intro h2 {
   font-family: var(--control-sans);
-  font-size: clamp(28px, 4vw, 48px);
+  font-size: clamp(26px, 3vw, 34px);
   letter-spacing: -0.045em;
   line-height: 1.1;
   margin: 10px 0 12px;
@@ -2593,7 +2593,7 @@ body {
 }
 
 .flow-now-line {
-  stroke: var(--control-red);
+  stroke: var(--control-muted);
   stroke-dasharray: 4 4;
   stroke-width: 1 !important;
 }
@@ -2733,7 +2733,7 @@ body {
 }
 
 .flow-event-hit {
-  height: 72px;
+  height: var(--flow-row-height);
   position: absolute;
   top: 0;
   transform: translateX(-50%);
@@ -2749,7 +2749,7 @@ body {
   height: 1px;
   pointer-events: none;
   position: absolute;
-  top: 36px;
+  top: calc(var(--flow-row-height) / 2);
   z-index: 0;
 }
 
@@ -2759,7 +2759,7 @@ body {
   border: 0;
   cursor: pointer;
   display: flex;
-  height: 72px;
+  height: var(--flow-row-height);
   justify-content: center;
   min-height: 44px;
   padding: 0;
@@ -2858,7 +2858,7 @@ body {
 }
 
 .flow-current-label {
-  color: var(--control-red);
+  color: var(--control-muted);
   font: 9px var(--control-mono);
   position: absolute;
   top: 5px;
@@ -3262,7 +3262,7 @@ body {
 
   .home-intro {
     gap: 22px;
-    padding: 42px 0 26px;
+    padding: 24px 0;
   }
 
   .home-intro h2 {
@@ -3291,7 +3291,7 @@ body {
   }
 
   .control-topbar .rescan-button {
-    display: none;
+    display: inline-flex;
   }
 
   .control-hero {
@@ -3520,54 +3520,80 @@ body {
   .flow-lane-button { font-size: 12px; }
 }
 
-/* Keep project context compact so the graph is visible on arrival. */
-.control-hero { grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 18px 0 12px; }
-.control-hero h1 { font-size: clamp(24px, 3vw, 32px); margin: 0 0 6px; }
-.control-identifiers { margin-top: 8px; font-size: 11px; }
-.control-latest-git { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; max-width: none; margin-top: 10px; border: 0; padding: 0; }
-.control-latest-git strong { font-weight: 400; }
+/* Project workspace: identity, navigation, controls, then the map. */
+.control-shell { padding: 16px clamp(16px, 3vw, 48px) 40px; }
+.control-topbar { min-height: 44px; padding-bottom: 10px; }
+.control-hero { grid-template-columns: minmax(0, 1fr); padding: 20px 0 12px; gap: 0; }
+.project-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.control-hero h1 { font-size: clamp(24px, 3vw, 30px); margin: 0; letter-spacing: -.035em; }
+.project-baseline { color: var(--control-blue); background: var(--control-blue-soft); padding: 5px 10px; border-radius: 6px; font-size: 12px; }
+.project-lane-count { color: var(--control-muted); font-size: 12px; }
+.project-context { margin-top: 8px; }
+.project-context summary { width: fit-content; cursor: pointer; color: var(--control-muted); font-size: 12px; padding: 8px 0; }
+.project-context[open] { padding-bottom: 12px; }
+.control-identifiers { margin-top: 8px; font-size: 12px; }
+.control-latest-git { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; max-width: none; margin: 12px 0; border: 0; padding: 0; }
 .control-metrics { display: flex; flex-wrap: wrap; gap: 8px 24px; }
 .control-metrics div { display: flex; flex-direction: row; align-items: baseline; gap: 6px; }
 .control-metrics strong { font-size: 16px; }
-.control-metrics span { font-size: 11px; }
-.flow-section { padding: 18px 20px; }
-.flow-controls h3 { margin: 0 0 4px; font-size: 18px; }
-.flow-toolbar { margin-top: 12px; gap: 8px; }
-.flow-control-label { color: var(--control-muted); font: 12px var(--control-sans); margin-right: 6px; }
-.flow-toolbar .range-tabs { align-items: center; gap: 4px; }
+.control-metrics span { font-size: 12px; }
+.control-tab { min-height: 46px; font-size: 14px; min-width: 100px; padding: 10px 18px; }
+.control-layout { padding-top: 16px; gap: 16px; }
+.flow-section { padding: 20px; }
+.flow-controls { display: block; }
+.flow-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.flow-controls h3 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+.flow-heading p { margin: 7px 0 0; color: var(--control-muted); font-size: 13px; }
+.flow-direction { color: var(--control-muted); font-size: 12px; white-space: nowrap; }
+.flow-toolbar { margin-top: 18px; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--control-border); }
+.flow-control-label { color: var(--control-muted); font: 12px var(--control-sans); margin-right: 8px; }
+.flow-toolbar .range-tabs { align-items: center; gap: 3px; }
 .flow-toolbar button { font-family: var(--control-sans); font-size: 12px; }
-.flow-history { margin-top: 8px; color: var(--control-muted); font: 12px var(--control-sans); }
+.flow-control-actions { gap: 6px; }
+.flow-history { margin: 4px 0; color: var(--control-muted); font: 12px var(--control-sans); }
 .flow-history summary { cursor: pointer; padding: 10px 0; }
-.flow-history summary > span { margin-left: 12px; font-size: 11px; }
+.flow-history summary > span { margin-left: 12px; font-size: 12px; }
 .flow-history[open] summary { color: var(--control-ink); }
-.flow-history summary:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
-.flow-section > .flow-legend { margin-top: 4px; padding: 10px 0; font: 11px var(--control-sans); gap: 8px 18px; }
-.flow-section > .flow-help { margin: 8px 0 0; }
-.flow-lane-label { border-right: 1px solid var(--control-border); padding-left: 8px; }
-.flow-track { border-bottom: 1px solid var(--control-border); }
-.flow-row:nth-of-type(even) .flow-track { background: color-mix(in srgb, var(--control-muted) 4%, transparent); }
-.flow-row.is-selected .flow-track { background: color-mix(in srgb, var(--control-blue) 8%, transparent); }
-.flow-lane-line { stroke: color-mix(in srgb, var(--control-green) 55%, var(--control-panel)); }
-.flow-branch-link { opacity: .55; }
-.flow-lane-relation { font: 11px var(--control-sans); }
-.flow-lane-button { min-height: 28px; }
-.flow-latest-visible { font-size: 12px; }
-.flow-axis { font: 11px var(--control-sans); }
-.flow-connections path { vector-effect: non-scaling-stroke; }
-@media (max-width: 600px) {
-  .flow-section { padding: 12px; }
-  .control-metrics { gap: 8px 16px; }
-  .flow-history summary > span { display: block; margin: 5px 0 0 14px; }
-  .flow-control-actions { gap: 6px; }
-  .flow-toolbar .range-tabs { gap: 4px; }
-  .flow-control-label { flex-basis: 100%; }
-  .flow-lane-label { padding-left: 6px; }
-}
-
-.flow-controls { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
-.flow-controls h3 { flex: 0 0 auto; margin: 0; }
-.flow-controls .flow-toolbar { flex: 1 1 620px; margin-top: 0; }
+.project-context summary:focus-visible, .flow-history summary:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
+.flow-section > .flow-legend { margin-top: 8px; padding: 8px 0; border: 0; font: 12px var(--control-sans); gap: 8px 16px; }
 .flow-time-direction { margin-left: auto; }
+.flow-section > .flow-help { margin: 8px 0 0; }
+.flow-scroll { border: 1px solid var(--control-border); border-radius: 8px; --control-label-width: 260px; }
+.flow-axis { font: 12px var(--control-sans); gap: 0; padding-top: 0; padding-bottom: 0; }
+.flow-axis > span { padding: 12px; border-right: 1px solid var(--control-border); }
+.flow-axis-track { padding: 12px 8px; }
+.flow-lane-label { border-right: 1px solid var(--control-border); padding: 8px 12px; }
+.flow-lane-title { height: 30px; }
+.flow-lane-button { font-size: 13px; min-height: 30px; }
+.flow-lane-meta { margin-top: 3px; }
+.flow-lane-relation { margin-top: 5px; font: 11px var(--control-sans); }
+.flow-row.is-default .flow-lane-label { background: var(--control-blue-soft); }
+.flow-row.is-default .lane-shape { border-color: var(--control-blue); }
+.flow-row.is-selected .flow-lane-label { padding-left: 12px; box-shadow: inset 3px 0 var(--control-blue); }
+.flow-row:nth-of-type(even) .flow-track { background: color-mix(in srgb, var(--control-muted) 3%, transparent); }
+.flow-row.is-selected .flow-track { background: color-mix(in srgb, var(--control-blue) 8%, transparent); }
+.flow-lane-line { stroke: color-mix(in srgb, var(--control-green) 65%, var(--control-panel)); }
+.flow-branch-link { opacity: .55; }
+.flow-latest-visible { bottom: 8px; font-size: 12px; gap: 8px; }
+.flow-latest-caption { flex-shrink: 0; font-size: 10px; opacity: .75; }
+.flow-connections path { vector-effect: non-scaling-stroke; }
+.selection-title { font-size: 13px; color: var(--control-muted); }
+.control-selection { max-height: calc(100dvh - 36px); overflow: auto; border-top: 3px solid var(--control-blue); }
 @media (max-width: 600px) {
-  .flow-axis, .flow-scroll, .flow-rows, .flow-row { --control-label-width: 150px; }
+  .control-shell { padding: 12px 12px 32px; }
+  .control-hero { padding-top: 16px; }
+  .control-tabs { display: grid; grid-template-columns: 1fr 1fr; overflow: visible; }
+  .control-tab { min-width: 0; padding: 10px 8px; font-size: 13px; }
+  .flow-section { padding: 12px; }
+  .flow-heading { align-items: start; }
+  .flow-controls h3 { font-size: 17px; }
+  .flow-heading p { font-size: 12px; line-height: 1.7; }
+  .flow-direction { display: none; }
+  .flow-toolbar { margin-top: 12px; }
+  .flow-control-label { flex-basis: 100%; }
+  .flow-history summary > span { display: block; margin: 5px 0 0 14px; }
+  .flow-scroll, .flow-axis, .flow-rows, .flow-row { --control-label-width: 160px; }
+  .flow-lane-label { padding-left: 8px; padding-right: 8px; }
+  .flow-lane-button { font-size: 12px; }
+  .flow-section > .flow-legend { font-size: 11px; gap: 8px 12px; }
 }
