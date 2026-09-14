@@ -48,7 +48,15 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
 }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--muted); border: 2px solid var(--panel); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+::-webkit-scrollbar-corner { background: transparent; }
 
 html,
 body {
@@ -2422,7 +2430,16 @@ body {
   accent-color: var(--control-blue);
   margin: 0;
   min-width: 100px;
+  appearance: none;
+  height: 24px;
+  background: transparent;
+  cursor: pointer;
 }
+
+.timeline-control input::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: var(--control-border); }
+.timeline-control input::-moz-range-track { height: 4px; border-radius: 999px; background: var(--control-border); }
+.timeline-control input::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; margin-top: -6px; border: 3px solid var(--control-panel); border-radius: 50%; background: var(--control-blue); box-shadow: 0 0 0 1px var(--control-blue); }
+.timeline-control input::-moz-range-thumb { width: 10px; height: 10px; border: 3px solid var(--control-panel); border-radius: 50%; background: var(--control-blue); box-shadow: 0 0 0 1px var(--control-blue); }
 
 .timeline-control output {
   color: var(--control-blue);
@@ -3549,7 +3566,9 @@ body {
 .flow-direction { color: var(--control-muted); font-size: 12px; white-space: nowrap; }
 .flow-toolbar { margin-top: 18px; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--control-border); }
 .flow-control-label { color: var(--control-muted); font: 12px var(--control-sans); margin-right: 8px; }
-.flow-toolbar .range-tabs { align-items: center; gap: 3px; }
+.flow-toolbar .range-tabs { align-items: center; gap: 4px; }
+.flow-toolbar .range-tab { border-radius: 999px; padding-inline: 16px; }
+.flow-toolbar .range-tab[aria-pressed="true"] { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--control-blue) 15%, transparent); }
 .flow-toolbar button { font-family: var(--control-sans); font-size: 12px; }
 .flow-control-actions { gap: 6px; }
 .flow-history { margin: 4px 0; color: var(--control-muted); font: 12px var(--control-sans); }
@@ -3560,7 +3579,10 @@ body {
 .flow-section > .flow-legend { margin-top: 8px; padding: 8px 0; border: 0; font: 12px var(--control-sans); gap: 8px 16px; }
 .flow-time-direction { margin-left: auto; }
 .flow-section > .flow-help { margin: 8px 0 0; }
-.flow-scroll { border: 1px solid var(--control-border); border-radius: 8px; --control-label-width: 260px; }
+.flow-scroll { border: 1px solid var(--control-border); border-radius: 12px; --control-label-width: 260px; }
+.control-shell, .control-shell * { scrollbar-color: color-mix(in srgb, var(--control-muted) 55%, var(--control-panel)) var(--control-panel); }
+.control-shell ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--control-muted) 55%, var(--control-panel)); border-color: var(--control-panel); }
+.control-shell ::-webkit-scrollbar-thumb:hover { background: var(--control-blue); }
 .flow-axis { font: 12px var(--control-sans); gap: 0; padding-top: 0; padding-bottom: 0; }
 .flow-axis > span { padding: 12px; border-right: 1px solid var(--control-border); }
 .flow-axis-track { padding: 0; position: relative; min-height: 54px; }

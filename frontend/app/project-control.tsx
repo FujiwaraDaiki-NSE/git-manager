@@ -35,7 +35,7 @@ const ranges: { id: TimeRange; label: string }[] = [
   { id: "current", label: "各ブランチの先端" },
   { id: "24h", label: "24時間" },
   { id: "7d", label: "7日" },
-  { id: "all", label: "取得済み履歴" },
+  { id: "all", label: "全期間" },
 ];
 
 const activityFilters: { id: ActivityFilter; label: string }[] = [
@@ -814,7 +814,7 @@ function FlowMap({
         <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
         <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は合流元コミットの日時から合流コミットの日時へ進み、途中の矢印で合流方向を示します。その日時の間で線を分け、同時刻の場合は垂直に接続します。破線は合流元が表示範囲外です。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
       </details>
-      {project.graph?.truncated && <div className="inline-note">全履歴の取得上限は 200 件です。表示範囲外の履歴は未取得です。</div>}
+      {project.graph?.truncated && <div className="inline-note">直近 200 件から表示しています。それ以前の履歴は「全期間」で確認できます。</div>}
     </section>
   );
 }

@@ -798,7 +798,7 @@ def build(
         known_worktree_paths.add(_key(path))
 
     # A project can have no local branch refs but still expose an empty graph.
-    graph_data = graph.build(repo, all_refs=True, limit=limit)
+    graph_data = graph.build(repo, all_refs=True, limit=None if range_name == "all" else limit)
     observed_at = time.time()
     merge_relations: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []

@@ -129,7 +129,7 @@ def _empty_response(
     }
 
 
-def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any] | None:
+def build(repo: str, all_refs: bool = True, limit: int | None = 200) -> dict[str, Any] | None:
     default, default_hash = _origin_default(repo)
     branch_heads = _local_branch_heads(repo)
     if branch_heads is None:
@@ -139,9 +139,10 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any] 
         "log",
         "--date-order",
         "--decorate=full",
-        f"--max-count={limit + 1}",
         f"--format={FORMAT}",
     ]
+    if limit is not None:
+        args.append(f"--max-count={limit + 1}")
     if all_refs:
         args.insert(1, "--all")
     else:
@@ -178,7 +179,7 @@ def build(repo: str, all_refs: bool = True, limit: int = 200) -> dict[str, Any] 
             "subject": subject,
         })
 
-    truncated = len(raw_rows) > limit
+    truncated = limit is not None and len(raw_rows) > limit
     raw_rows = raw_rows[:limit]
 
     lanes: list[str | None] = []
