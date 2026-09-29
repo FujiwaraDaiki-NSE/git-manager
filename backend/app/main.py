@@ -28,6 +28,7 @@ pool = ThreadPoolExecutor(max_workers=config.WORKERS, thread_name_prefix="git")
 fetch_pool = ThreadPoolExecutor(max_workers=config.FETCH_WORKERS, thread_name_prefix="fetch")
 
 scanning = {"active": False, "found": 0}
+fetching = {"active": False, "total": 0}
 watcher: Watcher | None = None
 
 # 自分が走らせた git status も .git/index を書き戻すため、inotify が自分自身を
@@ -732,7 +733,8 @@ async def _fetch_round(host_paths: list[str]) -> None:
 
     if not targets:
         return
-    bus.publish("fetch", {"active": True, "total": len(targets)})
+    fetching.update(active=True, total=len(targets))
+    bus.publish("fetch", dict(fetching))
     loop = asyncio.get_running_loop()
 
     async def fetch_project(
@@ -794,7 +796,8 @@ async def _fetch_round(host_paths: list[str]) -> None:
     if refresh_after_fetch:
         await _refresh_many(refresh_after_fetch)
     store.save(STATE)
-    bus.publish("fetch", {"active": False, "total": len(targets)})
+    fetching.update(active=False, total=len(targets))
+    bus.publish("fetch", dict(fetching))
 
 
 def _load_cached_state() -> dict[str, dict[str, Any]]:
@@ -1137,14 +1140,16 @@ async def get_repo_branches(path: str) -> dict[str, Any]:
 
 @app.get("/api/stream")
 async def stream() -> StreamingResponse:
-    queue = bus.subscribe()
-
     async def gen():
-        with STATE_LOCK:
-            snapshot = list(STATE.values())
-        snapshot.sort(key=lambda r: r.get("activity", 0), reverse=True)
-        yield f"event: snapshot\ndata: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+        queue = bus.subscribe()
         try:
+            with STATE_LOCK:
+                snapshot = list(STATE.values())
+            snapshot.sort(key=lambda r: r.get("activity", 0), reverse=True)
+            yield f"event: snapshot\ndata: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+            # Reconnecting clients may have missed the completion events.
+            yield f"event: scan\ndata: {json.dumps(scanning)}\n\n"
+            yield f"event: fetch\ndata: {json.dumps(fetching)}\n\n"
             while True:
                 try:
                     event, data = await asyncio.wait_for(queue.get(), timeout=20)

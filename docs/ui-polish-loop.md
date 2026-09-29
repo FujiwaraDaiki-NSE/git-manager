@@ -109,3 +109,10 @@
 - After the graph stats and detail changes, loaded the real design_db project: 1,078 commits/events, 54 lanes. The all-period API responded in 2.27 seconds in this local run (single observation, not a benchmark).
 - Activity initially renders 100 events; searching the earliest Japanese commit searches all 1,078. URL copying and reloading retained its Japanese query and oldest-first sort. The full-period graph rendered 217 visible commit controls and stayed within the viewport. No warning/error console entries during this pass.
 - Empty-commit graph tooltip reports 0 files and 変更ファイルなし. An event filter with zero matches states この条件に一致するイベントはありません rather than claiming unavailable data.
+
+## Reconnection state and subscription cleanup
+
+- Reproduced an SSE resource leak by closing the response iterator immediately after its initial snapshot: subscriber count stayed at 1 instead of returning to 0.
+- Create the subscription only when streaming begins and include the initial snapshot inside the cleanup scope. Send current scan/fetch state when each connection starts so a reconnect does not depend on a completion event it may have missed.
+- Added tests for close-after-first-event cleanup, current busy states, live completion delivery, and a subsequent connection seeing completed state. Backend: 81 passed with warnings treated as errors.
+- GUI E2E: a brief network failure kept event filters and prior data; retry recovered. Starting a scan and reloading returned to live updates and an enabled rescan button while retaining the selected test-event filter.
