@@ -30,3 +30,12 @@
 - GUI: `ui-` work search persists on reload; Back/Forward switches name/latest and retains query. Activity `graph` + oldest copied URL exactly matches browser location.
 - GUI: invalid activity filter and timeline=101 show both invalid keys; recovery preserves valid path, tab, queries and order.
 - Frontend 58 tests and production build pass; frontend container rebuilt.
+
+## Loop 4: smaller initial history and direct work navigation
+
+- Activity initially renders 100 entries; next 100/all are explicit choices. Search covers every fetched entry and adds focus to the first newly displayed row.
+- Real design_db all-history GUI: 1,078 rows / 12,937 DOM elements before; 100 / 1,265 after (~90% fewer elements). Next→200, all→1,078; oldest matching commit still searchable. Search→clear resets to 100 after a GUI-discovered restoration bug was fixed.
+- Home status counts link directly to work lanes with the corresponding filter. GUI dirty link preserved home search and selected the dirty filter; back link restored the home query.
+- Same-name projects expose their paths. Two mel-ladder checkouts visually verified at 390px in light theme, no horizontal overflow.
+- Quiet agent summaries remain expandable even with partially unknown data, avoiding six mostly unknown tiles taking the mobile first screen after one completed report.
+- Frontend 58 tests and Docker production build pass.

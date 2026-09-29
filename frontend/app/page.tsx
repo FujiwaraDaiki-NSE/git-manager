@@ -101,6 +101,7 @@ function ProjectCard({
   favorite,
   density,
   homeQuery,
+  showPath,
   onFavorite,
   onInteractEnd,
   onInteractStart,
@@ -109,12 +110,21 @@ function ProjectCard({
   favorite: boolean;
   density: CardDensity;
   homeQuery: string;
+  showPath: boolean;
   onFavorite: () => void;
   onInteractEnd: () => void;
   onInteractStart: () => void;
 }) {
   const target = project.main_path;
   const href = target === null ? null : `/project?path=${encodeURIComponent(target)}&tab=flow&range=current${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`;
+  const workHref = (filter: GitFilter, query: string | null = null) => {
+    if (target === null) return null;
+    const params = new URLSearchParams({ path: target, tab: "lanes", range: "current" });
+    if (filter !== "all") params.set("laneFilter", filter);
+    if (query !== null) params.set("laneQuery", query);
+    if (homeQuery) params.set("home", homeQuery);
+    return `/project?${params}`;
+  };
   const state = project.agent_state;
   const tasks = topAgentTasks(project.agent_tasks, 3);
   const latestAgent = project.latest_agent_event;
@@ -143,6 +153,7 @@ function ProjectCard({
         <div className="project-card-title-wrap">
           <h3>{href ? <Link href={href} prefetch={false}>{project.name}</Link> : project.name}</h3>
           <code title={remoteLabel(project.remote)}>{remoteLabel(project.remote)}</code>
+          {showPath && <code className="project-card-location" title={target ?? undefined}>{target === null ? "作業パス未取得" : target}</code>}
         </div>
         <div className="project-card-actions">
           <button
@@ -171,12 +182,18 @@ function ProjectCard({
       </div>}
       <div className="project-card-event"><span className="eyebrow">{latestAgent ? "最新のagent報告" : "最新コミット"}</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>{relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>
       <div className="project-card-facts" aria-label="Git状態">
-        <span className={project.git.dirty > 0 ? "fact fact-warn" : "fact"} title="未コミットの変更がある作業ディレクトリ数">変更あり <strong>{project.git.dirty}</strong></span>
-        <span className={project.git.conflict > 0 ? "fact fact-danger" : "fact"} title="競合がある作業ディレクトリ数">競合 <strong>{project.git.conflict}</strong></span>
-        <span className={project.git.ahead > 0 ? "fact fact-info" : "fact"} title="追跡先への未pushコミットがある作業ディレクトリ数（ahead > 0）">↑ 未push <strong>{project.git.ahead}</strong></span>
-        <span className={project.git.behind > 0 ? "fact fact-warn" : "fact"} title="追跡先からの未pullコミットがある作業ディレクトリ数（behind > 0）">↓ 未pull <strong>{project.git.behind}</strong></span>
+        {([
+          { key: "dirty", label: "変更あり", color: "warn", title: "未コミットの変更がある作業ディレクトリ数" },
+          { key: "conflict", label: "競合", color: "danger", title: "競合がある作業ディレクトリ数" },
+          { key: "ahead", label: "↑ 未push", color: "info", title: "追跡先への未pushコミットがある作業ディレクトリ数（ahead > 0）" },
+          { key: "behind", label: "↓ 未pull", color: "warn", title: "追跡先からの未pullコミットがある作業ディレクトリ数（behind > 0）" },
+        ] as const).map(({ key, label, color, title }) => {
+          const count = project.git[key];
+          const targetHref = workHref(key);
+          return count > 0 && targetHref ? <Link key={key} className={`fact fact-${color} fact-link`} prefetch={false} href={targetHref} title={`${title}。クリックして該当する作業を表示`} aria-label={`${project.name}の${label} ${count}件の作業を表示`}>{label} <strong>{count}</strong><span className="fact-arrow" aria-hidden="true">↗</span></Link> : <span key={key} className={count > 0 ? `fact fact-${color}` : "fact"} title={title}>{label} <strong>{count}</strong></span>;
+        })}
       </div>
-      {project.next_lane && <div className="project-card-footer"><span>次に確認 <strong>{project.next_lane}</strong></span></div>}
+      {project.next_lane && <div className="project-card-footer"><span>次に確認 {workHref("all", project.next_lane) ? <Link href={workHref("all", project.next_lane)!} prefetch={false}><strong>{project.next_lane}</strong><span aria-hidden="true"> →</span></Link> : <strong>{project.next_lane}</strong>}</span></div>}
       <details className="project-card-extra">
         <summary>管理情報 <span>{project.worktree_count} worktree</span></summary>
         <dl>
@@ -299,6 +316,15 @@ export default function Page() {
     }
   }, [favorites, favoritesReady, favoritesStorageIssue]);
 
+  const duplicateNames = useMemo(() => {
+    const names = new Set<string>();
+    const duplicates = new Set<string>();
+    for (const project of projects) {
+      if (names.has(project.name)) duplicates.add(project.name);
+      names.add(project.name);
+    }
+    return duplicates;
+  }, [projects]);
   const orderedByPriority = useMemo(() => {
     const byId = new Map(projects.map((project) => [project.id, project]));
     return displayOrder.map((id) => byId.get(id)).filter((project): project is ProjectSummary => Boolean(project));
@@ -347,7 +373,7 @@ export default function Page() {
   };
   const retry = () => { setError(null); setLoading(true); setReloadToken((value) => value + 1); };
 
-  const agentReportsUnavailable = projects.length > 0 && projects.every((project) => project.agent_tasks === null && unknownAgentSummaryKeys(project).length === 6);
+  const agentSummaryQuiet = projects.length > 0 && !projects.some((project) => summaryCards.some(({ key }) => { const count = agentCount(project, key); return count !== null && count > 0; }));
   const agentSummary = (<div className="home-summary" aria-label="agentタスクサマリー">
         {invalidUrlParams.length > 0 ? <span className="filter-unavailable">URL条件を確認してから一覧を表示します。</span> : <>
           {summaryCards.map(({ key, label }) => <button type="button" className="home-summary-card" key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "…" : totals[key] === null ? "未取得" : formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
@@ -358,7 +384,7 @@ export default function Page() {
   return (
     <main className="home-shell" id="main-content" tabIndex={-1}>
       <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></div></header>
-      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentReportsUnavailable ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>agentタスクの状態は未取得です<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
+      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>agentタスクの概要{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトで件数未取得`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
       {invalidUrlParams.length === 0 && <section className="home-toolbar" aria-label="プロジェクト検索と絞り込み">
         <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input ref={searchRef} aria-keyshortcuts="/" value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /><kbd aria-hidden="true">/</kbd></label>
         <label>並び順<select value={view.sort} onChange={(event) => applyView({ sort: event.target.value as ProjectSort })} aria-label="プロジェクトの並び順"><option value="priority">優先度</option><option value="name">名前</option><option value="latest">最新更新</option></select></label>
@@ -381,7 +407,7 @@ export default function Page() {
       {invalidUrlParams.length === 0 && loading && projects.length === 0 && <SkeletonGrid />}
       {error && <div className="home-state home-state-error" role="alert"><strong>{projects.length ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
       {invalidUrlParams.length === 0 && !loading && !error && visible.length === 0 && <div className="home-state home-empty"><h3>該当するプロジェクトがありません</h3><p>{hasActiveFilters ? "現在の条件に一致するプロジェクトはありません。条件をリセットして一覧を確認できます。" : "登録されたプロジェクトはありません。"}</p>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
-      {invalidUrlParams.length === 0 && <section className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard key={project.id} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
+      {invalidUrlParams.length === 0 && <section className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
       <details className="git-reading-guide"><summary>Git状態の見方</summary><div>
         <p><strong>変更あり</strong> 作業ディレクトリに未コミットの変更があります。<code>git status</code> で確認できます。</p>
         <p><strong>競合</strong> 同じ箇所への変更が衝突しています。対象ファイルを確認し、競合を解消します。</p>

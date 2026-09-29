@@ -4070,3 +4070,13 @@ html[data-theme="dark"] {
 .patch-wrap pre { width: 100%; }
 .patch-wrap .patch-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .patch-empty { color: var(--muted); font-size: 12px; }
+
+.activity-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 20px; margin-top: 12px; border: 1px dashed var(--control-border); border-radius: 10px; background: var(--control-panel-soft); }
+.activity-more > span { flex-basis: 100%; text-align: center; font: 12px/1.6 var(--sans); color: var(--control-muted); }
+.project-card-facts .fact-link { text-decoration: none; transition: border-color 120ms, background 120ms; }
+.project-card-facts .fact-link:hover { border-color: currentColor; background: var(--control-blue-soft); }
+.fact-arrow { font-size: 10px; opacity: .65; }
+.project-card-footer a { color: var(--control-blue); text-decoration: none; overflow-wrap: anywhere; }
+.project-card-footer a:hover { text-decoration: underline; }
+.project-card-title-wrap .project-card-location { margin-top: 4px; font-size: 10px; opacity: .8; white-space: normal; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .project-card-facts .fact-link { transition: none; } }

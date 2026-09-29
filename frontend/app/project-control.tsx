@@ -1007,6 +1007,24 @@ function ActivityView({
   const events = useMemo(() => [...filterEvents]
     .filter((event) => activityMatchesSearch(event, normalizedQuery))
     .sort((a, b) => compareActivityEvents(a, b, order)), [filterEvents, normalizedQuery, order]);
+  const viewKey = JSON.stringify([project.id, project.range, normalizedQuery, filter, order]);
+  const [page, setPage] = useState({ key: viewKey, limit: 100 });
+  useEffect(() => { setPage({ key: viewKey, limit: 100 }); }, [viewKey]);
+  const limit = page.key === viewKey ? page.limit : 100;
+  const shown = events.slice(0, limit);
+  const listRef = useRef<HTMLOListElement>(null);
+  const nextRowRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (nextRowRef.current === null) return;
+    const row = listRef.current?.children[nextRowRef.current] as HTMLElement | undefined;
+    nextRowRef.current = null;
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: "start" });
+  }, [page]);
+  const showMore = (nextLimit: number) => {
+    nextRowRef.current = shown.length;
+    setPage({ key: viewKey, limit: nextLimit });
+  };
   return (
     <section className="activity-section" aria-labelledby="activity-title">
       <div className="section-heading-row">
@@ -1025,7 +1043,7 @@ function ActivityView({
             <option value="oldest">古い順</option>
           </select>
         </label>
-        <span role="status">{events.length} / {filterEvents.length} 件</span>
+        <span role="status">{events.length} / {filterEvents.length} 件一致{shown.length < events.length ? ` · ${shown.length}件を表示` : ""}</span>
       </div>
       <div className="activity-filters" role="toolbar" aria-label="イベント種別">
         {activityFilters.map((item) => (
@@ -1037,9 +1055,9 @@ function ActivityView({
       {events.length === 0 ? (
         <div className="empty-activity">{normalizedQuery ? "検索に一致するイベントはありません。" : "この種別のイベントは未取得です。"}{(normalizedQuery || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); }}>絞り込みを解除</button>}</div>
       ) : (
-        <ol className="activity-list">
-          {events.map((event) => (
-            <li key={event.id}>
+        <ol className="activity-list" ref={listRef}>
+          {shown.map((event) => (
+            <li key={event.id} tabIndex={-1}>
               <div className="activity-time"><time dateTime={event.occurred_at ?? undefined}>{exactDate(event.occurred_at)}</time><span>{relativeTime(event.occurred_at)}</span></div>
               <span className="activity-source"><i aria-hidden="true" />{event.source === "agent" ? "agent" : event.source} · {event.type === "commit" ? "コミット" : event.agent_state ? agentStateLabel(event.agent_state) : event.type}</span>
               <div className="activity-content">
@@ -1053,6 +1071,7 @@ function ActivityView({
           ))}
         </ol>
       )}
+      {shown.length < events.length && <div className="activity-more"><span>一致する{events.length}件のうち、{shown.length}件を表示しています。検索は取得済みの全件が対象です。</span><button className="secondary-action" type="button" onClick={() => showMore(limit + 100)}>次の{Math.min(100, events.length - shown.length)}件を表示</button><button className="subtle-button" type="button" onClick={() => showMore(events.length)}>全{events.length}件を表示</button></div>}
     </section>
   );
 }
