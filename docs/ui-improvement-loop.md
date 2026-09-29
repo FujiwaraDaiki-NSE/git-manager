@@ -56,3 +56,13 @@
 - README HTML was shown literally in real project info. Parse prose without rendering HTML; ignore headings, badge images, script/style and code blocks. GUI confirms readable real description.
 - Backend regression total 69 passing; frontend remains 52. Both deployed containers healthy/running.
 - PR created: https://github.com/FujiwaraDaiki-NSE/git-manager/pull/30 . No reviewers requested.
+
+## Final interaction loop through 15:54 JST
+
+- Quick switch: blocked list API shows error; retry after unblocking restores 94 projects. No-result clear restores search focus; ArrowDown/Enter opens the chosen project.
+- Developer HTML summary rendered in browser. Temporary preview server stopped afterward.
+- Found responsive dialog registration bug by opening Git detail on desktop and resizing to mobile: Escape closed the underlying selection. Sorted keyboard layers by their DOM order and limited focus transfer to the upper layer.
+- Deployed fix: desktop→390px and mobile→desktop each close only Git detail on Escape, retaining selected branch URL and focus. At 320px with selection scrolled 512px, close button remains at y=11px.
+- Blocked only project refresh during real rescan: prior table and query remain visible, with an explicit stale-data error. Unblocked retry recovers and preserves query.
+- Project tabs respond to ArrowRight, moving both selected tab and focus.
+- Latest frontend 52 tests and production Docker build passed; backend 69 tests. Runtime logs contained no exceptions in the checked interval.

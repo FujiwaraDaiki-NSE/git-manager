@@ -1171,9 +1171,15 @@ function useDialogKeyboard(
     const root = rootRef.current;
     if (!root) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
     const entry: DialogEntry = { root, onClose };
     dialogStack.push(entry);
+    // The selection becomes modal at the mobile breakpoint, potentially
+    // after Git details have opened. These layers follow DOM order, not the
+    // order in which resize effects registered their keyboard handlers.
+    dialogStack.sort((a, b) => a.root.compareDocumentPosition(b.root) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    const frame = window.requestAnimationFrame(() => {
+      if (dialogStack.at(-1) === entry && !document.querySelector("dialog[open]")) closeRef.current?.focus();
+    });
     const onKeyDown = (event: KeyboardEvent) => {
       // Nested Git details share the document listener. Only the topmost
       // dialog may consume Escape or trap Tab; lower selection state and its
@@ -1206,9 +1212,10 @@ function useDialogKeyboard(
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown, true);
+      const wasTop = dialogStack.at(-1) === entry;
       const index = dialogStack.indexOf(entry);
       if (index >= 0) dialogStack.splice(index, 1);
-      if (previous?.isConnected && !rootRef.current?.contains(previous)) previous.focus();
+      if (wasTop && previous?.isConnected && !rootRef.current?.contains(previous)) previous.focus();
     };
   }, [closeRef, onClose, rootRef, modal]);
 }
