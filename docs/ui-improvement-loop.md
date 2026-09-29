@@ -44,3 +44,15 @@
 - Commit request blocked in browser: explicit error, unblocked retry recovered 64-file detail; truncated patch banner exposed the exact git show command.
 - Large activity list exposed 54 branch memberships per shared commit. Added accessible disclosure and render individual names only while open; search still considers all names.
 - Added developer-facing HTML summary. Production build and Docker deployment completed repeatedly.
+
+## Additional loop through 15:48 JST
+
+- Activity disclosure reduced real full-history DOM elements from 51,080 to 12,936; expanding one event still exposes all 54 branch names.
+- Browser Back/Forward restores activity/info tab and oldest-first order.
+- 320px quick switch stays within viewport and opens another project correctly.
+- Mobile selection focus cycles inside dialog and Escape restores the originating branch button. Real branch with no checkout disables Git details with explanation.
+- Missing project path and invalid home sort show explicit errors; reset restores the list.
+- Reproduced mobile detail at x=-10 due to 100vw including the scrollbar. Changed width to containing viewport percentage; x=0 and right edge=310 verified at 320px viewport.
+- README HTML was shown literally in real project info. Parse prose without rendering HTML; ignore headings, badge images, script/style and code blocks. GUI confirms readable real description.
+- Backend regression total 69 passing; frontend remains 52. Both deployed containers healthy/running.
+- PR created: https://github.com/FujiwaraDaiki-NSE/git-manager/pull/30 . No reviewers requested.

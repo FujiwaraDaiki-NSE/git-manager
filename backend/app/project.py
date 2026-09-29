@@ -12,6 +12,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Any, Mapping
 
 from app import agent_events, detail, gitinfo, graph, paths, scanner
@@ -198,6 +199,36 @@ def _ref_hash(repo: str, ref: str) -> str | None:
     return value or None
 
 
+class _ReadmeText(HTMLParser):
+    """Extract prose from README HTML without rendering markup or fetching assets."""
+
+    _blocks = {"p", "div", "section", "article", "br", "li"}
+    _omit = {"h1", "h2", "h3", "h4", "h5", "h6", "script", "style", "pre"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.omitted: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag in self._omit:
+            self.omitted.append(tag)
+        if not self.omitted and tag in self._blocks:
+            self.parts.append("\n\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.omitted:
+            if tag == self.omitted[-1]:
+                self.omitted.pop()
+            return
+        if tag in self._blocks:
+            self.parts.append("\n\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self.omitted:
+            self.parts.append(data)
+
+
 def _readme_description(repo: str) -> str | None:
     """Read only the conventional README.md; missing/empty means unavailable."""
     readme = os.path.join(repo, "README.md")
@@ -206,10 +237,22 @@ def _readme_description(repo: str) -> str | None:
             text = handle.read()
     except OSError:
         return None
+    # README introductions often use HTML layout and badge images. Extract
+    # their text before selecting a paragraph, while retaining plain Markdown.
+    if re.search(r"<(?:p|div|h[1-6]|img|a|strong|section|article|script|style|pre)(?:\s|>)", text, re.IGNORECASE):
+        parser = _ReadmeText()
+        parser.feed(text)
+        text = "".join(parser.parts)
     paragraphs: list[str] = []
     current: list[str] = []
+    fenced = False
     for raw_line in text.splitlines():
         line = raw_line.strip()
+        if line.startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
         if not line:
             if current:
                 paragraphs.append(" ".join(current))
