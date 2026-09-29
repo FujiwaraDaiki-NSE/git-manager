@@ -1,5 +1,7 @@
 "use client";
 
+import PatchView from "./patch-view";
+
 import { useEffect, useMemo, useState } from "react";
 import {
   BranchRelationSummary,
@@ -209,9 +211,7 @@ function CommitPane({
               <div className="muted-line">変更ファイルはありません</div>
             )}
           </div>
-          <pre className="patch" aria-label="コミットの diff">
-            {detail.patch}
-          </pre>
+          <PatchView key={detail.hash} patch={detail.patch} />
           {detail.patch_truncated && (
             <div className="truncated" role="status">
               {truncationLabel(200)}

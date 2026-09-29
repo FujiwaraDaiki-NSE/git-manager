@@ -1,5 +1,7 @@
 "use client";
 
+import PatchView from "./patch-view";
+
 import Link from "next/link";
 import { homeReturnHref } from "./home-overview.mjs";
 import { useSearchParams } from "next/navigation";
@@ -1143,7 +1145,7 @@ function CommitDetail({
       {state === "ready" && detail && <>
         <div className="selection-numstat"><span>変更ファイル {detail.files.length}</span><span className="additions">+{detail.files.reduce((sum, file) => sum + (typeof file.additions === "number" ? file.additions : 0), 0)}</span><span className="deletions">-{detail.files.reduce((sum, file) => sum + (typeof file.deletions === "number" ? file.deletions : 0), 0)}</span></div>
         <div className="selection-files">{detail.files.map((file) => <div key={file.path}><span>{file.additions}</span><span>{file.deletions}</span><code>{file.path}</code></div>)}</div>
-        <pre className="selection-patch">{detail.patch}</pre>
+        <PatchView key={detail.hash} patch={detail.patch} />
         {detail.patch_truncated && <p className="inline-note" role="status">差分が大きいため、一部を省略しています。全体は <code>git show {hash}</code> で確認できます。</p>}
       </>}
       {lane?.path && <button className="secondary-action" type="button" onClick={() => onOpenGit(lane)}>このレーンの Git 詳細</button>}

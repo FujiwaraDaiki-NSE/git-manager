@@ -4046,3 +4046,27 @@ html[data-theme="dark"] {
 .empty-activity .subtle-button { display: block; margin: 12px auto 0; }
 
 .control-selection .selection-head { position: sticky; top: -18px; background: var(--control-panel); z-index: 2; padding-top: 8px; }
+
+/* Readable, lossless unified patches in both commit detail surfaces. */
+.patch-view { min-width: 0; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.patch-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; background: var(--paper); }
+.patch-toolbar > button { border: 1px solid var(--rule); background: var(--panel); color: var(--ink); border-radius: 5px; padding: 5px 8px; font: 11px var(--sans); cursor: pointer; }
+.patch-toolbar > button[aria-pressed="true"] { background: var(--selected); border-color: var(--accent); color: var(--accent); }
+.patch-toolbar .copy-control { margin-left: auto; }
+.patch-legend { display: inline-flex; gap: 8px; margin-right: auto; font: 11px var(--sans); }
+.patch-legend span:first-child { color: var(--c-index); }
+.patch-legend span:last-child { color: var(--c-worktree); }
+.patch-file + .patch-file { border-top: 1px solid var(--rule); }
+.patch-file > summary { padding: 9px; cursor: pointer; background: var(--hover); font: 11px/1.5 var(--mono); overflow-wrap: anywhere; }
+.patch-lines { max-height: 440px; overflow: auto; background: var(--panel); }
+.patch-lines pre { margin: 0; width: max-content; min-width: 100%; font: 11px/1.7 var(--mono); tab-size: 4; }
+.patch-line { display: flex; min-height: 1.7em; }
+.patch-number { flex: 0 0 4ch; width: 4ch; padding-right: 1ch; text-align: right; color: var(--muted); user-select: none; border-right: 1px solid var(--rule); }
+.patch-text { padding: 0 10px; }
+.patch-addition { background: color-mix(in srgb, var(--c-index) 12%, var(--panel)); }
+.patch-deletion { background: color-mix(in srgb, var(--c-worktree) 12%, var(--panel)); }
+.patch-hunk { color: var(--accent); background: var(--selected); }
+.patch-meta { color: var(--muted); }
+.patch-wrap pre { width: 100%; }
+.patch-wrap .patch-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.patch-empty { color: var(--muted); font-size: 12px; }
