@@ -123,3 +123,15 @@
 - Preserve pending events through suppression and refresh when the window ends. Events arriving during an in-flight refresh remain pending. Use `git --no-optional-locks status` so read-only status does not rewrite the index and trigger itself.
 - Added tests for deferred events, events received during refresh, and unchanged index bytes after status collection. Backend: 84 passed with warnings treated as errors.
 - Repeated the immediate-push scenario: ahead=1 → 0 in 2.98 seconds. `checked_at` stayed unchanged during the next five seconds, confirming no self-refresh loop in this scenario. GUI E2E separately showed 未push 1 → 未push 0 while retaining the active filter and focus.
+
+## Final main integration
+
+- At 17:44 JST, origin/main advanced to `d36d9fc` (PR #31, compact branch work status). Merged it as `3f50c29`, retaining the new main terminology and branch-state presentation alongside the URL, file, unborn-branch and rendering improvements.
+- Resolved overlapping display edits in page.tsx and project-control.tsx. No review or reviewer was used.
+- Integrated tests: frontend 64 passed; backend 99 passed with warnings as errors; Next.js production build passed. Built both isolated Compose services again from the merged source.
+
+## Final integrated GUI and cleanup
+
+- After the last main integration and container rebuild, repeated large diff pagination (300 → 600), Japanese rename old/new names, and the 320px detail dialog with Escape focus restoration. No console warnings/errors in this fresh integrated browser session.
+- Loading toolbar now states Git件数を取得中… instead of presenting an unobserved zero. The final frontend tests (64) and container production build passed after this wording fix.
+- At 17:53 JST, removed the two disposable E2E repositories and their local bare origin, then rescanned both isolated 14412 and existing 4412 services. GUI search shows zero matching fixture projects. User repositories and the original checkout were not altered by cleanup.
