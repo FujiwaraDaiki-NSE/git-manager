@@ -20,9 +20,9 @@ docker compose up -d --build
 http://localhost:4412 を開く。
 
 通常の公開ポートは 4412 です。agent integration 用 backend は
-`127.0.0.1:${GITDASH_AGENT_PORT}` にだけ bind され、`GITDASH_AGENT_TOKEN` の
-Bearer 認証が必須です。ブラウザからの `/api/*` は frontend のルートハンドラ経由で
-到達します。
+`127.0.0.1:${GITDASH_AGENT_PORT}` にだけ bind されます。ブラウザからの `/api/*` は
+frontend のルートハンドラ経由で到達します。認証不要の agent REST
+`/api/agent-events` もこの proxy 経由で利用できます。
 
 ## 表示するもの
 
@@ -50,6 +50,21 @@ worktree の順で表示する。worktree がないリポジトリは単独行�
 詳細は「状態」「グラフ」「ブランチ」のタブに分かれ、選択したタブだけを取得する。
 グラフタブでは、既定ブランチを基準に、表示範囲内のローカルブランチ HEAD と
 共通祖先からの経路を小さなサマリーグラフでも確認できる。
+プロジェクトのフローでは、現在のローカルブランチ参照とreflogから一意に裏付けられる
+合流元・合流先を、既定ブランチに限定せず方向付きの線で表示する。
+削除済みブランチや同距離の候補があり一意に決められない関係は、推測せず不明として扱う。
+フローではブランチ名から作業詳細、点からコミット詳細を開く。表示範囲と観測日時を
+切り替え、最新の観測へ戻れる。過去表示でもブランチ名とGit作業状態は現在の情報を示す。
+グラフの基本凡例はグラフ直後に表示し、合流関係は重なりを避けた経路と、線の途中の矢印で示す。
+線は合流元コミットの日時から合流日時へ左から右に進み、同時刻なら垂直に接続する。
+重なりはこの時間区間内で分離する。合流元が表示範囲外なら破線で示し、日時が不明・逆転している場合は線を表示せず通知する。
+ブランチ選択時には関連する合流線を強調する。
+プロジェクトの説明・識別情報・最新コミット・集計は「プロジェクトの概要・集計」で開閉できる。
+プロジェクトのタブは左右キーと Home/End でも移動でき、小画面では2列に表示する。
+時間軸は直近を広く、過去を対数的に圧縮する。コミット・合流線・目盛りは同じ時間軸を使う。
+日時目盛りは幅に応じ通常5〜9点とし、区切りのよい日時を選んでラベルの重なりを避ける。
+日付が変わる箇所には日付も表示し、薄い縦線でコミット位置と対応づける。
+「履歴をたどる」を開くと観測日時を変更でき、スライダーも直近を細かく選択できる。キーボード操作は「グラフの見方」から確認できる。
 選択中のリポジトリとタブは URL に同期されるため、そのまま共有・再読込できる。
 一覧では上下キーで行を移動し、Enter で選択、Escape で詳細を閉じられる。
 
@@ -123,9 +138,8 @@ XY コードにはツールチップを付け、状態は色だけでなく `ahe
 | `GITDASH_FETCH_WORKERS`       | 4    | fetch の並列数                       |
 | `GITDASH_FETCH_INTERVAL_SEC`  | 300  | 同一リポジトリの fetch 間隔          |
 | `GITDASH_WATCH`               | true | inotify を使うか                     |
-| `GITDASH_AGENT_PORT`           | —    | agent REST/MCP を bind する localhost ポート（必須） |
-| `GITDASH_AGENT_TOKEN`          | —    | agent REST/MCP の Bearer token（必須。未設定なら integration unavailable） |
-| `GITDASH_AGENT_ENDPOINT`       | —    | host-side command hook の REST endpoint（必須。ポートを合わせる） |
+| `GITDASH_AGENT_PORT`           | 8762 | agent REST/MCP を bind する localhost ポート（必須） |
+| `GITDASH_AGENT_ENDPOINT`       | `http://127.0.0.1:8762/api/agent-events` | host-side command hook の REST endpoint（必須） |
 
 除外ディレクトリは `backend/app/scanner.py` の `SKIP_NAMES`。
 `node_modules` `.venv` `.cargo` `go/pkg` などは登録済み。
@@ -156,16 +170,25 @@ watch 数が爆発するのでやっていません。ブラウザにフォー�
 
 ## agent event integration
 
-agent status は `POST /api/agent-events` または localhost の Streamable HTTP MCP
-`/mcp` の `report_agent_status` で明示的に送信します。lifecycle event は
+agent status は `POST /api/agent-events`（frontend の `/api` proxy 経由でも利用可能）
+または localhost の Streamable HTTP MCP `/mcp` の `report_agent_status` で、認証なしに
+明示的に送信します。lifecycle event は
 `run_state` のみを変更し、semantic status は `phase`、`attention`、`outcome`、
 `summary` を必ず明示します（値を消す場合は `null`）。イベントは `/data` の
 append-only SQLite に保存され、`.codex/hooks.json` が SessionStart、SubagentStart、
 Interrupt、SubagentStop、SessionEnd を command hook として送信します。SessionEnd
 は終了時に MCP が利用できないため command hook を使用します。hook は Codex の
-ホストプロセスで実行されるため、`GITDASH_AGENT_ENDPOINT` と
-`GITDASH_AGENT_TOKEN` をホスト環境へ `export`（または Codex が同等に供給）し、
-`GITDASH_AGENT_PORT` を変更した場合は `.codex/config.toml` と endpoint も合わせます。
+ホストプロセスで実行されるため、`GITDASH_AGENT_ENDPOINT` をホスト環境へ
+`export`（または Codex が同等に供給）し、`GITDASH_AGENT_PORT` を変更した場合は
+`.codex/config.toml` と endpoint も合わせます。
+
+MCP は通常セッションのコンテキストを増やさないよう、プロジェクト設定では既定で
+`enabled = false` です。意味的な agent status を報告したいセッションだけ、次のように
+明示して起動します。Hooks による lifecycle event の送信はこの設定と独立して動作します。
+
+```bash
+codex --config mcp_servers.gitdash-agent-events.enabled=true
+```
 
 ## 開発
 
@@ -174,10 +197,25 @@ Interrupt、SubagentStop、SessionEnd を command hook として送信します�
 cd backend
 uv venv && uv pip install -r requirements.txt
 GITDASH_SCAN_ROOT=$HOME GITDASH_HOST_PREFIX=$HOME GITDASH_DATA_DIR=/tmp/gitdash \
-  uv run uvicorn app.main:app --port 8000
+  uv run uvicorn app.main:app --port 8762
 
 # frontend
 cd frontend
 npm install
-BACKEND_ORIGIN=http://127.0.0.1:8000 npm run dev
+BACKEND_ORIGIN=http://127.0.0.1:8762 npm run dev
 ```
+
+## プロジェクトを探す
+
+プロジェクト一覧では、上部のエージェント状態サマリーを選ぶと、その状態のタスクを
+含むプロジェクトだけを表示する。未取得は0件として扱わず、未取得対象だけを確認できる。
+Gitの変更・競合・ahead・behindでも絞り込め、名前・パス・リモートの検索と組み合わせられる。
+並び順は優先度・名前・最新活動から選べる。
+
+よく確認するプロジェクトは星ボタンでお気に入りに登録し、お気に入りだけの一覧にできる。
+お気に入りはブラウザ内に保存し、別端末へは同期しない。表示密度はゆったりとコンパクトから選べる。
+検索、絞り込み、並び順、表示密度はURLに記録され、再読み込みやブラウザの戻る・進むで復元する。
+
+詳細画面の「作業一覧」ではブランチ名・作業パス、「アクティビティ」では履歴の内容を検索できる。
+アクティビティは新しい順と古い順を切り替えられる。「この画面のURLをコピー」から現在の詳細画面への
+リンクをコピーできる。コピーできない環境では失敗を表示する。

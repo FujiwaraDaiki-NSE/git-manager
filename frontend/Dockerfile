@@ -1,14 +1,14 @@
 FROM node:20-alpine AS deps
 WORKDIR /srv
-COPY package.json package-lock.json* ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
 FROM node:20-alpine AS build
 WORKDIR /srv
 COPY --from=deps /srv/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+RUN npm run build && test -f .next/standalone/server.js
 
 FROM node:20-alpine AS run
 WORKDIR /srv

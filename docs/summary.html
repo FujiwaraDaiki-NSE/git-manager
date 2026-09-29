@@ -259,19 +259,35 @@
       </header>
 
       <section>
+        <h2>グラフ画面のUI整理（2026-09-14）</h2>
+        <p>3人のエージェントが情報構造、グラフ表現、狭い画面とキーボード操作を検討。上部の多段表示を縮め、グラフの読み取りを優先した。</p>
+        <ul>
+          <li>プロジェクト見出し・最新コミット・集計をコンパクト化し、グラフ見出しと表示範囲、補助操作を一つの領域へ集約。</li>
+          <li>履歴操作は開閉できる領域へ移し、過去表示時は自動で開く。最新へ戻しても開いた操作欄を維持する。</li>
+          <li>基本凡例は常時表示。合流矢印と縦型履歴の接続線を直線化し、行区切りと青い選択表示を統一。</li>
+          <li>既存のAPI、履歴の解釈、44pxの点の操作領域、キーボード移動、詳細表示は維持。未取得・特定不能の注記も残す。</li>
+        </ul>
+        <p>確認: frontend 29テスト、Next.js本番ビルド、ブラウザの通常幅と390px幅での表示・横スクロール・範囲切替・履歴復帰・ブランチ選択・矢印キーとEnterによるコミット詳細表示。</p>
+      </section>
+
+      <section>
         <h2>Agent event integration（Phase 2）</h2>
         <div class="card">
           <p>
             <code>POST /api/agent-events</code> と localhost の Streamable HTTP
-            <code>/mcp</code> は、明示的な Bearer token を要求する
-            <code>report_agent_status</code> だけを公開する。lifecycle は
+            <code>/mcp</code> は認証なしで、<code>report_agent_status</code> だけを公開する。
+            frontend の <code>/api</code> proxy 経由からも agent REST に到達できる。lifecycle は
             <code>run_state</code> のみ、semantic status は
             <code>phase</code>・<code>attention</code>・<code>outcome</code>・<code>summary</code>
             を null を含めて明示する。イベントは append-only SQLite に保存し、
             SessionEnd は終了時の MCP 制約のため command hook で送信する。
-            host hook 実行には <code>GITDASH_AGENT_ENDPOINT</code> と
-            <code>GITDASH_AGENT_TOKEN</code> の供給が必要で、ポート変更時は
-            MCP URL と endpoint を同時に更新する。
+            host hook 実行には <code>GITDASH_AGENT_ENDPOINT</code> の供給が必要で、
+            ホスト側の標準ポートは <code>8762</code> とする。ポート変更時は MCP URL と
+            endpoint を同時に更新する。MCP は通常セッションの
+            tool catalog と server instructions を増やさないよう既定で無効にし、
+            必要なセッションだけ
+            <code>--config mcp_servers.gitdash-agent-events.enabled=true</code>
+            で有効化する。Hooks は MCP の有効・無効と独立して動作する。
           </p>
         </div>
       </section>
@@ -343,9 +359,10 @@
           </div>
         </div>
         <p class="note">
-          Composeではfrontendだけが <code>4412:3000</code> を公開し、backendは
-          <code>expose: 8000</code>
-          のみ。backendはホストのuid/gidで動作し、fetchのためマウントはrw。アプリはfetch以外に明示的な変更操作を行わないが、<code
+          Composeではfrontendが <code>4412:3000</code> を公開し、backendのagent REST/MCPは
+          <code>127.0.0.1:${GITDASH_AGENT_PORT}:8000</code> としてホストのlocalhostだけにbindする。
+          frontendの <code>/api</code> proxyはbackendの <code>8000</code> へ到達させる。backendは
+          ホストのuid/gidで動作し、fetchのためマウントはrw。アプリはfetch以外に明示的な変更操作を行わないが、<code
             >git status</code
           >
           が
@@ -995,6 +1012,19 @@ SVG width   : min(max_lane + 1, 8) * W + 16</pre
             とし、SSEはupstreamのbodyを触らずストリームとして返している。proxyをrewritesへ戻さないこと。
           </p>
         </div>
+      </section>
+
+      <section>
+        <h2>フロー画面のUX改善（2026-09-14）</h2>
+        <p>情報構造・操作性・視覚表現を3人のagentが検討し、ブランチの選択と日時の読み取りを優先した。</p>
+        <ul>
+          <li>表示範囲、履歴スライダー、最新復帰をグラフ内へ集約。日時と観測線の位置を一致させる。</li>
+          <li>ブランチ名から作業詳細を開き、選択行を強調。行内に表示末尾のコミット件名と日時を表示する。</li>
+          <li>凡例と操作説明を展開式にし、パスと完全な合流情報を作業詳細で確認する。</li>
+          <li>過去表示でもブランチ参照と作業状態は現在の情報であることを明示。過去の状態を推測しない。</li>
+          <li>1200px以上は非モーダルの詳細ペイン、未満はフォーカスを制御するドロワー。72pxの行高をSVGと共有する。</li>
+        </ul>
+        <p>確認: frontendの既存テスト、本番ビルド、実データによるブランチ・コミット選択、キーボード移動、期間変更、過去日時と最新復帰、390px幅での表示とEscape復帰。バックエンドとCompose定義の変更は不要で、既存プロジェクトのfrontendイメージを再ビルドして反映する。</p>
       </section>
 
       <section>

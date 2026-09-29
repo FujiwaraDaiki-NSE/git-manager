@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Repo } from "./types";
+import type { AgentEvent, AgentEventEnvelope, Repo } from "./types";
 
 export type RepoStreamState = {
   repos: Map<string, Repo>;
   scanning: boolean;
   fetching: boolean;
   connected: boolean;
+  agentEvents: AgentEvent[];
+  latestAgentEvent: AgentEvent | null;
 };
 
 /** Shared read-only SSE snapshot used by home and the project control page. */
@@ -16,6 +18,8 @@ export function useRepoStream(): RepoStreamState {
   const [scanning, setScanning] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const [latestAgentEvent, setLatestAgentEvent] = useState<AgentEvent | null>(null);
 
   useEffect(() => {
     const es = new EventSource("/api/stream");
@@ -52,8 +56,16 @@ export function useRepoStream(): RepoStreamState {
         Boolean((JSON.parse((event as MessageEvent).data) as { active: boolean }).active),
       );
     });
+    es.addEventListener("agent_event", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as AgentEvent | AgentEventEnvelope;
+      const value = "snapshot" in payload
+        ? { ...payload.snapshot, event_id: payload.event_id }
+        : payload;
+      setLatestAgentEvent(value);
+      setAgentEvents((previous) => [value, ...previous.filter((item) => item.event_id !== value.event_id)].slice(0, 200));
+    });
     return () => es.close();
   }, []);
 
-  return { repos, scanning, fetching, connected };
+  return { repos, scanning, fetching, connected, agentEvents, latestAgentEvent };
 }

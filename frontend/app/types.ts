@@ -95,12 +95,73 @@ export type BranchesResponse = {
   command: string;
 };
 
+export type AgentRunState =
+  | "investigating"
+  | "implementing"
+  | "testing"
+  | "reviewing"
+  | "waiting_for_user"
+  | "blocked"
+  | "completed"
+  | "stopped"
+  | "active"
+  | "review_required"
+  | "merge_ready"
+  | string;
+
+export type AgentTask = {
+  task_id: string;
+  agent_id: string | null;
+  worktree: string | null;
+  branch: string | null;
+  run_state: AgentRunState | null;
+  phase: string | null;
+  attention: string | null;
+  outcome: string | null;
+  summary: string | null;
+  occurred_at: string | null;
+};
+
+export type AgentEvent = AgentTask & {
+  event_id: string;
+  observed_at: number;
+  project_id?: string | null;
+  kind?: "lifecycle" | "status" | string;
+  sequence?: number;
+};
+
+export type AgentEventEnvelope = {
+  event_id: string;
+  worktree: string;
+  snapshot: AgentEvent;
+};
+
 export type AgentCounts = {
   running: number | null;
   waiting_for_user: number | null;
   problem: number | null;
   reviewing: number | null;
   integratable: number | null;
+};
+
+export type AgentPriorityCounts = {
+  waiting_for_user: number | null;
+  blocked: number | null;
+  review_required: number | null;
+  merge_ready: number | null;
+  active: number | null;
+  completed: number | null;
+};
+
+export type ProjectMergeRelation = {
+  commit_hash: string;
+  occurred_at: string | null;
+  target_parent: string;
+  source_parent: string;
+  source_branch: string | null;
+  source_lane_id: string | null;
+  target_branch: string | null;
+  target_lane_id: string | null;
 };
 
 export type ProjectLane = {
@@ -125,13 +186,10 @@ export type ProjectLane = {
   last_commit: Commit & { short?: string } | null;
   next_command: NextCommand | null;
   error: string | null;
-  agent: {
-    task_id?: string | null;
-    state?: string | null;
-    summary?: string | null;
-    occurred_at?: string | null;
-  } | null;
+  agent: AgentTask | null;
   merge_target: string | null;
+  merge_sources: ProjectMergeRelation[];
+  merge_targets: ProjectMergeRelation[];
   next_phase: string | null;
 };
 
@@ -155,11 +213,18 @@ export type ProjectEvent = {
   branch: string | null;
   lane_id: string | null;
   lane_names?: string[];
-  commit_hash: string | null;
-  subject: string | null;
-  author: string | null;
+  commit_hash?: string | null;
+  subject?: string | null;
+  author?: string | null;
   parents?: string[];
   stats?: CommitStats | null;
+  task_id?: string | null;
+  agent_id?: string | null;
+  run_state?: AgentRunState | null;
+  phase?: string | null;
+  attention?: string | null;
+  outcome?: string | null;
+  summary?: string | null;
 };
 
 export type ProjectGitCounts = {
@@ -186,7 +251,10 @@ export type ProjectSummary = {
   next_lane: string | null;
   largest_difference_lane: string | null;
   agent_counts: AgentCounts;
-  agent_state: string | null;
+  agent_tasks: AgentTask[] | null;
+  agent_state: AgentRunState | null;
+  agent_priority_counts: AgentPriorityCounts;
+  latest_agent_event: AgentEvent | null;
 };
 
 export type ProjectResponse = {
@@ -202,6 +270,7 @@ export type ProjectResponse = {
   range: "current" | "24h" | "7d" | "all";
   graph: GraphResponse | null;
   lanes: ProjectLane[];
+  merge_relations: ProjectMergeRelation[];
   events: ProjectEvent[];
   latest_event: ProjectEvent | null;
   branch_counts: { local: number; remote: number };
@@ -210,8 +279,12 @@ export type ProjectResponse = {
   languages: string[] | null;
   directories: string[] | null;
   test_commands: string[] | null;
-  agent_tasks: unknown[] | null;
+  agent_tasks: AgentTask[] | null;
   agent_counts: AgentCounts;
+  agent_priority_counts: AgentPriorityCounts;
+  agent_state: AgentRunState | null;
+  agent_latest_event: AgentEvent | null;
+  agent_events: AgentEvent[];
   ci: unknown | null;
   reviews: unknown | null;
   merge_target: string | null;

@@ -1,7 +1,8 @@
 /**
  * backend へのプロキシ。
  *
- * backend はポートを公開しないため、ブラウザからの /api/* は必ずここを通る。
+ * backend の agent REST/MCP はホストの localhost にだけ bind されるため、
+ * ブラウザからの /api/* は必ずここを通る。
  * next.config の rewrites を使わないのは、行き先がビルド時に固定されてしまい
  * compose の環境変数で切り替えられなくなるため。
  */

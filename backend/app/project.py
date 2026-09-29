@@ -1,15 +1,18 @@
 """プロジェクト管制画面向けの Git 事実集約。
 
-このモジュールは Git から観測できる値だけを返す。agent、PR、CI、合流先や
-次工程はここで推測しないため、呼び出し側が渡さない限り常に ``None`` になる。
-コミットの patch は取得せず、詳細 API は従来の ``/api/repo/commit`` に任せる。
+このモジュールは Git から観測できる値だけを返す。agent、PR、CI、次工程は
+ここで推測しない。合流関係も、現在存在するローカル branch ref が merge commit
+またはその親を直接指す場合だけ返す。コミットの patch は取得せず、
+詳細 API は従来の ``/api/repo/commit`` に任せる。
 """
 from __future__ import annotations
 
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Any, Mapping
 
 from app import agent_events, detail, gitinfo, graph, paths, scanner
@@ -196,6 +199,36 @@ def _ref_hash(repo: str, ref: str) -> str | None:
     return value or None
 
 
+class _ReadmeText(HTMLParser):
+    """Extract prose from README HTML without rendering markup or fetching assets."""
+
+    _blocks = {"p", "div", "section", "article", "br", "li"}
+    _omit = {"h1", "h2", "h3", "h4", "h5", "h6", "script", "style", "pre"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.omitted: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag in self._omit:
+            self.omitted.append(tag)
+        if not self.omitted and tag in self._blocks:
+            self.parts.append("\n\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.omitted:
+            if tag == self.omitted[-1]:
+                self.omitted.pop()
+            return
+        if tag in self._blocks:
+            self.parts.append("\n\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self.omitted:
+            self.parts.append(data)
+
+
 def _readme_description(repo: str) -> str | None:
     """Read only the conventional README.md; missing/empty means unavailable."""
     readme = os.path.join(repo, "README.md")
@@ -204,10 +237,22 @@ def _readme_description(repo: str) -> str | None:
             text = handle.read()
     except OSError:
         return None
+    # README introductions often use HTML layout and badge images. Extract
+    # their text before selecting a paragraph, while retaining plain Markdown.
+    if re.search(r"<(?:p|div|h[1-6]|img|a|strong|section|article|script|style|pre)(?:\s|>)", text, re.IGNORECASE):
+        parser = _ReadmeText()
+        parser.feed(text)
+        text = "".join(parser.parts)
     paragraphs: list[str] = []
     current: list[str] = []
+    fenced = False
     for raw_line in text.splitlines():
         line = raw_line.strip()
+        if line.startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
         if not line:
             if current:
                 paragraphs.append(" ".join(current))
@@ -360,6 +405,16 @@ def _agent_counts(snapshots: list[Mapping[str, Any]]) -> dict[str, int | None]:
     }
 
 
+def _agents_for_worktree(
+    snapshots: Mapping[str, Mapping[str, Any]], worktree: str | None
+) -> list[Mapping[str, Any]]:
+    if not isinstance(worktree, str):
+        return []
+    result = [item for item in snapshots.values() if item.get("worktree") == worktree]
+    result.sort(key=lambda item: (item.get("occurred_at") or "", item.get("sequence") or 0))
+    return result
+
+
 def _agent_priority_categories(snapshots: list[Mapping[str, Any]]) -> dict[str, int | None]:
     """Classify each task into exactly one explicit priority bucket."""
     if not snapshots:
@@ -391,6 +446,221 @@ def _parse_track(track: str | None) -> tuple[int | None, int | None]:
         int(ahead_match.group(1)) if ahead_match else 0,
         int(behind_match.group(1)) if behind_match else 0,
     )
+
+
+ReflogEntry = tuple[str, int, str]
+
+
+def _branch_reflog(
+    repo: str,
+    branch: str,
+    cache: dict[str, list[ReflogEntry]],
+) -> list[ReflogEntry]:
+    """Return a current local branch's complete observable ref history."""
+    if branch in cache:
+        return cache[branch]
+    raw = gitinfo._run(
+        repo,
+        [
+            "reflog",
+            "show",
+            "--date=unix",
+            "--format=%H%x1f%gD%x1f%gs",
+            f"refs/heads/{branch}",
+        ],
+    )
+    entries: list[ReflogEntry] = []
+    for line in raw.splitlines() if raw else []:
+        fields = line.split("\x1f", 2)
+        selector_time = re.search(r"@\{(\d+)(?: [+-]\d{4})?\}$", fields[1]) if len(fields) == 3 else None
+        if selector_time:
+            entries.append((fields[0], int(selector_time.group(1)), fields[2]))
+    cache[branch] = entries
+    return entries
+
+
+def _history_action(action: str) -> bool:
+    return action.startswith(("commit", "merge ", "pull", "fetch", "rebase", "cherry-pick"))
+
+
+def _tracks_remote_branch(repo: str, branch: str, commit_hash: str) -> bool:
+    """Confirm that a fast-forwarded local branch tracks a ref containing the merge."""
+    upstream = gitinfo._run(
+        repo,
+        ["for-each-ref", "--format=%(upstream)", f"refs/heads/{branch}"],
+    )
+    upstream_ref = upstream.strip() if upstream else ""
+    if not upstream_ref:
+        return False
+    return gitinfo._run(repo, ["merge-base", "--is-ancestor", commit_hash, upstream_ref]) is not None
+
+
+def _unique_merge_target(
+    repo: str,
+    branches: Mapping[str, str],
+    target_parent: str,
+    commit_hash: str,
+    occurred_at: Any,
+    cache: dict[str, list[ReflogEntry]],
+) -> tuple[str, int] | None:
+    """Resolve the one local ref observed moving from first parent to merge."""
+    merge_epoch = _iso_epoch(occurred_at)
+    matches: list[tuple[str, int]] = []
+    for branch in branches:
+        entries = _branch_reflog(repo, branch, cache)
+        for index, (new_hash, pointed_at, action) in enumerate(entries[:-1]):
+            old_hash, old_pointed_at, old_action = entries[index + 1]
+            if new_hash != commit_hash or old_hash != target_parent:
+                continue
+            local_merge = (
+                action.startswith("commit (merge)")
+                or (action.startswith("merge ") and "Fast-forward" not in action)
+                or (action.startswith("pull") and "Fast-forward" not in action)
+            )
+            remote_update = action.startswith("fetch") or (
+                action.startswith("pull") and "Fast-forward" in action
+            ) or (
+                action.startswith("merge ") and "Fast-forward" in action
+            )
+            target_parent_predates_merge = merge_epoch is not None and (
+                old_pointed_at < merge_epoch
+                or (old_pointed_at == merge_epoch and _history_action(old_action))
+            )
+            if local_merge or (
+                remote_update
+                and target_parent_predates_merge
+                and _tracks_remote_branch(repo, branch, commit_hash)
+            ):
+                matches.append((branch, pointed_at))
+            break
+    return matches[0] if len(matches) == 1 else None
+
+
+def _unique_source_branch(
+    repo: str,
+    branches: Mapping[str, str],
+    source_parent: str,
+    cutoff: int | None,
+    cache: dict[str, list[ReflogEntry]],
+) -> str | None:
+    """Resolve one extant branch that formed the source tip before target update."""
+    if cutoff is None:
+        return None
+    matches: list[str] = []
+    for branch in branches:
+        entries = _branch_reflog(repo, branch, cache)
+        matched = False
+        for index, (commit_hash, pointed_at, action) in enumerate(entries):
+            if commit_hash != source_parent or not _history_action(action):
+                continue
+            local_formation = action.startswith(("commit", "cherry-pick", "rebase")) or (
+                action.startswith("merge ") and "Fast-forward" not in action
+            )
+            prior_history = any(
+                older_at < pointed_at for _older_hash, older_at, _older_action in entries[index + 1:]
+            )
+            if (local_formation and pointed_at <= cutoff) or (
+                not local_formation and prior_history and pointed_at < cutoff
+            ):
+                matched = True
+                break
+        if matched:
+            matches.append(branch)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _merge_relations(
+    repo: str,
+    graph_rows: list[Mapping[str, Any]],
+    branch_heads: Mapping[str, str],
+    lane_ids: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Build one relation for every second-or-later parent of each merge row."""
+    merge_rows = [
+        row
+        for row in graph_rows
+        if isinstance(row.get("hash"), str)
+        and row.get("hash")
+        and isinstance(row.get("parents"), list)
+        and len(row["parents"]) >= 2
+    ]
+    if not merge_rows:
+        return []
+
+    evidence_cache: dict[str, list[ReflogEntry]] = {}
+    relations: list[dict[str, Any]] = []
+    for row in merge_rows:
+        commit_hash = row["hash"]
+        parents = row["parents"]
+        occurred_at = row.get("date") if isinstance(row.get("date"), str) else None
+        target_parent = parents[0]
+        if not isinstance(target_parent, str) or not target_parent:
+            continue
+        target = _unique_merge_target(
+            repo, branch_heads, target_parent, commit_hash, occurred_at, evidence_cache
+        )
+        target_branch = target[0] if target else None
+        target_observed_at = target[1] if target else None
+        for source_parent in parents[1:]:
+            if not isinstance(source_parent, str) or not source_parent:
+                continue
+            source_branch = _unique_source_branch(
+                repo, branch_heads, source_parent, target_observed_at, evidence_cache
+            )
+            relations.append(
+                {
+                    "commit_hash": commit_hash,
+                    "occurred_at": occurred_at,
+                    "target_parent": target_parent,
+                    "source_parent": source_parent,
+                    "source_branch": source_branch,
+                    "source_lane_id": lane_ids.get(source_branch) if source_branch else None,
+                    "target_branch": target_branch,
+                    "target_lane_id": lane_ids.get(target_branch) if target_branch else None,
+                }
+            )
+    return relations
+
+
+def _latest_unique_merge_target(relations: list[Mapping[str, Any]]) -> str | None:
+    """Return a source lane's legacy target only when the latest fact is unique."""
+    if not relations:
+        return None
+    dated: list[tuple[float, Mapping[str, Any]]] = []
+    for relation in relations:
+        occurred_at = _iso_epoch(relation.get("occurred_at"))
+        if occurred_at is None:
+            # Without a comparable date, selecting a latest relation would be
+            # an unsupported fallback.
+            return None
+        dated.append((occurred_at, relation))
+    latest_time = max(occurred_at for occurred_at, _relation in dated)
+    latest = [relation for occurred_at, relation in dated if occurred_at == latest_time]
+    if len(latest) != 1:
+        return None
+    target_branch = latest[0].get("target_branch")
+    return target_branch if isinstance(target_branch, str) and target_branch else None
+
+
+def _attach_merge_relations(
+    lanes: list[dict[str, Any]],
+    relations: list[dict[str, Any]],
+) -> None:
+    """Attach full relation facts to their resolved source/target lanes."""
+    lanes_by_id = {
+        lane["id"]: lane
+        for lane in lanes
+        if isinstance(lane.get("id"), str)
+    }
+    for relation in relations:
+        source_lane_id = relation.get("source_lane_id")
+        if isinstance(source_lane_id, str) and source_lane_id in lanes_by_id:
+            lanes_by_id[source_lane_id]["merge_sources"].append(dict(relation))
+        target_lane_id = relation.get("target_lane_id")
+        if isinstance(target_lane_id, str) and target_lane_id in lanes_by_id:
+            lanes_by_id[target_lane_id]["merge_targets"].append(dict(relation))
+    for lane in lanes:
+        lane["merge_target"] = _latest_unique_merge_target(lane["merge_sources"])
 
 
 def _event_from_row(
@@ -485,6 +755,7 @@ def build(
         commit = _commit_metadata(repo, head if isinstance(head, str) else None)
         status = _lane_status(branch, worktree, exact_rows)
         lane_id = f"branch:{name}"
+        lane_agents = _agents_for_worktree(agent_snapshots, status.get("path"))
         lanes.append(
             {
                 "id": lane_id,
@@ -508,8 +779,11 @@ def build(
                 "last_commit": commit,
                 "next_command": status["next_command"],
                 "error": status["error"],
-                "agent": agent_snapshots.get(status["path"]) if isinstance(status.get("path"), str) else None,
+                "agent": lane_agents[-1] if lane_agents else None,
+                "agents": lane_agents or None,
                 "merge_target": None,
+                "merge_sources": [],
+                "merge_targets": [],
                 "next_phase": None,
             }
         )
@@ -533,6 +807,7 @@ def build(
         ahead, behind = _count_against_default(repo, default_ref, head) if head else (None, None)
         base = _merge_base(repo, default_ref, head) if head else None
         commit = _commit_metadata(repo, head)
+        lane_agents = _agents_for_worktree(agent_snapshots, path)
         lanes.append(
             {
                 "id": f"worktree:{path}",
@@ -556,23 +831,37 @@ def build(
                 "last_commit": commit,
                 "next_command": status["next_command"],
                 "error": status["error"],
-                "agent": agent_snapshots.get(path),
+                "agent": lane_agents[-1] if lane_agents else None,
+                "agents": lane_agents or None,
                 "merge_target": None,
+                "merge_sources": [],
+                "merge_targets": [],
                 "next_phase": None,
             }
         )
         known_worktree_paths.add(_key(path))
 
     # A project can have no local branch refs but still expose an empty graph.
-    graph_data = graph.build(repo, all_refs=True, limit=limit)
+    graph_data = graph.build(repo, all_refs=True, limit=None if range_name == "all" else limit)
     observed_at = time.time()
+    merge_relations: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     known_events: list[dict[str, Any]] = []
     latest_event: dict[str, Any] | None = None
     if graph_data is not None:
+        graph_rows = graph_data.get("rows", [])
+        if isinstance(graph_rows, list):
+            lane_ids = {
+                lane["branch"]: lane["id"]
+                for lane in lanes
+                if isinstance(lane.get("branch"), str)
+                and isinstance(lane.get("id"), str)
+            }
+            merge_relations = _merge_relations(repo, graph_rows, branch_heads, lane_ids)
+            _attach_merge_relations(lanes, merge_relations)
         parents_by_hash = {
             row.get("hash"): row.get("parents") or []
-            for row in graph_data.get("rows", [])
+            for row in graph_rows
             if isinstance(row.get("hash"), str)
         }
         lane_hashes: dict[str, set[str]] = {}
@@ -593,7 +882,6 @@ def build(
                     if isinstance(parent, str)
                 )
             lane_hashes[lane["id"]] = seen
-        graph_rows = graph_data.get("rows", [])
         head_hashes = {
             lane.get("head")
             for lane in lanes
@@ -688,6 +976,7 @@ def build(
         "range": range_name,
         "graph": graph_data,
         "lanes": lanes,
+        "merge_relations": merge_relations,
         "events": events,
         "latest_event": latest_event,
         "agent_events": agent_history,
@@ -714,7 +1003,7 @@ def build(
 
 
 def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Build fast home cards from the existing Git snapshot only."""
+    """Build home cards from one observation snapshot and bounded Git reads."""
     groups: dict[str, list[Mapping[str, Any]]] = {}
     for row in state.values():
         common = row.get("common_dir")
@@ -722,168 +1011,10 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
             continue
         groups.setdefault(common, []).append(row)
 
-    summaries: list[dict[str, Any]] = []
-    for project_id, rows in groups.items():
-        agent_snapshots = agent_events.snapshots(project_id=project_id, state=state)
-        snapshot_values = list(agent_snapshots.values())
-        agent_counts = _agent_counts(snapshot_values)
-        agent_priority_counts = _agent_priority_categories(snapshot_values)
-        agent_history = agent_events.project_events(project_id, state=state)
-        agent_history.sort(key=lambda event: (_iso_epoch(event.get("occurred_at")) or 0, event.get("sequence", 0)))
-        latest_agent = agent_history[-1] if agent_history else None
-        main = next((row for row in rows if row.get("is_worktree") is False), rows[0])
-        commits = [
-            row.get("last_commit")
-            for row in rows
-            if isinstance(row.get("last_commit"), dict)
-            and isinstance(row.get("last_commit", {}).get("date"), str)
-        ]
-        latest = max(
-            (commit for commit in commits if _iso_epoch(commit.get("date")) is not None),
-            key=lambda commit: _iso_epoch(commit.get("date")),
-            default=None,
-        )
-        conflicts = sum(
-            1
-            for row in rows
-            if any(
-                isinstance(entry, dict)
-                and entry.get("xy") in {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
-                for entry in (row.get("entries") or [])
-            )
-        )
-        dirty = sum(1 for row in rows if isinstance(row.get("entries"), list) and row["entries"])
-        ahead = sum(1 for row in rows if isinstance(row.get("ahead"), int) and row["ahead"] > 0)
-        behind = sum(1 for row in rows if isinstance(row.get("behind"), int) and row["behind"] > 0)
-        attention_row = next(
-            (
-                row
-                for row in rows
-                if any(
-                    isinstance(entry, dict)
-                    and entry.get("xy") in {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
-                    for entry in (row.get("entries") or [])
-                )
-                or (isinstance(row.get("entries"), list) and bool(row["entries"]))
-                or (isinstance(row.get("behind"), int) and row["behind"] > 0)
-                or (isinstance(row.get("ahead"), int) and row["ahead"] > 0)
-            ),
-            None,
-        )
-        next_lane = (
-            attention_row.get("branch")
-            or attention_row.get("path")
-            if attention_row
-            else None
-        )
-        merged = len(main.get("merged_branches") or []) + sum(
-            1 for row in rows if row.get("is_worktree") and row.get("merged")
-        )
-        prunable = sum(1 for row in rows if row.get("worktree_state") == "prunable")
-        locked = sum(1 for row in rows if row.get("worktree_state") == "locked")
-        lane_count: int | None = None
-        checkout = main.get("path") if isinstance(main.get("path"), str) else None
-        if checkout:
-            branch_data = detail.get_branches(paths.to_container(checkout))
-            if branch_data is not None:
-                local_branches = branch_data.get("local")
-                if isinstance(local_branches, list):
-                    lane_count = len(local_branches)
-        largest_difference_lane: str | None = None
-        largest_difference = -1
-        if checkout:
-            repo = paths.to_container(checkout)
-            default_branch = gitinfo.default_branch(repo)
-            default_ref = f"refs/remotes/origin/{default_branch}" if default_branch else None
-            if default_ref:
-                for row in rows:
-                    branch = row.get("branch")
-                    if not isinstance(branch, str) or not branch or branch == default_branch:
-                        continue
-                    ahead_count, behind_count = _count_against_default(
-                        repo,
-                        default_ref,
-                        f"refs/heads/{branch}",
-                    )
-                    if ahead_count is None or behind_count is None:
-                        continue
-                    difference = ahead_count + behind_count
-                    if difference > largest_difference:
-                        largest_difference = difference
-                        largest_difference_lane = branch
-        # Explicit agent attention has priority over Git maintenance facts.
-        attention_priority = {
-            "waiting_for_user": 0,
-            "blocked": 1,
-            "review_required": 2,
-            "merge_ready": 3,
-        }
-        explicit_priorities = [
-            attention_priority[item.get("attention")]
-            for item in snapshot_values
-            if item.get("attention") in attention_priority
-        ]
-        active_agents = any(item.get("run_state") == "active" for item in snapshot_values)
-        completed_agents = bool(snapshot_values) and all(item.get("outcome") == "completed" for item in snapshot_values)
-        issue_rank = (
-            min(explicit_priorities)
-            if explicit_priorities
-            else 4
-            if active_agents
-            else 5
-            if completed_agents
-            else 6
-            if snapshot_values
-            else 0 if conflicts else 1 if dirty else 2 if behind else 3
-        )
-        latest_summary = latest_agent.get("summary") if latest_agent else None
-        agent_state = None
-        if snapshot_values:
-            state_order = ("waiting_for_user", "blocked", "review_required", "merge_ready")
-            agent_state = next((value for value in state_order if any(item.get("attention") == value for item in snapshot_values)), None)
-            if agent_state is None and active_agents:
-                agent_state = "active"
-            elif agent_state is None and completed_agents:
-                agent_state = "completed"
-            elif agent_state is None:
-                agent_state = next((item.get("phase") for item in snapshot_values if item.get("phase")), None)
-        summaries.append(
-            {
-                "id": project_id,
-                "name": os.path.basename(project_id.rstrip("/")) or project_id,
-                "remote": main.get("remote"),
-                "main_path": main.get("path"),
-                # A worktree is a checkout, not a branch lane. Match the
-                # project endpoint's local-branch lane count instead of
-                # counting snapshot rows.
-                "lane_count": lane_count,
-                "worktree_count": sum(1 for row in rows if row.get("is_worktree")),
-                "git": {
-                    "dirty": dirty,
-                    "conflict": conflicts,
-                    "ahead": ahead,
-                    "behind": behind,
-                    "merged": merged,
-                    "prunable": prunable,
-                    "locked": locked,
-                },
-                "latest_event": latest,
-                "latest_agent_event": latest_agent,
-                "latest_summary": latest_summary,
-                "agent_tasks": sorted(snapshot_values, key=lambda item: (item.get("worktree") or "", item.get("task_id") or "")) or None,
-                "latest_observed_at": max(
-                    (row.get("activity", 0) for row in rows if isinstance(row.get("activity", 0), (int, float))),
-                    default=0,
-                ),
-                "priority": issue_rank,
-                "next_lane": next_lane,
-                "largest_difference_lane": largest_difference_lane,
-                # Never interpret a worktree as an agent being active.
-                "agent_counts": agent_counts,
-                "agent_priority_counts": agent_priority_counts,
-                "agent_state": agent_state,
-            }
-        )
+    # Bound parallel Git reads per request. Each result still uses the same
+    # copied observation snapshot and retains the previous deterministic order.
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="project-summary") as executor:
+        summaries = list(executor.map(lambda item: _summary_row(item[0], item[1], state), groups.items()))
     summaries.sort(
         key=lambda item: (
             item.get("priority", 99),
@@ -892,3 +1023,164 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
         )
     )
     return summaries
+
+
+def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    agent_snapshots = agent_events.snapshots(project_id=project_id, state=state)
+    snapshot_values = list(agent_snapshots.values())
+    agent_counts = _agent_counts(snapshot_values)
+    agent_priority_counts = _agent_priority_categories(snapshot_values)
+    agent_history = agent_events.project_events(project_id, state=state)
+    agent_history.sort(key=lambda event: (_iso_epoch(event.get("occurred_at")) or 0, event.get("sequence", 0)))
+    latest_agent = agent_history[-1] if agent_history else None
+    main = next((row for row in rows if row.get("is_worktree") is False), rows[0])
+    commits = [
+        row.get("last_commit")
+        for row in rows
+        if isinstance(row.get("last_commit"), dict)
+        and isinstance(row.get("last_commit", {}).get("date"), str)
+    ]
+    latest = max(
+        (commit for commit in commits if _iso_epoch(commit.get("date")) is not None),
+        key=lambda commit: _iso_epoch(commit.get("date")),
+        default=None,
+    )
+    conflicts = sum(
+        1
+        for row in rows
+        if any(
+            isinstance(entry, dict)
+            and entry.get("xy") in {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
+            for entry in (row.get("entries") or [])
+        )
+    )
+    dirty = sum(1 for row in rows if isinstance(row.get("entries"), list) and row["entries"])
+    ahead = sum(1 for row in rows if isinstance(row.get("ahead"), int) and row["ahead"] > 0)
+    behind = sum(1 for row in rows if isinstance(row.get("behind"), int) and row["behind"] > 0)
+    attention_row = next(
+        (
+            row
+            for row in rows
+            if any(
+                isinstance(entry, dict)
+                and entry.get("xy") in {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
+                for entry in (row.get("entries") or [])
+            )
+            or (isinstance(row.get("entries"), list) and bool(row["entries"]))
+            or (isinstance(row.get("behind"), int) and row["behind"] > 0)
+            or (isinstance(row.get("ahead"), int) and row["ahead"] > 0)
+        ),
+        None,
+    )
+    next_lane = (
+        attention_row.get("branch")
+        or attention_row.get("path")
+        if attention_row
+        else None
+    )
+    merged = len(main.get("merged_branches") or []) + sum(
+        1 for row in rows if row.get("is_worktree") and row.get("merged")
+    )
+    prunable = sum(1 for row in rows if row.get("worktree_state") == "prunable")
+    locked = sum(1 for row in rows if row.get("worktree_state") == "locked")
+    lane_count: int | None = None
+    checkout = main.get("path") if isinstance(main.get("path"), str) else None
+    if checkout:
+        branch_data = detail.get_branches(paths.to_container(checkout))
+        if branch_data is not None:
+            local_branches = branch_data.get("local")
+            if isinstance(local_branches, list):
+                lane_count = len(local_branches)
+    largest_difference_lane: str | None = None
+    largest_difference = -1
+    if checkout:
+        repo = paths.to_container(checkout)
+        default_branch = gitinfo.default_branch(repo)
+        default_ref = f"refs/remotes/origin/{default_branch}" if default_branch else None
+        if default_ref:
+            for row in rows:
+                branch = row.get("branch")
+                if not isinstance(branch, str) or not branch or branch == default_branch:
+                    continue
+                ahead_count, behind_count = _count_against_default(
+                    repo,
+                    default_ref,
+                    f"refs/heads/{branch}",
+                )
+                if ahead_count is None or behind_count is None:
+                    continue
+                difference = ahead_count + behind_count
+                if difference > largest_difference:
+                    largest_difference = difference
+                    largest_difference_lane = branch
+    # Explicit agent attention has priority over Git maintenance facts.
+    attention_priority = {
+        "waiting_for_user": 0,
+        "blocked": 1,
+        "review_required": 2,
+        "merge_ready": 3,
+    }
+    explicit_priorities = [
+        attention_priority[item.get("attention")]
+        for item in snapshot_values
+        if item.get("attention") in attention_priority
+    ]
+    active_agents = any(item.get("run_state") == "active" for item in snapshot_values)
+    completed_agents = bool(snapshot_values) and all(item.get("outcome") == "completed" for item in snapshot_values)
+    issue_rank = (
+        min(explicit_priorities)
+        if explicit_priorities
+        else 4
+        if active_agents
+        else 5
+        if completed_agents
+        else 6
+        if snapshot_values
+        else 0 if conflicts else 1 if dirty else 2 if behind else 3
+    )
+    latest_summary = latest_agent.get("summary") if latest_agent else None
+    agent_state = None
+    if snapshot_values:
+        state_order = ("waiting_for_user", "blocked", "review_required", "merge_ready")
+        agent_state = next((value for value in state_order if any(item.get("attention") == value for item in snapshot_values)), None)
+        if agent_state is None and active_agents:
+            agent_state = "active"
+        elif agent_state is None and completed_agents:
+            agent_state = "completed"
+        elif agent_state is None:
+            agent_state = next((item.get("phase") for item in snapshot_values if item.get("phase")), None)
+    return {
+            "id": project_id,
+            "name": os.path.basename(project_id.rstrip("/")) or project_id,
+            "remote": main.get("remote"),
+            "main_path": main.get("path"),
+            # A worktree is a checkout, not a branch lane. Match the
+            # project endpoint's local-branch lane count instead of
+            # counting snapshot rows.
+            "lane_count": lane_count,
+            "worktree_count": sum(1 for row in rows if row.get("is_worktree")),
+            "git": {
+                "dirty": dirty,
+                "conflict": conflicts,
+                "ahead": ahead,
+                "behind": behind,
+                "merged": merged,
+                "prunable": prunable,
+                "locked": locked,
+            },
+            "latest_event": latest,
+            "latest_agent_event": latest_agent,
+            "latest_summary": latest_summary,
+            "agent_tasks": sorted(snapshot_values, key=lambda item: (item.get("worktree") or "", item.get("task_id") or "")) or None,
+            "latest_observed_at": max(
+                (row.get("activity", 0) for row in rows if isinstance(row.get("activity", 0), (int, float))),
+                default=0,
+            ),
+            "priority": issue_rank,
+            "next_lane": next_lane,
+            "largest_difference_lane": largest_difference_lane,
+            # Never interpret a worktree as an agent being active.
+            "agent_counts": agent_counts,
+            "agent_priority_counts": agent_priority_counts,
+            "agent_state": agent_state,
+    }
