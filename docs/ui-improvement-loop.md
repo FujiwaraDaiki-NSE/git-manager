@@ -66,3 +66,11 @@
 - Blocked only project refresh during real rescan: prior table and query remain visible, with an explicit stale-data error. Unblocked retry recovers and preserves query.
 - Project tabs respond to ArrowRight, moving both selected tab and focus.
 - Latest frontend 52 tests and production Docker build passed; backend 69 tests. Runtime logs contained no exceptions in the checked interval.
+
+## Final status observation
+
+- Fresh unmodified browser session: no console warnings/errors; 94-project home rendered with system theme.
+- Actual push yielded local ahead=0 while the stored lane still showed ahead=1. Existing watcher subscribes to Git directories non-recursively, so nested remote-ref writes are not guaranteed to refresh immediately. This watcher scope is not changed by this PR.
+- Added the shared RescanControl to home as well as detail, and clarified snapshot timing in Git guidance/work list. Re-scan is the explicit refresh path after terminal operations.
+- Restored system theme, original empty clipboard, viewport overrides and network blocking. Original main checkout remains clean.
+- GUI verified home rescan: button disables while scanning, query stays `git-manager`, and the card updates from unpushed=1 to unpushed=0. The new action and feedback fit 320px without horizontal overflow.

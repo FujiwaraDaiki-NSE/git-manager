@@ -3,6 +3,7 @@
 import Link from "next/link";
 import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
+import RescanControl from "./rescan-control";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AGENT_SUMMARY_LABELS,
@@ -356,7 +357,7 @@ export default function Page() {
 
   return (
     <main className="home-shell" id="main-content" tabIndex={-1}>
-      <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></div></header>
+      <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></div></header>
       <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentReportsUnavailable ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>agentタスクの状態は未取得です<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
       {invalidUrlParams.length === 0 && <section className="home-toolbar" aria-label="プロジェクト検索と絞り込み">
         <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input ref={searchRef} aria-keyshortcuts="/" value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /><kbd aria-hidden="true">/</kbd></label>
@@ -386,7 +387,7 @@ export default function Page() {
         <p><strong>競合</strong> 同じ箇所への変更が衝突しています。対象ファイルを確認し、競合を解消します。</p>
         <p><strong>↑ 未push（ahead）</strong> ローカルにだけあるコミットを持つ作業ディレクトリです。<code>git log @{'{u}'}..HEAD</code> で確認できます。</p>
         <p><strong>↓ 未pull（behind）</strong> 追跡先にだけあるコミットを持つ作業ディレクトリです。<code>git log HEAD..@{'{u}'}</code> で確認できます。</p>
-        <p>追跡先の状態は最終fetch時点です。追跡先がないブランチは未push・未pullの集計対象外です。カードの数値は、それぞれの状態に当てはまる作業ディレクトリ数です。</p>
+        <p>Git状態は最終取得時点の情報です。ターミナル操作後は「再走査」で更新できます。追跡先の状態は最終fetch時点です。追跡先がないブランチは未push・未pullの集計対象外です。カードの数値は、それぞれの状態に当てはまる作業ディレクトリ数です。</p>
       </div></details>
       <p className="home-footnote"><span className="legend-line" aria-hidden="true" /> agent の明示状態・最新報告を優先。Git の件数は補助情報です。</p>
     </main>

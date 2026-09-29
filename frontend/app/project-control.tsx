@@ -905,7 +905,7 @@ function WorkLanes({
         <div>
 
           <h3 id="lanes-title">作業一覧</h3>
-          <p className="section-copy">ブランチごとの状態と、次に確認したいことをまとめています。</p>
+          <p className="section-copy">ブランチごとの状態と、次に確認したいことをまとめています。Git状態は取得時点の情報です。ターミナル操作後は「再走査」で更新できます。</p>
         </div>
         {mergedCount > 0 && <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "統合済みを折り畳む" : `統合済み・完了を表示 (${mergedCount})`}</button>}
       </div>
