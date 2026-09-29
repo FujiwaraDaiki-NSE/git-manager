@@ -1,0 +1,8 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Git履歴とPRから再構成するフロー</title><style>body{font:16px/1.8 system-ui;max-width:960px;margin:48px auto;padding:0 24px;color:#172c41}h1{font-size:28px}h2{font-size:20px;margin-top:32px}code{background:#edf2f7;padding:2px 5px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #cdd8e3;padding:10px;text-align:left}</style>
+<h1>Git履歴とPRから分岐・合流を再構成</h1>
+<p>PRをまとめてローカルへ取り込むと合流先が不明になり、mainへの矢印が消えていた。マージ後のmerge-baseで描画区間を切り詰めるため、開発ブランチの履歴も先端だけになっていた。</p>
+<h2>変更後の動作</h2><p>取得したコミットと親の関係を全て接続し、現在のref・検証できたPR・既存のローカルマージ証拠で表示行へ配置する。行の名前が分からない経路も残す。矢印は親から子へ向け、先端を受け取る側へ置く。分岐はGit履歴上の分岐で、ブランチ作成の正確な日時ではない。</p>
+<table><tr><th>事象</th><th>表示</th></tr><tr><td>mainから開発開始</td><td>mainの親コミット → 開発経路の子コミット</td></tr><tr><td>開発ブランチへmainを取り込み</td><td>main → 開発側のマージコミット</td></tr><tr><td>開発PRをmainへマージ</td><td>開発先端 → mainのマージコミット</td></tr><tr><td>削除済みブランチ</td><td>コミット経路を維持。PRで名前が分かれば表示</td></tr><tr><td>同じ先端の複数ref</td><td>先端の共有を表示し、架空の分岐を作らない</td></tr></table>
+<h2>データと運用</h2><p>独自の開発履歴は永続保存しない。gh APIの全ページを取得してGitのSHAと照合する。PR応答は60秒だけメモリで保持する。失敗後に以前の成功を代用しない。GitHub以外のoriginは対象外。backendのghへGH_TOKENを起動時に渡す。ブラウザやログへ認証値を返さない。</p>
+<h2>確認</h2><p>再clone・reflogなしの複数PR、削除済みブランチ、mainの取り込み、積み重ねた開発ブランチ、同一先端、forkの同名ブランチ、PR SHA不一致、取得失敗、ページング、日時の逆転をテストする。2026年9月29日にbackend 114件、frontend 68件、Next.js production build、diff --checkが成功。Composeに反映し、実データのPR #31・#32がmainへ向く矢印、main→開発側の取り込み、先端表示で29本の分岐矢印、コミット詳細の開閉をブラウザで確認した。390px幅ではページ幅380pxで横はみ出しがなく、グラフ内の横スクロールと63本の矢印を確認した。レビューのP1指摘2件は修正し、再レビューで未解決P1なし。</p>
+<h2>表示の限界</h2><p>取得範囲外の親は作らない。全期間を選ぶと取得上限を外せる。行は現在取得できる情報に基づく表示上の配置で、過去のブランチ所属を断定しない。Squash・Rebaseなど通常のマージ親子関係を持たないPRは別一覧に表示する。</p></html>

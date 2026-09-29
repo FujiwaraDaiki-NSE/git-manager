@@ -2,7 +2,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # git 本体と ssh クライアント。fetch を SSH リモートに対して行うため
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
+ && apt-get install -y --no-install-recommends git gh openssh-client ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv

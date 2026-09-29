@@ -12,7 +12,7 @@ Docker / Docker Compose を使用し、リポジトリのルートで実行す�
 現在のホストではユーザー共通hooksの設定を使用するため、起動・再作成・変更反映は
 `/home/solution2024/.local/bin/gitdash-compose up -d --build` を使用する（実行ディレクトリは任意）。
 このコマンドはリポジトリの `.env` と `~/.config/gitdash/agent.env` を順に読み込む。
-現在のAPIは認証不要で、トークンをコンテナへ渡す必要はない。
+agent APIは認証不要。GitHub PR情報の取得には別途GH_TOKENを渡す（README参照）。
 稼働確認・ログ確認・停止も同じコマンドの `ps`、`logs --tail=100 backend frontend`、`down` を使用する。
 
 別のホストで初めて起動する場合:

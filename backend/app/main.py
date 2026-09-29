@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app import agent_events, config, detail, gitinfo, graph, mcp_server, paths, project, scanner, store
+from app import agent_events, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
 
@@ -139,8 +139,9 @@ def _get_project_sync(
     as_of: datetime | None = None,
 ) -> dict[str, Any] | None:
     """Build one project payload while sharing the repository Git lock."""
+    github_data = github.load(repo)
     with _repo_lock(host_path):
-        return project.build(repo, project_id, state_rows, range_name=range_name, as_of=as_of)
+        return project.build(repo, project_id, state_rows, range_name=range_name, as_of=as_of, github_data=github_data)
 
 
 def _upsert(repo: dict[str, Any]) -> None:

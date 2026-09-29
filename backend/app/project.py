@@ -1,9 +1,9 @@
 """プロジェクト管制画面向けの Git 事実集約。
 
-このモジュールは Git から観測できる値だけを返す。agent、PR、CI、次工程は
-ここで推測しない。合流関係も、現在存在するローカル branch ref が merge commit
-またはその親を直接指す場合だけ返す。コミットの patch は取得せず、
-詳細 API は従来の ``/api/repo/commit`` に任せる。
+Gitと明示されたagent情報を集約し、PRはghが取得した観測値だけを受け取る。
+従来の合流詳細はローカルref/reflogの証拠を保持し、flowはコミットの親子関係を
+全て再構成して検証済みPRで名前を補う。独自の開発履歴は保存しない。
+コミットのpatchは詳細APIに任せる。
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any, Mapping
 
-from app import agent_events, detail, gitinfo, graph, paths, scanner
+from app import agent_events, detail, flow, github, gitinfo, graph, paths, scanner
 
 MAX_PROJECT_COMMITS = 200
 README_MAX_CHARS = 280
@@ -706,10 +706,12 @@ def build(
     limit: int = MAX_PROJECT_COMMITS,
     range_name: str = "current",
     as_of: datetime | None = None,
+    github_data: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build the project control payload from one concrete Git checkout."""
     if range_name not in PROJECT_RANGES:
         raise ValueError(f"unknown project range: {range_name}")
+    github_data = github.unavailable("PR情報は未取得です") if github_data is None else github_data
     state_rows = state_rows or {}
     # State keys are host paths. Keep a normalized lookup for callers that
     # supplied equivalent path spellings.
@@ -999,6 +1001,8 @@ def build(
         "graph": graph_data,
         "lanes": lanes,
         "merge_relations": merge_relations,
+        "github": {key: value for key, value in github_data.items() if key != "pulls"},
+        "flow": flow.build(graph_data["rows"] if graph_data else [], lanes, default_branch, default_hash, github_data, merge_relations),
         "events": events,
         "latest_event": latest_event,
         "agent_events": agent_history,
