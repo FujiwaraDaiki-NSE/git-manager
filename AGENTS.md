@@ -9,6 +9,14 @@
 
 Docker / Docker Compose を使用し、リポジトリのルートで実行する。
 
+現在のホストではユーザー共通hooksの設定を使用するため、起動・再作成・変更反映は
+`/home/solution2024/.local/bin/gitdash-compose up -d --build` を使用する（実行ディレクトリは任意）。
+このコマンドはリポジトリの `.env` と `~/.config/gitdash/agent.env` を順に読み込む。
+現在のAPIは認証不要で、トークンをコンテナへ渡す必要はない。
+稼働確認・ログ確認・停止も同じコマンドの `ps`、`logs --tail=100 backend frontend`、`down` を使用する。
+
+別のホストで初めて起動する場合:
+
 1. 初回のみ `.env.example` を `.env` にコピーする。既存の `.env` は上書きしない。
 2. `.env` に以下を設定する。
    - `GITDASH_SCAN_ROOT`: 探索するホスト側ディレクトリの絶対パス。
@@ -39,3 +47,6 @@ Docker / Docker Compose を使用し、リポジトリのルートで実行す�
 - 原因不明の問題は、再現・ログ・API・保存状態・実効設定・稼働環境から調べる。
 - 変更時はソース・テスト・Compose・コンテナへの反映を一つの作業として扱う。
 - 詳細な仕様・設定・コンテナを使わない開発起動は `README.md` を参照する。
+- 現在のホストのagent連携は `~/.codex/hooks.json` のユーザー共通command hooksで行う。MCPの追加・有効化は不要。
+- 共通送信スクリプトは `~/.codex/hooks/git_manager_agent_event.py`、共通設定は `~/.config/gitdash/agent.env`（権限 `600`）。全プロジェクトに適用し、gitdashが認識するGitリポジトリ／worktreeのイベントを保存する。
+- 共通hooksとリポジトリ内hooksの同じ送信処理を重複して有効化しない。認証情報はコミットしない。
