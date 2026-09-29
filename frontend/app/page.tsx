@@ -19,7 +19,7 @@ import {
   sortHomeProjects,
   unknownAgentSummaryKeys,
 } from "./home-overview.mjs";
-import { agentStateLabel, agentTaskState, deferProjectOrder, mergeAgentSnapshot, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
+import { agentReportKey, agentStateLabel, agentTaskState, deferProjectOrder, mergeAgentSnapshot, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
 import { useRepoStream } from "./repo-stream";
 import type { AgentRunState, ProjectSummary } from "./types";
 
@@ -29,7 +29,7 @@ const summaryCards: Array<{ key: AgentSummaryKey; label: string }> = [
   { key: "blocked", label: "問題あり" },
   { key: "active", label: "実行中" },
   { key: "review_required", label: "レビュー待ち" },
-  { key: "merge_ready", label: "統合可能" },
+  { key: "merge_ready", label: "マージ可能" },
 ];
 
 type AgentFilter = "all" | "unknown" | AgentSummaryKey;
@@ -169,18 +169,18 @@ function ProjectCard({
           {href ? <Link className="open-project" href={href} prefetch={false} aria-label={`${project.name} の詳細を開く`}>開く <span aria-hidden="true">↗</span></Link> : <span className="no-checkout">作業パス未取得</span>}
         </div>
       </div>
-      {hasAgentCounts && <div className="project-card-agent-counts" aria-label="agentタスク件数">
+      {hasAgentCounts && <div className="project-card-agent-counts" aria-label="ブランチの作業状況件数">
         {summaryCards.map(({ key, label }) => {
           const count = agentCount(project, key);
           return count === null ? null : <span key={key}><strong>{formatAgentCount(count)}</strong> {label}</span>;
         })}
         {completedCount !== null && <span><strong>{formatAgentCount(completedCount)}</strong> 完了</span>}
       </div>}
-      {tasks.length > 0 && <div className="project-card-agent-list" aria-label="上位 agent タスク">
-        {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); return <div className="agent-task-row" key={task.task_id}><span className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{task.agent_id || task.task_id}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent 状態不明</strong><span>タスク未取得</span></div>}
+      {tasks.length > 0 && <div className="project-card-agent-list" aria-label="上位ブランチの作業状況">
+        {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); return <div className="agent-task-row" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><span className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{task.branch || "ブランチ未取得"}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>ブランチ状態不明</strong><span>報告未取得</span></div>}
         {maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
       </div>}
-      <div className="project-card-event"><span className="eyebrow">{latestAgent ? "最新のagent報告" : "最新コミット"}</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>{relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>
+      <div className="project-card-event"><span className="eyebrow">{latestAgent ? "最新のブランチ報告" : "最新コミット"}</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><span>{latestAgent.branch || "ブランチ未取得"} · {agentStateLabel(agentTaskState(latestAgent))}</span><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>{relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>
       <div className="project-card-facts" aria-label="Git状態">
         {([
           { key: "dirty", label: "変更あり", color: "warn", title: "未コミットの変更がある作業ディレクトリ数" },
@@ -374,17 +374,17 @@ export default function Page() {
   const retry = () => { setError(null); setLoading(true); setReloadToken((value) => value + 1); };
 
   const agentSummaryQuiet = projects.length > 0 && !projects.some((project) => summaryCards.some(({ key }) => { const count = agentCount(project, key); return count !== null && count > 0; }));
-  const agentSummary = (<div className="home-summary" aria-label="agentタスクサマリー">
+  const agentSummary = (<div className="home-summary" aria-label="ブランチの作業状況サマリー">
         {invalidUrlParams.length > 0 ? <span className="filter-unavailable">URL条件を確認してから一覧を表示します。</span> : <>
           {summaryCards.map(({ key, label }) => <button type="button" className="home-summary-card" key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "…" : totals[key] === null ? "未取得" : formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
-          <button type="button" className="home-summary-card" aria-label="agent件数不明のプロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{loading && !projects.length ? "…" : unknownProjectTotal}</strong><span>agent件数未取得</span></button>
+          <button type="button" className="home-summary-card" aria-label="ブランチ作業状況の件数不明プロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{loading && !projects.length ? "…" : unknownProjectTotal}</strong><span>件数未取得</span></button>
         </>}
       </div>);
 
   return (
     <main className="home-shell" id="main-content" tabIndex={-1}>
       <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></div></header>
-      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>agentタスクの概要{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトで件数未取得`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
+      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>ブランチの作業状況{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトで件数未取得`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
       {invalidUrlParams.length === 0 && <section className="home-toolbar" aria-label="プロジェクト検索と絞り込み">
         <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input ref={searchRef} aria-keyshortcuts="/" value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /><kbd aria-hidden="true">/</kbd></label>
         <label>並び順<select value={view.sort} onChange={(event) => applyView({ sort: event.target.value as ProjectSort })} aria-label="プロジェクトの並び順"><option value="priority">優先度</option><option value="name">名前</option><option value="latest">最新更新</option></select></label>
@@ -396,7 +396,7 @@ export default function Page() {
       {hasActiveFilters && invalidUrlParams.length === 0 && <div className="active-filters" aria-label="選択中の検索条件">
         <span>絞り込み</span>
         {view.query.trim() && <button type="button" onClick={() => applyView({ query: "" })} aria-label="検索キーワードを解除">検索: {view.query}<span aria-hidden="true">×</span></button>}
-        {view.agentFilter !== "all" && <button type="button" onClick={() => applyView({ agentFilter: "all" })} aria-label="agentの絞り込みを解除">{view.agentFilter === "unknown" ? "agent件数未取得" : AGENT_SUMMARY_LABELS[view.agentFilter]}<span aria-hidden="true">×</span></button>}
+        {view.agentFilter !== "all" && <button type="button" onClick={() => applyView({ agentFilter: "all" })} aria-label="ブランチ作業状況の絞り込みを解除">{view.agentFilter === "unknown" ? "件数未取得" : AGENT_SUMMARY_LABELS[view.agentFilter]}<span aria-hidden="true">×</span></button>}
         {view.gitFilter !== "all" && <button type="button" onClick={() => applyView({ gitFilter: "all" })} aria-label="Gitの絞り込みを解除">{gitFilters.find((item) => item.key === view.gitFilter)?.label}<span aria-hidden="true">×</span></button>}
         {view.favoritesOnly && <button type="button" onClick={() => applyView({ favoritesOnly: false })} aria-label="お気に入りの絞り込みを解除">★ お気に入り<span aria-hidden="true">×</span></button>}
       </div>}

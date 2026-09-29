@@ -96,25 +96,40 @@ export type BranchesResponse = {
   command: string;
 };
 
-export type AgentRunState =
+/** Explicit branch work status published by the agent status contract. */
+export type AgentStatus =
   | "investigating"
   | "implementing"
   | "testing"
   | "reviewing"
   | "waiting_for_user"
   | "blocked"
-  | "completed"
-  | "stopped"
-  | "active"
   | "review_required"
   | "merge_ready"
+  | "completed"
+  | "stopped"
   | string;
 
+/** Runtime state from hook/lifecycle history. It is not a branch work status. */
+export type AgentRunState =
+  | "active"
+  | "idle"
+  | "interrupted"
+  | "ended"
+  | "stopped"
+  | string;
+
+export type AgentEventKind = "lifecycle" | "status" | string;
+
 export type AgentTask = {
-  task_id: string;
-  agent_id: string | null;
+  /** Legacy history identity. Branch status reports do not require it. */
+  task_id?: string | null;
+  agent_id?: string | null;
+  project_id?: string | null;
   worktree: string | null;
   branch: string | null;
+  kind?: AgentEventKind | null;
+  status?: AgentStatus | null;
   run_state: AgentRunState | null;
   phase: string | null;
   attention: string | null;
@@ -126,8 +141,6 @@ export type AgentTask = {
 export type AgentEvent = AgentTask & {
   event_id: string;
   observed_at: number;
-  project_id?: string | null;
-  kind?: "lifecycle" | "status" | string;
   sequence?: number;
 };
 
@@ -222,6 +235,10 @@ export type ProjectEvent = {
   stats?: CommitStats | null;
   task_id?: string | null;
   agent_id?: string | null;
+  event_id?: string | null;
+  sequence?: number | null;
+  kind?: AgentEventKind | null;
+  status?: AgentStatus | null;
   run_state?: AgentRunState | null;
   phase?: string | null;
   attention?: string | null;
@@ -254,7 +271,7 @@ export type ProjectSummary = {
   largest_difference_lane: string | null;
   agent_counts: AgentCounts;
   agent_tasks: AgentTask[] | null;
-  agent_state: AgentRunState | null;
+  agent_state: AgentStatus | null;
   agent_priority_counts: AgentPriorityCounts;
   latest_agent_event: AgentEvent | null;
 };
@@ -284,7 +301,7 @@ export type ProjectResponse = {
   agent_tasks: AgentTask[] | null;
   agent_counts: AgentCounts;
   agent_priority_counts: AgentPriorityCounts;
-  agent_state: AgentRunState | null;
+  agent_state: AgentStatus | null;
   agent_latest_event: AgentEvent | null;
   agent_events: AgentEvent[];
   ci: unknown | null;

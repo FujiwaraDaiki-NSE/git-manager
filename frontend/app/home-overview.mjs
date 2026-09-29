@@ -13,7 +13,7 @@ export const AGENT_SUMMARY_LABELS = {
   blocked: "問題あり",
   active: "実行中",
   review_required: "レビュー待ち",
-  merge_ready: "統合可能",
+  merge_ready: "マージ可能",
   completed: "完了",
 };
 

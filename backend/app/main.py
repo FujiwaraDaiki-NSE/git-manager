@@ -995,7 +995,20 @@ async def report_agent_status(
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail="agent event persistence unavailable") from exc
     # append() commits before returning. Never notify subscribers before that.
-    bus.publish("agent_event", {"event_id": request.event_id, "worktree": request.worktree, "snapshot": response.snapshot})
+    snapshot = response.snapshot
+    if snapshot is None:
+        raise HTTPException(status_code=503, detail="agent event snapshot unavailable")
+    bus.publish(
+        "agent_event",
+        {
+            "event_id": request.event_id,
+            "worktree": request.worktree,
+            "kind": snapshot.get("kind"),
+            "branch": snapshot.get("branch"),
+            "status": snapshot.get("status"),
+            "snapshot": snapshot,
+        },
+    )
     return response
 
 

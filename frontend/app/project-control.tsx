@@ -12,7 +12,7 @@ import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
+import { agentReportKey, agentSnapshotAt, agentStateLabel, agentTaskState, isExplicitAgentStatus, laneAgentSnapshotAt, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
 import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, recentTimePosition, recentTimeAt, graphTimeTicks, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import { useRepoStream } from "./repo-stream";
@@ -158,16 +158,16 @@ function agentElapsed(occurredAt: string | null | undefined) {
   return `経過 ${Math.floor(seconds / 86400)}日`;
 }
 
-function AgentFact({ task }: { task: AgentTask | null | undefined }) {
-  if (!task) return <span className="agent-unknown">agent 状態不明</span>;
+function AgentFact({ task, branch }: { task: AgentTask | null | undefined; branch?: string | null }) {
+  if (!task) return <span className="agent-unknown">ブランチ状態不明</span>;
   return (
     <span className="agent-fact">
       <strong>{agentStateLabel(agentTaskState(task))}</strong>
-      <span>{task.agent_id || task.task_id || "担当未取得"}</span>
-      <span>{task.phase || "工程未取得"}</span>
+      <span>{branch || task.branch || "ブランチ未取得"}</span>
+      <span>{task.phase ? agentStateLabel(task.phase) : "工程未取得"}</span>
       <span>{task.summary || "報告内容なし"}</span>
       <time dateTime={task.occurred_at ?? undefined}>{agentElapsed(task.occurred_at)}</time>
-      {task.attention && <em>{task.attention}</em>}
+      {task.attention && task.attention !== task.status && <em>{agentStateLabel(task.attention)}</em>}
     </span>
   );
 }
@@ -726,7 +726,7 @@ function FlowMap({
           <button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button>
         </div>
       </details>
-      {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・agent履歴を表示中。ブランチ名とGit作業状態、作業詳細は現在の情報です。</p>}
+      {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・ブランチ作業履歴を表示中。ブランチ名とGit作業状態、作業詳細は現在の情報です。</p>}
       {lanes.length === 0 ? (
         <div className="empty-flow">表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。</div>
       ) : (
@@ -801,7 +801,7 @@ function FlowMap({
                   </div>
                   <div className="flow-lane-meta">
                     <span className={`lane-state ${laneStateClass(lane, project.default_branch)}`}>{laneState(lane, project.default_branch)}</span>
-                    <span title={snapshot?.summary ?? undefined}>{snapshot ? agentStateLabel(agentTaskState(snapshot)) : "agent 状態不明"}</span>
+                    <span title={snapshot?.summary ?? undefined}>{snapshot ? agentStateLabel(agentTaskState(snapshot)) : "ブランチ状態不明"}</span>
                   </div>
                   <div className="flow-lane-relation" title={visibleRelations}>
                     {lane.unborn ? "コミットを作成すると履歴が表示されます" : visibleRelations ? visibleRelations : mergeBase?.afterObservation ? "分岐点は選択日時より後" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点は表示範囲外" : "分岐点を表示中"}
@@ -859,7 +859,7 @@ function FlowMap({
         <summary>グラフの見方・キーボード操作</summary>
         <p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進みます。直近を広く、過去を圧縮した時間軸です。同じ横幅が同じ時間間隔を表すとは限りません。</p>
         <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
-        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は合流元コミットの日時から合流コミットの日時へ進み、途中の矢印で合流方向を示します。その日時の間で線を分け、同時刻の場合は垂直に接続します。破線は合流元が表示範囲外です。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
+        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は合流元コミットの日時から合流コミットの日時へ進み、途中の矢印で合流方向を示します。その日時の間で線を分け、同時刻の場合は垂直に接続します。破線は合流元が表示範囲外です。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。ブランチ作業状況は明示された報告を表示します。</p>
       </details>
       {project.graph?.truncated && <div className="inline-note">直近 200 件から表示しています。それ以前の履歴は「全期間」で確認できます。</div>}
     </section>
@@ -867,7 +867,7 @@ function FlowMap({
 }
 
 function LaneSummary({ lane, defaultBranch }: { lane: ProjectLane; defaultBranch: string | null }) {
-  return <><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={currentLaneAgent(lane)} /></>;
+  return <><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact branch={lane.branch} task={currentLaneAgent(lane)} /></>;
 }
 
 const laneFilters: { id: LaneFilter; label: string }[] = [
@@ -932,7 +932,7 @@ function WorkLanes({
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
-            <tr><th scope="col">作業</th><th scope="col">状態 / agent</th><th scope="col">最終活動</th><th scope="col">既定ブランチとの差</th><th scope="col">最新メッセージ</th><th scope="col">合流関係</th><th scope="col">次の工程 / 注意</th><th scope="col" aria-label="操作" /></tr>
+            <tr><th scope="col">作業</th><th scope="col">Git状態 / ブランチ作業</th><th scope="col">最終活動</th><th scope="col">既定ブランチとの差</th><th scope="col">最新メッセージ</th><th scope="col">合流関係</th><th scope="col">次の工程 / 注意</th><th scope="col" aria-label="操作" /></tr>
           </thead>
           <tbody id="project-lane-results">
             {lanes.map((lane) => (
@@ -944,13 +944,13 @@ function WorkLanes({
                     <span title={lane.path ?? undefined}>{lane.path ?? "作業ディレクトリなし"}</span>
                   </button>
                 </td>
-                <td data-label="状態 / agent"><LaneSummary defaultBranch={project.default_branch} lane={lane} /></td>
+                <td data-label="Git状態 / ブランチ作業"><LaneSummary defaultBranch={project.default_branch} lane={lane} /></td>
                 <td data-label="最終コミット">
                   <time dateTime={lane.last_commit?.date ?? undefined} title={exactDate(lane.last_commit?.date)}>{relativeTime(lane.last_commit?.date)}</time>
                   <span className="table-subvalue">{exactDate(lane.last_commit?.date)}</span>
                 </td>
                 <td className="mono-cell" data-label="既定ブランチとの差">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
-                <td className="lane-message" data-label="最新メッセージ"><span title={lane.last_commit?.subject}>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "コミット未取得"}</span>{currentLaneAgent(lane)?.summary && <small>agent: {currentLaneAgent(lane)?.summary}</small>}</td>
+                <td className="lane-message" data-label="最新メッセージ"><span title={lane.last_commit?.subject}>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "コミット未取得"}</span>{currentLaneAgent(lane)?.summary && <small>報告: {currentLaneAgent(lane)?.summary}</small>}</td>
                 <td className="unknown-cell" data-label="合流関係">{laneMergeSummary(lane)}</td>
                 <td className="unknown-cell" data-label="次の工程 / 注意">{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</td>
                 <td data-label="操作"><button className="table-action" type="button" disabled={!lane.path} title={!lane.path ? "このブランチには作業ディレクトリがありません" : undefined} onClick={() => onOpenGit(lane)}>Git詳細</button>{!lane.path && <small className="no-checkout">作業ディレクトリなし</small>}</td>
@@ -972,6 +972,11 @@ function ActivityBranches({ names }: { names: string[] }) {
   </details>;
 }
 
+function activityAgentLabel(event: { kind?: string | null; status?: string | null; run_state?: string | null }) {
+  if (event.kind === "lifecycle") return `ライフサイクル · ${event.run_state || "状態未取得"}`;
+  return event.status ? agentStateLabel(event.status) : "ブランチ状態不明";
+}
+
 function ActivityView({
   searchQuery, onSearch, order, onOrder,
   project,
@@ -991,18 +996,20 @@ function ActivityView({
     commit_hash: event.commit_hash ?? null,
     subject: event.source === "agent" ? event.summary ?? null : event.subject ?? null,
     author: event.source === "agent" ? event.agent_id ?? null : event.author ?? null,
-    agent_state: event.source === "agent" ? agentTaskState(event) : null,
+    agent_state: event.source === "agent" ? event.status ?? null : null,
     task_id: event.source === "agent" ? event.task_id ?? null : null,
+    status: event.source === "agent" ? event.status ?? null : null,
+    kind: event.source === "agent" ? event.kind ?? null : null,
     agent_phase: event.source === "agent" ? event.phase ?? null : null,
     attention: event.source === "agent" ? event.attention ?? null : null,
   })), [project.events]);
   const filterEvents = useMemo(() => unifiedEvents.filter((event) => {
     if (filter === "all") return true;
     if (filter === "commit") return event.type === "commit";
-    if (filter === "edit") return event.agent_phase === "implementing";
-    if (filter === "test") return event.agent_phase === "testing";
-    if (filter === "review") return event.agent_state === "review_required" || event.agent_state === "reviewing";
-    return event.agent_state === "waiting_for_user";
+    if (filter === "edit") return event.status === "implementing" || event.agent_phase === "implementing";
+    if (filter === "test") return event.status === "testing" || event.agent_phase === "testing";
+    if (filter === "review") return event.status === "review_required" || event.status === "reviewing" || event.agent_state === "review_required" || event.agent_state === "reviewing";
+    return event.status === "waiting_for_user" || event.agent_state === "waiting_for_user";
   }), [filter, unifiedEvents]);
   const events = useMemo(() => [...filterEvents]
     .filter((event) => activityMatchesSearch(event, normalizedQuery))
@@ -1059,12 +1066,12 @@ function ActivityView({
           {shown.map((event) => (
             <li key={event.id} tabIndex={-1}>
               <div className="activity-time"><time dateTime={event.occurred_at ?? undefined}>{exactDate(event.occurred_at)}</time><span>{relativeTime(event.occurred_at)}</span></div>
-              <span className="activity-source"><i aria-hidden="true" />{event.source === "agent" ? "agent" : event.source} · {event.type === "commit" ? "コミット" : event.agent_state ? agentStateLabel(event.agent_state) : event.type}</span>
+              <span className="activity-source"><i aria-hidden="true" />{event.source === "agent" ? "agent" : event.source} · {event.type === "commit" ? "コミット" : event.source === "agent" ? activityAgentLabel(event) : event.type}</span>
               <div className="activity-content">
                 <strong>{event.subject || (event.type === "agent" ? "報告内容なし" : "件名なし")}</strong>
-                <span>{event.author ?? "作成者未取得"}{event.task_id ? ` · タスク ${event.task_id}` : ""}</span>
+                <span>{event.author ?? "作成者未取得"}{event.kind === "lifecycle" && event.task_id ? ` · セッション ${event.task_id}` : ""}</span>
                 {event.lane_names && event.lane_names.length > 3 ? <ActivityBranches names={event.lane_names} /> : <span>{event.lane_names?.length ? event.lane_names.join(" / ") : event.branch ?? "対象ブランチ未取得"}</span>}
-                {event.attention && <span className="activity-attention">注意: {event.attention}</span>}
+                {event.attention && <span className="activity-attention">注意: {agentStateLabel(event.attention)}</span>}
               </div>
               {event.commit_hash && <button className="activity-commit" type="button" onClick={() => onSelect(event)}>{shortHash(event.commit_hash)} 詳細</button>}
             </li>
@@ -1094,9 +1101,9 @@ function ProjectInfo({ project }: { project: ProjectResponse }) {
         <InfoField label="使用言語" value={project.languages ? project.languages.join(", ") : null} />
         <InfoField label="主要ディレクトリ" value={project.directories ? project.directories.join(", ") : null} />
         <InfoField label="テストコマンド" value={project.test_commands ? project.test_commands.join(" / ") : null} />
-        <InfoField label="関連 agent タスク" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
+        <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
-      <div className="info-subsection"><h4>関連 Codex タスク</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent 状態不明（関連タスク未取得）</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={task.task_id}><div><strong>{task.task_id}</strong><span>{task.agent_id || "agent 未取得"} · {agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">関連するタスクはありません。</div>}</div>
+      <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">ブランチ状態不明（報告未取得）</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
       <div className="info-subsection"><h4>worktree 一覧</h4><div className="worktree-records">{project.worktrees.map((item) => <div className="worktree-record" key={item.path}><span className="worktree-shape" aria-hidden="true" /><strong>{item.branch ?? "detached HEAD"}</strong><code title={item.path}>{item.path}</code><CopyButton value={item.path} label={`${item.branch ?? "worktree"} のパスをコピー`} /><span className={`lane-state ${item.state === "prunable" || item.state === "locked" ? "lane-state-warn" : "lane-state-ok"}`}>{item.state ?? "未取得"}</span></div>)}</div></div>
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
     </section>
@@ -1112,7 +1119,7 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
     <div className="selection-content">
       <div className="selection-kicker">作業レーン</div>
       <h3>{laneLabel(lane)}</h3>
-      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={currentLaneAgent(lane)} /></div>
+      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact branch={lane.branch} task={currentLaneAgent(lane)} /></div>
       <dl className="selection-list">
         <div><dt>作業パス</dt><dd><code>{lane.path ?? "未取得"}</code>{lane.path && <CopyButton value={lane.path} label="作業パスをコピー" />}</dd></div>
         <div><dt>作業先端</dt><dd><code>{lane.unborn ? "初回コミット前" : lane.head ?? "未取得"}</code></dd></div>
@@ -1120,10 +1127,10 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
         <div><dt>最終イベント</dt><dd>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "未取得"}{!lane.unborn && <small>{exactDate(lane.last_commit?.date)}</small>}</dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
         <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}</dd></div>
-        <div><dt>担当 agent</dt><dd>{currentLaneAgent(lane)?.agent_id || "未関連付け"}</dd></div>
+        <div><dt>ブランチの作業状況</dt><dd>{agentStateLabel(agentTaskState(currentLaneAgent(lane)))}</dd></div>
         <div><dt>このブランチからの合流</dt><dd>{lane.merge_sources.length ? lane.merge_sources.map((relation) => `${relation.target_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
         <div><dt>このブランチへの合流</dt><dd>{lane.merge_targets.length ? lane.merge_targets.map((relation) => `${relation.source_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
-        <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</dd></div>
+        <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || (currentLaneAgent(lane)?.attention ? agentStateLabel(currentLaneAgent(lane)?.attention) : null) || "未取得"}</dd></div>
       </dl>
       <details className="flow-help selection-help">
         <summary>Git状態と比較先の見方</summary>
@@ -1419,10 +1426,21 @@ export default function ProjectControl() {
     if (!projectMatchesAgentEvent(project, latestAgentEvent)) return;
     setProject((current) => {
       if (!current) return current;
-      const summary = mergeAgentSnapshot(current, latestAgentEvent);
-      const lane = current.lanes.find((item) => laneMatchesAgentEvent(item, latestAgentEvent));
+      // The summary and detail endpoints use different legacy field names;
+      // normalize the already-authoritative detail field before applying one
+      // SSE report so recency comparisons do not lose another branch's newer
+      // report.
+      const normalizedCurrent = { ...current, latest_agent_event: current.agent_latest_event };
+      const summary = mergeAgentSnapshot(normalizedCurrent, latestAgentEvent);
+      // Lifecycle events are activity history only. mergeAgentSnapshot also
+      // rejects stale status snapshots, so a lane/latest report is updated
+      // only when the explicit status was accepted for this branch.
+      const statusApplied = isExplicitAgentStatus(latestAgentEvent) && summary !== normalizedCurrent;
+      const lane = statusApplied ? current.lanes.find((item) => laneMatchesAgentEvent(item, latestAgentEvent)) : null;
       const activity = {
         id: `agent:${latestAgentEvent.event_id}`,
+        event_id: latestAgentEvent.event_id,
+        sequence: latestAgentEvent.sequence ?? null,
         occurred_at: latestAgentEvent.occurred_at,
         observed_at: latestAgentEvent.observed_at,
         type: "agent",
@@ -1433,6 +1451,8 @@ export default function ProjectControl() {
         lane_id: lane?.id ?? null,
         task_id: latestAgentEvent.task_id,
         agent_id: latestAgentEvent.agent_id,
+        kind: latestAgentEvent.kind ?? null,
+        status: latestAgentEvent.status ?? null,
         run_state: latestAgentEvent.run_state,
         phase: latestAgentEvent.phase,
         attention: latestAgentEvent.attention,
@@ -1444,13 +1464,13 @@ export default function ProjectControl() {
         agent_tasks: summary.agent_tasks,
         agent_priority_counts: summary.agent_priority_counts,
         agent_state: summary.agent_state,
-        agent_latest_event: latestAgentEvent,
+        agent_latest_event: statusApplied ? summary.latest_agent_event : current.agent_latest_event,
         agent_events: current.agent_events.some((item) => item.event_id === latestAgentEvent.event_id)
           ? current.agent_events
           : [...current.agent_events, latestAgentEvent],
         events: current.events.some((item) => item.id === activity.id) ? current.events : [...current.events, activity],
         lanes: current.lanes.map((item) => (
-          laneMatchesAgentEvent(item, latestAgentEvent)
+          statusApplied && laneMatchesAgentEvent(item, latestAgentEvent)
             ? { ...item, agent: latestAgentEvent }
             : item
         )),
@@ -1556,7 +1576,7 @@ export default function ProjectControl() {
       {projectState === "error" && <div className="project-refresh-error" role="alert"><span>最新情報を取得できませんでした。前回取得した内容を表示しています。</span><button className="subtle-button" type="button" onClick={retryProject}>再試行</button></div>}
       <section className="control-hero" aria-labelledby="project-title">
         <div className="control-hero-main"><div className="project-identity"><h1 id="project-title">{project.name}</h1><span className="project-baseline">既定 <strong>{project.default_branch ?? "未取得"}</strong></span><span className="project-lane-count">{project.lanes.length} 作業レーン</span><span className="project-url-control"><button aria-describedby={projectUrlCopyState !== "idle" ? "project-url-copy-feedback" : undefined} className="subtle-button project-url-copy" type="button" onClick={copyCurrentProjectUrl}>{projectUrlCopyState === "success" ? "URLをコピーしました" : "この画面のURLをコピー"}</button><span aria-live="polite" className="project-url-feedback" id="project-url-copy-feedback" role={projectUrlCopyState === "error" ? "alert" : projectUrlCopyState === "success" ? "status" : undefined}>{projectUrlCopyState === "success" ? "現在のプロジェクト画面URLをコピーしました。" : projectUrlCopyState === "error" ? "URLをコピーできませんでした。ブラウザのクリップボード機能を利用できません。" : "\u00a0"}</span></span></div><details className="project-context"><summary>プロジェクトの概要・集計</summary><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div>
-        <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>統合可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div></details></div>
+        <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>マージ可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div></details></div>
       </section>
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">
         {tabs.map((tab) => <button aria-selected={urlState.tab === tab.id} className="control-tab" key={tab.id} role="tab" id={`project-tab-${tab.id}`} aria-controls={`project-panel-${tab.id}`} tabIndex={urlState.tab === tab.id ? 0 : -1} type="button" onKeyDown={(event) => {
