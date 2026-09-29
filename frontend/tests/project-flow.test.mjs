@@ -65,6 +65,9 @@ test("URL state is restored and updated without dropping the project path", () =
     event: "abc",
     lane: "branch:feature",
     at: 35,
+    laneQuery: "", laneFilter: "all", laneOrder: "name",
+    activityQuery: "", activityFilter: "all", activityOrder: "newest",
+    invalidParams: [],
   });
   const next = updateProjectUrl(
     "http://localhost/project?path=%2Fworkspace%2Frepo&tab=flow&range=current",
@@ -462,4 +465,22 @@ test("ancestry search handles deep histories without recursive stack overflow", 
   assert.equal(path.length, 20000);
   assert.equal(path[0].hash, "0");
   assert.equal(path.at(-1).hash, "19999");
+});
+
+test('work and activity view settings survive URL round trips', () => {
+  const changes = { laneQuery: '修正 & main', laneFilter: 'ahead', laneOrder: 'attention', activityQuery: 'commit #1', activityFilter: 'commit', activityOrder: 'oldest' };
+  const href = updateProjectUrl('http://localhost/project?path=%2Frepo&tab=lanes', changes);
+  const parsed = parseProjectUrl(new URL(href, 'http://localhost').search);
+  for (const [key,value] of Object.entries(changes)) assert.equal(parsed[key],value);
+  assert.deepEqual(parsed.invalidParams, []);
+  assert.equal(parsed.path, '/repo');
+});
+
+test('invalid project view parameters are explicit and never silently substituted', () => {
+  for (const [key,value] of [['tab','bogus'],['range',''],['at','NaN'],['at','101'],['at','-1'],['at',''],['merged','yes'],['laneFilter','oops'],['laneOrder',''],['activityFilter','x'],['activityOrder','x']]) {
+    assert.deepEqual(parseProjectUrl(`?${key}=${value}`).invalidParams, [key]);
+  }
+  assert.equal(parseProjectUrl('?tab=bogus').tab, 'bogus');
+  assert.equal(parseProjectUrl('?at=101').at, 101);
+  assert.deepEqual(parseProjectUrl('?merged=false&at=0').invalidParams, []);
 });

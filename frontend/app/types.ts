@@ -62,6 +62,7 @@ export type BranchRelationSummary = {
 };
 
 export type Numstat = {
+  old_path?: string;
   additions: number | "-";
   deletions: number | "-";
   path: string;
@@ -178,6 +179,7 @@ export type ProjectMergeRelation = {
 };
 
 export type ProjectLane = {
+  unborn?: boolean;
   id: string;
   name: string;
   branch: string | null;

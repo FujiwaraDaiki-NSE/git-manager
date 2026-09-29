@@ -637,6 +637,7 @@ def test_hook_mapping_failure_modes_and_real_git_worktree(tmp_path: Path) -> Non
         assert run_hook(script, repo, "SessionStart", GITDASH_AGENT_ENDPOINT="http://127.0.0.1:1").returncode == 0
     finally:
         server.shutdown()
+        server.server_close()
         thread.join(timeout=2)
 
 

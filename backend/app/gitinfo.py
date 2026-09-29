@@ -33,15 +33,12 @@ def _run(repo: str, args: list[str], timeout: int | None = None) -> str | None:
         proc = subprocess.run(
             [GIT, "-C", repo, *args],
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout or config.GIT_TIMEOUT_SEC,
             env={**os.environ, **NON_INTERACTIVE_ENV},
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
-    return proc.stdout if proc.returncode == 0 else None
+    return proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else None
 
 
 def _run_limited(
@@ -100,20 +97,16 @@ def _run_limited(
             proc.stdout.close()
 
 
-def _unquote(path: str) -> str:
-    """porcelain v2 の path はそのまま。念のため前後の空白だけ落とす。"""
-    return path.strip()
-
-
 def _parse_status_v2(out: str) -> dict[str, Any]:
-    """git status --porcelain=v2 --branch を、短縮形式のコードに戻して返す。"""
+    """Parse NUL-delimited porcelain v2 without quoting or trimming file paths."""
     branch: str | None = None
     upstream: str | None = None
     detached = False
     ahead = behind = 0
     entries: list[dict[str, str]] = []
 
-    for line in out.splitlines():
+    records = iter(out.split("\0"))
+    for line in records:
         if line.startswith("# branch.head "):
             branch = line[len("# branch.head "):].strip()
             detached = branch == "(detached)"
@@ -127,16 +120,17 @@ def _parse_status_v2(out: str) -> dict[str, Any]:
                     behind = int(token[1:])
         elif line.startswith("1 "):
             fields = line.split(" ", 8)
-            entries.append({"xy": fields[1], "path": _unquote(fields[8])})
+            entries.append({"xy": fields[1], "path": fields[8]})
         elif line.startswith("2 "):
             fields = line.split(" ", 9)
-            # rename は path\torigPath 形式。表示は新しい方
-            entries.append({"xy": fields[1], "path": _unquote(fields[9].split("\t")[0])})
+            # In -z mode the destination is followed by a separate source record.
+            entries.append({"xy": fields[1], "path": fields[9]})
+            next(records, None)
         elif line.startswith("u "):
             fields = line.split(" ", 10)
-            entries.append({"xy": fields[1], "path": _unquote(fields[10])})
+            entries.append({"xy": fields[1], "path": fields[10]})
         elif line.startswith("? "):
-            entries.append({"xy": "??", "path": _unquote(line[2:])})
+            entries.append({"xy": "??", "path": line[2:]})
 
     return {
         "branch": branch,
@@ -507,7 +501,7 @@ def collect(
         "checked_at": time.time(),
     }
 
-    status = _run(repo, ["status", "--porcelain=v2", "--branch"])
+    status = _run(repo, ["--no-optional-locks", "status", "--porcelain=v2", "--branch", "-z"])
     if status is None:
         result["error"] = "git status を実行できませんでした"
         status_info = {

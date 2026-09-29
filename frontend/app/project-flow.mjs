@@ -8,20 +8,43 @@ const TIME_RANGES = new Set(["current", "24h", "7d", "all"]);
  */
 export function parseProjectUrl(search) {
   const params = new URLSearchParams(search || "");
-  const tab = params.get("tab");
-  const range = params.get("range");
-  const at = Number(params.get("at") ?? "100");
+  const defaults = {
+    tab: "flow", range: "current", laneFilter: "all", laneOrder: "name",
+    activityFilter: "all", activityOrder: "newest",
+  };
+  const choices = {
+    tab: CONTROL_TABS, range: TIME_RANGES,
+    laneFilter: new Set(["all", "dirty", "conflict", "ahead", "behind", "worktree"]),
+    laneOrder: new Set(["name", "latest", "attention"]),
+    activityFilter: new Set(["all", "commit", "edit", "test", "review", "input"]),
+    activityOrder: new Set(["newest", "oldest"]),
+  };
+  const invalidParams = [];
+  const values = Object.fromEntries(Object.entries(defaults).map(([key, value]) => {
+    const provided = params.get(key);
+    if (provided !== null && !choices[key].has(provided)) invalidParams.push(key);
+    return [key, provided === null ? value : provided];
+  }));
+  const atParam = params.get("at");
+  const at = atParam === null ? 100 : Number(atParam);
+  if (atParam !== null && (atParam.trim() === "" || !Number.isFinite(at) || at < 0 || at > 100)) invalidParams.push("at");
+  const mergedParam = params.get("merged");
+  if (mergedParam !== null && mergedParam !== "true" && mergedParam !== "false") invalidParams.push("merged");
   return {
     path: params.get("path"),
-    tab: CONTROL_TABS.has(tab) ? tab : "flow",
-    range: TIME_RANGES.has(range) ? range : "current",
-    // The merged-lane filter is a project-level view preference. Keep it in
-    // the URL so switching tabs/ranges and browser history restore the same
-    // filter in both the flow and lane register views.
-    merged: params.get("merged") === "true",
+    tab: values.tab,
+    range: values.range,
+    laneFilter: values.laneFilter,
+    laneOrder: values.laneOrder,
+    activityFilter: values.activityFilter,
+    activityOrder: values.activityOrder,
+    merged: mergedParam === "true",
     event: params.get("event"),
     lane: params.get("lane"),
-    at: Number.isFinite(at) ? Math.min(100, Math.max(0, at)) : 100,
+    at,
+    laneQuery: params.get("laneQuery") ?? "",
+    activityQuery: params.get("activityQuery") ?? "",
+    invalidParams,
   };
 }
 

@@ -62,50 +62,10 @@ def _commit_metadata(repo: str, commit_hash: str | None) -> dict[str, Any] | Non
 
 
 def _commit_stats(repo: str, commit_hash: str | None) -> dict[str, Any] | None:
-    """Return lightweight numstat facts without loading a patch/diff body."""
+    """Return lightweight file counts using the same parser as batched graphs."""
     if not commit_hash:
         return None
-    raw = gitinfo._run(
-        repo,
-        [
-            "show",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--numstat",
-            "--format=",
-            commit_hash,
-        ],
-    )
-    if raw is None:
-        return None
-    files = 0
-    additions = 0
-    deletions = 0
-    paths: list[str] = []
-    unknown_additions = False
-    unknown_deletions = False
-    for line in raw.splitlines():
-        fields = line.split("\t", 2)
-        if len(fields) != 3:
-            continue
-        added, deleted, path = fields
-        files += 1
-        if len(paths) < 3:
-            paths.append(path)
-        if added.isdecimal():
-            additions += int(added)
-        else:
-            unknown_additions = True
-        if deleted.isdecimal():
-            deletions += int(deleted)
-        else:
-            unknown_deletions = True
-    return {
-        "files": files,
-        "additions": None if unknown_additions else additions,
-        "deletions": None if unknown_deletions else deletions,
-        "paths": paths,
-    }
+    return _commit_stats_many(repo, [commit_hash]).get(commit_hash)
 
 
 def _commit_stats_many(repo: str, commit_hashes: list[str]) -> dict[str, dict[str, Any] | None]:
@@ -127,6 +87,7 @@ def _commit_stats_many(repo: str, commit_hashes: list[str]) -> dict[str, dict[st
             "--no-ext-diff",
             "--no-textconv",
             "--numstat",
+            "-z",
             "--format=%H",
             *hashes,
         ],
@@ -135,7 +96,11 @@ def _commit_stats_many(repo: str, commit_hashes: list[str]) -> dict[str, dict[st
         return result
     current: str | None = None
     by_hash: dict[str, dict[str, Any]] = {}
-    for line in raw.splitlines():
+    records = iter(raw.split("\0"))
+    for record in records:
+        line = record.removeprefix("\n")
+        if not line:
+            continue
         if _COMMIT_HASH_LINE.fullmatch(line) and line in result:
             current = line
             by_hash[current] = {"files": 0, "additions": 0, "deletions": 0, "paths": []}
@@ -144,8 +109,15 @@ def _commit_stats_many(repo: str, commit_hashes: list[str]) -> dict[str, dict[st
             continue
         fields = line.split("\t", 2)
         if len(fields) != 3:
-            continue
+            return result
         added, deleted, path = fields
+        if not path:
+            old_path = next(records, None)
+            path = next(records, None)
+            if old_path is None or path is None:
+                return result
+        if (added != "-" and not added.isdecimal()) or (deleted != "-" and not deleted.isdecimal()):
+            return result
         entry = by_hash[current]
         entry["files"] += 1
         if len(entry["paths"]) < 3:
@@ -831,8 +803,8 @@ def build(
         for lane in lanes
         if isinstance(lane.get("path"), str)
     }
-    # Detached linked worktrees have no local branch row but are still Git
-    # work lanes. Include them with an explicit null branch.
+    # Detached and unborn worktrees have no local branch ref row. Preserve
+    # the branch reported by Git instead of assuming every missing ref is detached.
     for worktree in worktrees:
         if _key(worktree["path"]) in known_worktree_paths:
             continue
@@ -842,15 +814,20 @@ def build(
             state_row = normalized_state.get(_key(path))
         status = _repo_status(state_row)
         head = worktree.get("head")
+        branch_name = worktree.get("branch")
+        unborn = isinstance(branch_name, str) and isinstance(head, str) and bool(head) and set(head) == {"0"}
+        if unborn:
+            head = None
         ahead, behind = _count_against_default(repo, default_ref, head) if head else (None, None)
         base = _merge_base(repo, default_ref, head) if head else None
         commit = _commit_metadata(repo, head)
         lane_agents = _agents_for_branch(agent_snapshots, None)
         lanes.append(
             {
-                "id": f"worktree:{path}",
-                "name": "detached HEAD",
-                "branch": None,
+                "id": f"branch:{branch_name}" if branch_name is not None else f"worktree:{path}",
+                "name": branch_name if branch_name is not None else "detached HEAD",
+                "branch": branch_name,
+                "unborn": unborn,
                 "path": path,
                 "is_worktree": not worktree.get("is_main", False),
                 "worktree_state": worktree.get("state"),
@@ -861,7 +838,7 @@ def build(
                 "merged": None,
                 "dirty": status["dirty"],
                 "conflict": status["conflict"],
-                "detached": True,
+                "detached": worktree["detached"],
                 "upstream": status["upstream"],
                 "upstream_ahead": status["upstream_ahead"],
                 "upstream_behind": status["upstream_behind"],

@@ -74,6 +74,7 @@ export function stateBadges(repo: Repo): Badge[] {
   if (repo.pending) badges.push({ text: "pending", token: "pending" });
   if (
     badges.length === 0 &&
+    repo.entries !== undefined &&
     entries.length === 0 &&
     !repo.pending &&
     !repo.error &&

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gitdash UI改善・E2E記録 — 2026年9月29日</title>
+<style>
+:root{color-scheme:light;--ink:#182b42;--muted:#50647a;--line:#d9e3ed;--blue:#125baf;--soft:#edf5ff;--green:#116842}
+*{box-sizing:border-box}body{margin:0;background:#f3f6fa;color:var(--ink);font:16px/1.8 system-ui,-apple-system,"Noto Sans JP",sans-serif}main{max-width:1120px;margin:auto;padding:48px 28px 72px}header{padding:34px;border-radius:20px;background:linear-gradient(115deg,#102943,#174c7d);color:white}header p{max-width:780px;color:#d9e9f8;margin-bottom:0}.eyebrow{font-size:12px;letter-spacing:.12em;font-weight:700;color:#aed8ff}h1{font-size:clamp(26px,4vw,39px);line-height:1.4;margin:10px 0}h2{font-size:23px;margin:36px 0 14px}h3{font-size:18px;margin:0 0 8px}p{margin:8px 0 16px}section{scroll-margin-top:24px}nav{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0}a{color:var(--blue)}nav a{padding:8px 14px;border:1px solid var(--line);border-radius:30px;background:white;text-decoration:none}a:focus-visible{outline:3px solid #206bbd;outline-offset:3px}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:24px 0}.metric,.card{background:white;border:1px solid var(--line);border-radius:14px;padding:22px}.metric strong{display:block;font-size:34px;line-height:1.4;color:var(--blue)}.metric span,.muted{color:var(--muted);font-size:14px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.card ul{padding-left:22px;margin:8px 0 0}.card li+li{margin-top:7px}.callout{border-left:4px solid var(--blue);background:var(--soft);padding:18px 22px;border-radius:0 10px 10px 0}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:white}table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}th,td{padding:13px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{background:#edf2f8;font-weight:700}tr:last-child td{border-bottom:0}.pass{color:var(--green);font-weight:700;white-space:nowrap}code{font-family:ui-monospace,monospace;font-size:.9em;overflow-wrap:anywhere;background:#edf2f8;border-radius:4px;padding:2px 5px}pre{background:#102943;color:#e8f2fc;padding:20px;border-radius:12px;overflow:auto;font-size:13px;line-height:1.7}pre code{background:none;color:inherit;padding:0}.bars{display:grid;gap:12px;margin:18px 0}.bar-label{display:flex;justify-content:space-between;gap:10px;font-size:14px}.track{height:16px;background:#e2eaf3;border-radius:20px;overflow:hidden}.bar{height:100%;background:#6684a6}.bar.after{background:#208a65}.tag{display:inline-block;padding:2px 9px;border-radius:5px;background:#e6f4ec;color:var(--green);font-size:12px;font-weight:700}footer{border-top:1px solid var(--line);padding-top:22px;margin-top:36px;color:var(--muted);font-size:13px}@media(max-width:700px){main{padding:20px 16px 40px}header{padding:24px}.metrics,.grid{grid-template-columns:1fr}.metric strong{font-size:30px}h2{font-size:21px}}@media print{body{background:white;font-size:11pt}main{padding:0}nav{display:none}header{background:white;color:var(--ink);border:1px solid var(--line)}header p,.eyebrow{color:var(--muted)}.card,.metric{break-inside:avoid}.table-wrap{overflow:visible}table{min-width:0;font-size:9pt}a{color:inherit}}
+</style>
+</head>
+<body><main>
+<header><div class="eyebrow">GITDASH · UI IMPROVEMENT &amp; E2E</div><h1>操作の分かりやすさと、<br>大きな履歴の扱いやすさを改善</h1><p>2026年9月29日。mainの更新を取り込み、UI・機能・不具合・描画負荷・文言を改善。ユーザー指定によりレビューは行わず、実際のGit操作とブラウザE2Eで検証しました。</p><p id="completion-status">日本時間2026年9月29日18:00まで改善とE2Eを実施。実装・統合・検証を完了しました。</p></header>
+<nav aria-label="ページ内移動"><a href="#changes">変更内容</a><a href="#performance">描画量</a><a href="#e2e">E2E結果</a><a href="#environment">環境・再現方法</a></nav>
+<div class="metrics"><div class="metric"><strong>64件</strong><span>フロントエンドの自動テスト</span></div><div class="metric"><strong>99件</strong><span>バックエンドの自動テスト<br>警告をエラーとして実行</span></div><div class="metric"><strong>約92%削減</strong><span>4,000行差分の初期DOM要素数</span></div></div>
+<section id="changes"><h2>何が変わったか</h2><div class="grid">
+<article class="card"><h3>差分を読みやすく</h3><ul><li>追加・削除の色分けと変更前後の行番号。</li><li>ファイル単位の展開、折り返し、ファイル検索。</li><li>300行ずつ追加表示。全行表示・差分全体コピーも可能。</li><li>日本語名と名前変更前後のパスを正しく表示。</li></ul></article>
+<article class="card"><h3>探した状態を維持</h3><ul><li>作業一覧とアクティビティの検索・フィルター・並び順をURLに保存。</li><li>再読み込み、戻る・進む、URLコピーで表示条件を維持。</li><li>カードの変更あり・未pushなどから、対応する一覧へ移動。</li><li>同名プロジェクトは作業パスで見分けられるように。</li></ul></article>
+<article class="card"><h3>Git状態を正確に</h3><ul><li>変更ファイルをステージ済み・未ステージ・未追跡・競合で検索。</li><li>初回コミット前のブランチをdetached HEADと区別。</li><li>開いているGit詳細もブランチ追加に自動追従。</li><li>既定ブランチとの差と追跡先との差を別々に表示し、意味を説明。</li></ul></article>
+<article class="card"><h3>更新と復帰を安定化</h3><ul><li>深いrefsの変更と、状態取得直後のpushも取りこぼさずに更新。</li><li>更新失敗時は前回の内容であることを明示し、再取得を用意。</li><li>SSEの早期切断時に購読を解放。再接続時は走査・fetch状態も送信。</li><li>画面幅変更後や入れ子の詳細を閉じたあと、元の操作へフォーカスを戻す。</li></ul></article>
+</div></section>
+<section id="performance"><h2>描画する量を減らす</h2><div class="card"><h3>4,000行の実差分</h3><p>差分全体は保持し、初期表示を300行に限定。続きを表示したときは追加部分の先頭へ移動します。</p><div class="bars"><div><div class="bar-label"><span>改善前の初期DOM</span><strong>16,043要素</strong></div><div class="track"><div class="bar" style="width:100%"></div></div></div><div><div class="bar-label"><span>改善後の初期DOM</span><strong>1,219要素</strong></div><div class="track"><div class="bar after" style="width:7.598%"></div></div></div></div><p class="muted">同じ4,007行のpatchで比較。行数にはGitのメタデータ行を含みます。応答時間の倍率ではなく、DOM要素数の測定です。</p></div><div class="callout"><strong>1,078件の実履歴では最初の100件を表示</strong><p>検索は取得済みの全件が対象です。最古の日本語コミットを検索でき、追加100件・全件表示も確認しました。54レーンの全期間グラフも表示し、この確認中のコンソール警告・エラーはありませんでした。</p></div></section>
+<section id="e2e"><h2>実際に通したE2E</h2><p>通常の実データに加え、使い捨てのGitリポジトリとローカルbare originを作成。モックだけに頼らず、ファイル変更・コミット・push・競合を実際に発生させて確認しました。</p><div class="table-wrap"><table><thead><tr><th scope="col">対象</th><th scope="col">操作と確認結果</th><th scope="col">結果</th></tr></thead><tbody>
+<tr><th scope="row">ライブGit状態</th><td>コミットで未pushが0→1、ローカルoriginへのpushで1→0。状態取得直後にpushするケースも約3秒で反映。手動再走査なしで更新。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">ファイル状態</th><td>同じファイルがステージ済み・未ステージの両方に表示。日本語の未追跡名で検索。実際のUU競合を表示。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">ブランチ詳細</th><td>開いたままブランチを追加すると反映。統合済み候補の表示・再折りたたみ。長い作業パスが読める配置。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">通信失敗</th><td>詳細APIをブロックし、前回の一覧＋失敗文言を表示。通信復旧後の再取得で追加ブランチを表示。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">コミットの日本語名</th><td>名前変更前→変更後を表示。グラフの概要・詳細の両方で日本語パスを確認。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">差分検索</th><td>6ファイルから1ファイルへ絞り込み、0件、解除、展開状態の保持。コピーは6ファイル全体を保持。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">大きな差分</th><td>300→600→全4,007行→300行。最後の4,000行目が表示・コピーに含まれることを確認。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">URL・検索条件</th><td>日本語検索と並び順をコピー・再読み込みで維持。不正なURL条件は明示し、妥当な条件を残して解除。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">大量履歴</th><td>実プロジェクトの1,078件を対象に検索。100件ずつ・全件表示。検索解除時は初期表示量へ戻る。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">空のリポジトリ</th><td>main／初回コミット前を表示。最初のコミット後に自動でグラフ点が出現。実際のdetached HEADも別途確認。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">キーボード</th><td>Ctrl+K、検索、矢印移動、Esc。詳細のTab循環、入れ子のEsc、画面幅変更後のフォーカス復元。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">画面幅・テーマ</th><td>デスクトップ、390px、320px。ライト／ダーク。長い差分を折り返し、ページ横幅のはみ出しがないことを確認。</td><td class="pass">確認済み</td></tr>
+<tr><th scope="row">再接続</th><td>走査開始後に再読み込み。ライブ更新へ戻り再走査ボタンが利用可能。イベントフィルターは保持。</td><td class="pass">確認済み</td></tr>
+</tbody></table></div><p class="muted">上記シナリオと自動テストで問題がないことを確認しています。すべての入力・環境で不具合が存在しないと保証するものではありません。</p></section>
+<section id="environment"><h2>環境と再現方法</h2><div class="card"><p><strong>Pull Request:</strong> <a href="https://github.com/FujiwaraDaiki-NSE/git-manager/pull/32">#32（Draft）</a><br><strong>作業ブランチ:</strong> <code>codex/ui-polish-20260929</code><br><strong>取り込み済みmain:</strong> <code>d36d9fc</code>（PR #31）とローカルmain <code>67f18fb</code><br><strong>専用E2E画面:</strong> <a href="http://localhost:14412">http://localhost:14412</a></p><p>別作業が通常環境の4412番ポートを更新していたため、検証は専用Composeプロジェクト <code>git-manager-ui-e2e</code> に分離しました。専用データボリュームを使用し、重複fetchを避けるため自動fetchは無効にしています。通常環境の設定や他の作業ブランチは変更していません。</p><p id="fixture-status">E2E用の2リポジトリとローカルbare originを削除し、14412・4412の再走査を実行。GUI検索で検証用プロジェクトが0件になったことを確認しました。</p></div><pre><code># リポジトリのルートで実行
+npm --prefix frontend ci
+npm --prefix frontend test
+npm --prefix frontend run build
+uv run --directory backend --with pytest python -m pytest -q -W error</code></pre><p>詳細な測定・再現記録は <a href="ui-polish-loop.md">ui-polish-loop.md</a> に記載しています。レビューはユーザー指定により実施していません。</p></section>
+<footer>gitdash · 2026-09-29 · この資料は開発者向けの変更・検証サマリーです。</footer>
+</main></body></html>
