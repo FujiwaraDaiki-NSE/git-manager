@@ -97,3 +97,9 @@
 - A real-Git regression test checks Unicode/tab/newline/CR paths, rename and binary totals, empty commits, and exactly one Git process for three commits. Backend: 79 passed with warnings treated as errors.
 - GUI E2E: keyboard focus on the graph point shows readable 差分検索-1/2/3.txt and correct +12/-0 across six files.
 - Added the actual upstream comparison to work details and an expandable explanation of ahead/behind, working changes, and comparison targets. Show observed counts instead of implying that a push operation was acknowledged.
+
+## Large diff rendering
+
+- Real fixture: one commit adding 4,000 lines (4,007 patch lines including metadata). Before the change, initial rendering created 16,043 elements inside the patch view.
+- Render the first 300 patch lines, with explicit next-page/all-lines controls and a count. Initial patch DOM is now 1,219 elements, about 92% fewer. Parser output and copied patch stay complete.
+- GUI E2E: initial 300 → 600 → all 4,007 → first 300; focus moves to the first new row. Confirmed the last addition is `line 4000` and clipboard output includes it. At 390px in light mode the page width remained within the viewport.

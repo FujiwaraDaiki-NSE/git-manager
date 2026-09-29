@@ -1,8 +1,41 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import CopyButton from "./copy-button";
 import { parsePatch } from "./parse-patch.mjs";
+
+const PATCH_PAGE_LINES = 300;
+
+function PatchLines({ section, wrap }: { section: ReturnType<typeof parsePatch>[number]; wrap: boolean }) {
+  const [limit, setLimit] = useState(PATCH_PAGE_LINES);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const focusRow = useRef<number | null>(null);
+  const count = Math.min(limit, section.lines.length);
+  useLayoutEffect(() => {
+    if (focusRow.current === null) return;
+    const row = containerRef.current?.querySelector<HTMLElement>(`[data-patch-row="${focusRow.current}"]`);
+    focusRow.current = null;
+    row?.focus({ preventScroll: true });
+    const container = containerRef.current;
+    if (row && container) container.scrollTop += row.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  }, [limit]);
+  const show = (next: number) => {
+    focusRow.current = next > limit ? count : 0;
+    setLimit(next);
+  };
+  return <>
+    <div ref={containerRef} className={`patch-lines${wrap ? " patch-wrap" : ""}`} tabIndex={0} role="region" aria-label={`${section.title} の差分（左: 変更前、右: 変更後の行番号）`}>
+      <pre>{section.lines.slice(0, count).map((line, row) => <span className={`patch-line patch-${line.kind}`} data-patch-row={row} tabIndex={-1} key={row}><span className="patch-number" aria-hidden="true">{line.oldLine}</span><span className="patch-number" aria-hidden="true">{line.newLine}</span><span className="patch-text">{line.text}{row < section.lines.length - 1 ? "\n" : ""}</span></span>)}</pre>
+    </div>
+    {section.lines.length > PATCH_PAGE_LINES && <div className="patch-more">
+      <span role="status">差分 {count.toLocaleString()} / {section.lines.length.toLocaleString()} 行を表示</span>
+      {count < section.lines.length ? <>
+        <button type="button" onClick={() => show(Math.min(limit + PATCH_PAGE_LINES, section.lines.length))}>次の{Math.min(PATCH_PAGE_LINES, section.lines.length - count)}行を表示</button>
+        {section.lines.length - count > PATCH_PAGE_LINES && <button type="button" onClick={() => show(section.lines.length)}>すべての行を表示</button>}
+      </> : <button type="button" onClick={() => show(PATCH_PAGE_LINES)}>先頭{PATCH_PAGE_LINES}行のみ表示</button>}
+    </div>}
+  </>;
+}
 
 export default function PatchView({ patch }: { patch: string }) {
   const sections = useMemo(() => parsePatch(patch), [patch]);
@@ -41,9 +74,7 @@ export default function PatchView({ patch }: { patch: string }) {
       });
     }}>
       <summary title={section.title}><span>{section.title}</span></summary>
-      {expanded.has(index) && <div className={`patch-lines${wrap ? " patch-wrap" : ""}`} tabIndex={0} role="region" aria-label={`${section.title} の差分（左: 変更前、右: 変更後の行番号）`}>
-        <pre>{section.lines.map((line, row) => <span className={`patch-line patch-${line.kind}`} key={row}><span className="patch-number" aria-hidden="true">{line.oldLine}</span><span className="patch-number" aria-hidden="true">{line.newLine}</span><span className="patch-text">{line.text}{row < section.lines.length - 1 ? "\n" : ""}</span></span>)}</pre>
-      </div>}
+      {expanded.has(index) && <PatchLines section={section} wrap={wrap} />}
     </details>)}
   </section>;
 }
