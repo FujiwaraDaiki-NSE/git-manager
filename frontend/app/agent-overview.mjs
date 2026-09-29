@@ -197,3 +197,15 @@ export const selectTopAgentTasks = topAgentTasks;
 export const sortProjectSummaries = sortProjects;
 export const selectAgentSnapshotAt = agentSnapshotAt;
 export const deferSortOrder = deferProjectOrder;
+
+/** Branch names alone cannot identify a project (many projects have main). */
+export function projectMatchesAgentEvent(project, event) {
+  if (typeof event.project_id === "string") return event.project_id === project.id;
+  if (typeof event.worktree !== "string") return false;
+  return event.worktree === project.main_path || project.lanes.some((lane) => lane.path === event.worktree);
+}
+
+export function laneMatchesAgentEvent(lane, event) {
+  return (typeof event.worktree === "string" && lane.path === event.worktree)
+    || (typeof event.branch === "string" && lane.branch === event.branch);
+}

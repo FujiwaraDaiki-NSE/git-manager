@@ -192,3 +192,11 @@ export function parseFavoriteIds(serialized) {
     return null;
   }
 }
+
+/** Restore only validated local list settings; never accept a return URL. */
+export function homeReturnHref(query) {
+  if (query === null) return "/";
+  const parsed = parseHomeUrl(query);
+  if (parsed.view === null) return `/?${query}`;
+  return homeHref(parsed.view, "/");
+}

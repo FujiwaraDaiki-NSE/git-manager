@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import ProjectSwitcher from "./project-switcher";
+import ThemeControl from "./theme-control";
+import RescanControl from "./rescan-control";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AGENT_SUMMARY_LABELS,
   FAVORITES_STORAGE_KEY,
@@ -53,9 +56,9 @@ const defaultView: HomeView = {
 
 const gitFilters: Array<{ key: Exclude<GitFilter, "all">; label: string }> = [
   { key: "dirty", label: "変更あり" },
-  { key: "conflict", label: "conflict" },
-  { key: "ahead", label: "ahead" },
-  { key: "behind", label: "behind" },
+  { key: "conflict", label: "競合" },
+  { key: "ahead", label: "未push" },
+  { key: "behind", label: "未pull" },
 ];
 
 function relativeTime(iso: string | null | undefined) {
@@ -97,6 +100,7 @@ function ProjectCard({
   project,
   favorite,
   density,
+  homeQuery,
   onFavorite,
   onInteractEnd,
   onInteractStart,
@@ -104,12 +108,13 @@ function ProjectCard({
   project: ProjectSummary;
   favorite: boolean;
   density: CardDensity;
+  homeQuery: string;
   onFavorite: () => void;
   onInteractEnd: () => void;
   onInteractStart: () => void;
 }) {
-  const target = project.main_path || project.id;
-  const href = `/project?path=${encodeURIComponent(target)}&tab=flow&range=current`;
+  const target = project.main_path;
+  const href = target === null ? null : `/project?path=${encodeURIComponent(target)}&tab=flow&range=current${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`;
   const state = project.agent_state;
   const tasks = topAgentTasks(project.agent_tasks, 3);
   const latestAgent = project.latest_agent_event;
@@ -119,10 +124,12 @@ function ProjectCard({
   const unknownKeys = unknownAgentSummaryKeys(project);
   const unknownLabels = unknownKeys.map((key) => AGENT_SUMMARY_LABELS[key as keyof typeof AGENT_SUMMARY_LABELS] || key).join("・");
   const completedCount = agentCount(project, "completed");
+  const hasAgentCounts = summaryCards.some(({ key }) => agentCount(project, key) !== null) || completedCount !== null;
   return (
     <article
       className={`project-card${hasAttention ? " project-card-attention" : ""}`}
       data-density={density}
+      aria-label={project.name}
       onFocusCapture={onInteractStart}
       onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onInteractEnd(); }}
       onPointerEnter={onInteractStart}
@@ -130,11 +137,11 @@ function ProjectCard({
     >
       <div className="project-card-topline">
         <span className={`agent-state-badge ${stateClass(state)}`}>{agentStateLabel(state)}</span>
-        <span className="project-lane-count">{project.lane_count === null ? "Gitレーン 未取得" : `${project.lane_count} Gitレーン`}</span>
+        <span className="project-lane-count">{project.lane_count === null ? "ブランチ数 未取得" : `${project.lane_count} ブランチ`}</span>
       </div>
       <div className="project-card-heading">
         <div className="project-card-title-wrap">
-          <h2>{project.name}</h2>
+          <h3>{href ? <Link href={href} prefetch={false}>{project.name}</Link> : project.name}</h3>
           <code title={remoteLabel(project.remote)}>{remoteLabel(project.remote)}</code>
         </div>
         <div className="project-card-actions">
@@ -148,25 +155,38 @@ function ProjectCard({
           >
             <span aria-hidden="true">{favorite ? "★" : "☆"}</span>
           </button>
-          <Link className="open-project" href={href} aria-label={`${project.name} の管制画面を開く`}>開く <span aria-hidden="true">↗</span></Link>
+          {href ? <Link className="open-project" href={href} prefetch={false} aria-label={`${project.name} の詳細を開く`}>開く <span aria-hidden="true">↗</span></Link> : <span className="no-checkout">作業パス未取得</span>}
         </div>
       </div>
-      <div className="project-card-agent-counts" aria-label="agentタスク件数">
+      {hasAgentCounts && <div className="project-card-agent-counts" aria-label="agentタスク件数">
         {summaryCards.map(({ key, label }) => {
           const count = agentCount(project, key);
           return count === null ? null : <span key={key}><strong>{formatAgentCount(count)}</strong> {label}</span>;
         })}
         {completedCount !== null && <span><strong>{formatAgentCount(completedCount)}</strong> 完了</span>}
-        {unknownLabels && <span className="project-card-agent-unknown" title={`未取得: ${unknownLabels}`}>agent件数未取得: {unknownLabels}</span>}
-      </div>
-      <div className="project-card-agent-list" aria-label="上位 agent タスク">
+      </div>}
+      {tasks.length > 0 && <div className="project-card-agent-list" aria-label="上位 agent タスク">
         {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); return <div className="agent-task-row" key={task.task_id}><span className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{task.agent_id || task.task_id}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent 状態不明</strong><span>タスク未取得</span></div>}
         {maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
+      </div>}
+      <div className="project-card-event"><span className="eyebrow">{latestAgent ? "最新のagent報告" : "最新コミット"}</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>{relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>
+      <div className="project-card-facts" aria-label="Git状態">
+        <span className={project.git.dirty > 0 ? "fact fact-warn" : "fact"} title="未コミットの変更がある作業ディレクトリ数">変更あり <strong>{project.git.dirty}</strong></span>
+        <span className={project.git.conflict > 0 ? "fact fact-danger" : "fact"} title="競合がある作業ディレクトリ数">競合 <strong>{project.git.conflict}</strong></span>
+        <span className={project.git.ahead > 0 ? "fact fact-info" : "fact"} title="追跡先への未pushコミットがある作業ディレクトリ数（ahead > 0）">↑ 未push <strong>{project.git.ahead}</strong></span>
+        <span className={project.git.behind > 0 ? "fact fact-warn" : "fact"} title="追跡先からの未pullコミットがある作業ディレクトリ数（behind > 0）">↓ 未pull <strong>{project.git.behind}</strong></span>
       </div>
-      <div className="project-card-event"><span className="eyebrow">最終明示レポート</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>Git · {relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>
-      <div className="project-card-facts" aria-label="Git補助情報"><span className={project.git.conflict > 0 ? "fact fact-danger" : "fact"}>conflict {project.git.conflict}</span><span className={project.git.dirty > 0 ? "fact fact-warn" : "fact"}>変更 {project.git.dirty}</span><span className="fact">ahead {project.git.ahead}</span><span className="fact">behind {project.git.behind}</span></div>
-      <div className="project-card-footer"><span>次に確認: <strong>{project.next_lane ?? "未取得"}</strong></span><span>最大差 {project.largest_difference_lane ?? "未取得"}</span></div>
-      <div className="project-card-secondary">worktree {project.worktree_count} · merged {project.git.merged} · 最終観測 {projectLatestTime(project) ? relativeTime(new Date(projectLatestTime(project)).toISOString()) : "未取得"}</div>
+      {project.next_lane && <div className="project-card-footer"><span>次に確認 <strong>{project.next_lane}</strong></span></div>}
+      <details className="project-card-extra">
+        <summary>管理情報 <span>{project.worktree_count} worktree</span></summary>
+        <dl>
+          <div><dt>作業パス</dt><dd><code>{project.main_path ?? "未取得"}</code></dd></div>
+          <div><dt>既定との差が最大</dt><dd>{project.largest_difference_lane ?? "未取得"}</dd></div>
+          <div><dt>統合済み</dt><dd>{project.git.merged}</dd></div>
+          <div><dt>最終観測</dt><dd>{projectLatestTime(project) ? relativeTime(new Date(projectLatestTime(project)).toISOString()) : "未取得"}</dd></div>
+          {unknownLabels && <div><dt>agent件数未取得</dt><dd>{unknownLabels}</dd></div>}
+        </dl>
+      </details>
     </article>
   );
 }
@@ -193,6 +213,17 @@ export default function Page() {
   const [favoritesReady, setFavoritesReady] = useState(false);
   const [favoritesStorageIssue, setFavoritesStorageIssue] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || target.isContentEditable || target.closest("input, textarea, select")) return;
+      event.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const snapshotKey = useMemo(() => [...repos.values()].map((repo) => `${repo.path}:${repo.checked_at ?? repo.activity ?? 0}`).sort().join("|"), [repos]);
 
   useEffect(() => {
@@ -208,15 +239,15 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void fetch("/api/projects", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return (await response.json()) as { projects: ProjectSummary[] }; }).then((value) => {
-        if (cancelled) return;
+      void fetch("/api/projects", { cache: "no-store", signal: controller.signal }).then(async (response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return (await response.json()) as { projects: ProjectSummary[] }; }).then((value) => {
+        if (controller.signal.aborted) return;
         setProjects(value.projects);
         setLoading(false); setError(null);
-      }).catch((reason: unknown) => { if (!cancelled) { setLoading(false); setError(reason instanceof Error ? reason.message : "unknown error"); } });
+      }).catch((reason: unknown) => { if (!controller.signal.aborted) { setLoading(false); setError(reason instanceof Error ? reason.message : "unknown error"); } });
     }, snapshotKey ? 120 : 0);
-    return () => { cancelled = true; window.clearTimeout(timer); };
+    return () => { controller.abort(); window.clearTimeout(timer); };
   }, [reloadToken, snapshotKey]);
 
   useEffect(() => {
@@ -277,7 +308,7 @@ export default function Page() {
   const totals = useMemo(() => aggregateAgentCounts(projects), [projects]);
   const unknownProjectTotal = useMemo(() => countProjectsWithUnknownAgentCounts(projects), [projects]);
   const gitTotals = useMemo(() => ({ conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0), dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0), lanes: projects.every((item) => item.lane_count !== null) ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0) : null }), [projects]);
-  const hasActiveFilters = Boolean(view.query.trim() || view.agentFilter !== "all" || view.gitFilter !== "all" || view.sort !== "priority" || view.favoritesOnly || view.density !== "comfortable" || invalidUrlParams.length);
+  const hasActiveFilters = Boolean(view.query.trim() || view.agentFilter !== "all" || view.gitFilter !== "all" || view.favoritesOnly || invalidUrlParams.length);
   const startInteraction = (id?: string) => setInteractionId(id || "grid");
   const finishInteraction = () => setInteractionId(null);
   const applyOrder = () => { if (deferredOrder) { setDisplayOrder(deferredOrder); setDeferredOrder(null); } };
@@ -293,7 +324,9 @@ export default function Page() {
       else window.history.pushState({}, "", nextHref);
     }
   };
-  const resetView = () => applyView({ ...defaultView });
+  const resetView = () => applyView({ query: "", agentFilter: "all", gitFilter: "all", favoritesOnly: false, ...(invalidUrlParams.length ? defaultView : {}) });
+  const homeQuery = homeSearch(view);
+  const gitProjectCounts = useMemo(() => Object.fromEntries(gitFilters.map(({ key }) => [key, projects.filter((project) => project.git[key] > 0).length])), [projects]);
   const toggleFavorite = (projectId: string) => {
     setFavorites((current) => {
       const next = new Set(current);
@@ -314,31 +347,48 @@ export default function Page() {
   };
   const retry = () => { setError(null); setLoading(true); setReloadToken((value) => value + 1); };
 
-  return (
-    <main className="home-shell">
-      <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "同期中" : "接続待ち"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></header>
-      <section className="home-intro" aria-labelledby="home-title"><div><h2 id="home-title">プロジェクト一覧</h2><p className="intro-copy">プロジェクトを選んで、ブランチの流れと作業状況を確認できます。</p></div><div className="home-summary" aria-label="agentタスクサマリー">
+  const agentReportsUnavailable = projects.length > 0 && projects.every((project) => project.agent_tasks === null && unknownAgentSummaryKeys(project).length === 6);
+  const agentSummary = (<div className="home-summary" aria-label="agentタスクサマリー">
         {invalidUrlParams.length > 0 ? <span className="filter-unavailable">URL条件を確認してから一覧を表示します。</span> : <>
-          {summaryCards.map(({ key, label }) => <button type="button" className="home-summary-card" key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong>{formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
-          <button type="button" className="home-summary-card" aria-label="agent件数不明のプロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{unknownProjectTotal}</strong><span>件数不明</span></button>
+          {summaryCards.map(({ key, label }) => <button type="button" className="home-summary-card" key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "…" : totals[key] === null ? "未取得" : formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
+          <button type="button" className="home-summary-card" aria-label="agent件数不明のプロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{loading && !projects.length ? "…" : unknownProjectTotal}</strong><span>agent件数未取得</span></button>
         </>}
-      </div></section>
+      </div>);
+
+  return (
+    <main className="home-shell" id="main-content" tabIndex={-1}>
+      <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></div></header>
+      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentReportsUnavailable ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>agentタスクの状態は未取得です<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
       {invalidUrlParams.length === 0 && <section className="home-toolbar" aria-label="プロジェクト検索と絞り込み">
-        <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /></label>
+        <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input ref={searchRef} aria-keyshortcuts="/" value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /><kbd aria-hidden="true">/</kbd></label>
         <label>並び順<select value={view.sort} onChange={(event) => applyView({ sort: event.target.value as ProjectSort })} aria-label="プロジェクトの並び順"><option value="priority">優先度</option><option value="name">名前</option><option value="latest">最新更新</option></select></label>
-        <div role="group" aria-label="Git状態で絞り込み"><button type="button" aria-pressed={view.gitFilter === "all"} onClick={() => applyView({ gitFilter: "all" })}>Gitすべて</button>{gitFilters.map(({ key, label }) => <button type="button" key={key} aria-pressed={view.gitFilter === key} onClick={() => applyView({ gitFilter: view.gitFilter === key ? "all" : key })}>{label}</button>)}</div>
+        <div role="group" aria-label="Git状態で絞り込み"><button type="button" aria-pressed={view.gitFilter === "all"} onClick={() => applyView({ gitFilter: "all" })}>すべて</button>{gitFilters.map(({ key, label }) => <button type="button" key={key} aria-pressed={view.gitFilter === key} onClick={() => applyView({ gitFilter: view.gitFilter === key ? "all" : key })}>{label}<span className="filter-count">{loading && !projects.length ? "…" : gitProjectCounts[key]}</span></button>)}</div>
         <button type="button" aria-pressed={view.favoritesOnly} onClick={() => applyView({ favoritesOnly: !view.favoritesOnly })}>{view.favoritesOnly ? "★ お気に入りのみ" : "☆ お気に入り"}</button>
         <div role="group" aria-label="カード密度"><button type="button" aria-pressed={view.density === "comfortable"} onClick={() => applyView({ density: "comfortable" })}>ゆったり</button><button type="button" aria-pressed={view.density === "compact"} onClick={() => applyView({ density: "compact" })}>コンパクト</button></div>
-        <span className="toolbar-note">Git変更 {gitTotals.dirty} · conflict {gitTotals.conflicts} · Gitレーン {gitTotals.lanes ?? "?"}</span>
+        <span className="toolbar-note">{gitTotals.lanes === null ? "ブランチ数は一部未取得" : `${gitTotals.lanes} ブランチ`} · {gitTotals.dirty} 作業ディレクトリに変更</span>
       </section>}
+      {hasActiveFilters && invalidUrlParams.length === 0 && <div className="active-filters" aria-label="選択中の検索条件">
+        <span>絞り込み</span>
+        {view.query.trim() && <button type="button" onClick={() => applyView({ query: "" })} aria-label="検索キーワードを解除">検索: {view.query}<span aria-hidden="true">×</span></button>}
+        {view.agentFilter !== "all" && <button type="button" onClick={() => applyView({ agentFilter: "all" })} aria-label="agentの絞り込みを解除">{view.agentFilter === "unknown" ? "agent件数未取得" : AGENT_SUMMARY_LABELS[view.agentFilter]}<span aria-hidden="true">×</span></button>}
+        {view.gitFilter !== "all" && <button type="button" onClick={() => applyView({ gitFilter: "all" })} aria-label="Gitの絞り込みを解除">{gitFilters.find((item) => item.key === view.gitFilter)?.label}<span aria-hidden="true">×</span></button>}
+        {view.favoritesOnly && <button type="button" onClick={() => applyView({ favoritesOnly: false })} aria-label="お気に入りの絞り込みを解除">★ お気に入り<span aria-hidden="true">×</span></button>}
+      </div>}
       {favoritesStorageIssue && <div className="home-results" role="alert"><span>お気に入りの保存データを読み込めません。お気に入り機能を再設定できます。</span><button type="button" onClick={resetFavoriteStorage}>保存を再設定</button></div>}
       {invalidUrlParams.length > 0 && <div className="home-state home-state-error" role="alert"><span>URLの絞り込み条件を認識できませんでした: {invalidUrlParams.join("、")}</span><button type="button" onClick={resetView}>条件をリセット</button></div>}
       {invalidUrlParams.length === 0 && deferredOrder && view.sort === "priority" && <div className="order-update" role="status"><span>優先度の並び順に更新があります</span><button type="button" onClick={applyOrder}>並び順を更新</button></div>}
-      {invalidUrlParams.length === 0 && <div className="home-results" role="status" aria-live="polite"><span>{visible.length} / {projects.length} プロジェクトを表示中</span>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
+      {invalidUrlParams.length === 0 && <div className="home-results" role="status" aria-live="polite"><span>{loading && !projects.length ? "プロジェクトを読み込み中…" : `${visible.length} / ${projects.length} プロジェクトを表示中`}</span>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
       {invalidUrlParams.length === 0 && loading && projects.length === 0 && <SkeletonGrid />}
-      {error && <div className="home-state home-state-error" role="alert"><strong>プロジェクト情報を取得できませんでした。</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
+      {error && <div className="home-state home-state-error" role="alert"><strong>{projects.length ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
       {invalidUrlParams.length === 0 && !loading && !error && visible.length === 0 && <div className="home-state home-empty"><h3>該当するプロジェクトがありません</h3><p>{hasActiveFilters ? "現在の条件に一致するプロジェクトはありません。条件をリセットして一覧を確認できます。" : "登録されたプロジェクトはありません。"}</p>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
-      {invalidUrlParams.length === 0 && <section className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard key={project.id} density={view.density} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
+      {invalidUrlParams.length === 0 && <section className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard key={project.id} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
+      <details className="git-reading-guide"><summary>Git状態の見方</summary><div>
+        <p><strong>変更あり</strong> 作業ディレクトリに未コミットの変更があります。<code>git status</code> で確認できます。</p>
+        <p><strong>競合</strong> 同じ箇所への変更が衝突しています。対象ファイルを確認し、競合を解消します。</p>
+        <p><strong>↑ 未push（ahead）</strong> ローカルにだけあるコミットを持つ作業ディレクトリです。<code>git log @{'{u}'}..HEAD</code> で確認できます。</p>
+        <p><strong>↓ 未pull（behind）</strong> 追跡先にだけあるコミットを持つ作業ディレクトリです。<code>git log HEAD..@{'{u}'}</code> で確認できます。</p>
+        <p>Git状態は最終取得時点の情報です。ターミナル操作後は「再走査」で更新できます。追跡先の状態は最終fetch時点です。追跡先がないブランチは未push・未pullの集計対象外です。カードの数値は、それぞれの状態に当てはまる作業ディレクトリ数です。</p>
+      </div></details>
       <p className="home-footnote"><span className="legend-line" aria-hidden="true" /> agent の明示状態・最新報告を優先。Git の件数は補助情報です。</p>
     </main>
   );

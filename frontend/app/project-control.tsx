@@ -1,12 +1,18 @@
 "use client";
 
+import Link from "next/link";
+import { homeReturnHref } from "./home-overview.mjs";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import CopyButton from "./copy-button";
+import ProjectSwitcher from "./project-switcher";
+import ThemeControl from "./theme-control";
+import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
+import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
 import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, recentTimePosition, recentTimeAt, graphTimeTicks, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
-import { activityMatchesSearch, compareActivityEvents, laneMatchesSearch, normalizedSearchQuery } from "./project-search.mjs";
+import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -23,6 +29,8 @@ type ControlTab = "flow" | "lanes" | "activity" | "info";
 type TimeRange = "current" | "24h" | "7d" | "all";
 type ActivityFilter = "all" | "commit" | "edit" | "test" | "review" | "input";
 type ActivityOrder = "newest" | "oldest";
+type LaneFilter = "all" | "dirty" | "conflict" | "ahead" | "behind" | "worktree";
+type LaneOrder = "name" | "latest" | "attention";
 type LoadState = "idle" | "loading" | "ready" | "error";
 type CopyStatus = "idle" | "success" | "error";
 type ProjectUrlChanges = Record<string, string | number | boolean | null | undefined>;
@@ -93,15 +101,16 @@ function laneMergeSummary(lane: ProjectLane) {
 }
 
 function laneState(lane: ProjectLane, defaultBranch: string | null = null) {
-  if (lane.conflict === true) return "conflict";
+  if (lane.conflict === true) return "競合";
   if (lane.dirty === true) return "変更あり";
-  if (lane.worktree_state === "prunable") return "prunable";
-  if (lane.worktree_state === "locked") return "locked";
+  if (lane.worktree_state === "prunable") return "作業先なし";
+  if (lane.worktree_state === "locked") return "ロック中";
   if (defaultBranch && lane.branch === defaultBranch) return "既定";
-  if (lane.merged === true) return "merged";
-  if (lane.detached === true) return "detached";
+  if (lane.merged === true) return "統合済み";
+  if (lane.detached === true) return "ブランチ未接続";
   if (lane.error) return "Git情報未取得";
-  return "clean";
+  if (lane.dirty === false) return "変更なし";
+  return "作業状態 未取得";
 }
 
 function laneStateClass(lane: ProjectLane, defaultBranch: string | null = null) {
@@ -109,7 +118,8 @@ function laneStateClass(lane: ProjectLane, defaultBranch: string | null = null) 
   if (lane.dirty === true || lane.worktree_state === "prunable" || lane.worktree_state === "locked")
     return "lane-state-warn";
   if (defaultBranch && lane.branch === defaultBranch) return "lane-state-ok";
-  if (lane.merged === true) return "lane-state-muted";
+  if (lane.merged === true || lane.dirty === null) return "lane-state-muted";
+  if (lane.error) return "lane-state-warn";
   return "lane-state-ok";
 }
 
@@ -501,10 +511,13 @@ function FlowMap({
   }, [timeline]);
   const flowScrollRef = useRef<HTMLDivElement>(null);
   const firstLaneLabelRef = useRef<HTMLDivElement>(null);
+  const laneButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const [navigationLane, setNavigationLane] = useState("");
   const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
   const [renderedLabelWidth, setRenderedLabelWidth] = useState(220);
   const graphRows = project.graph?.rows ?? [];
+  const graphHashes = useMemo(() => new Set(graphRows.map((row) => row.hash)), [graphRows]);
   const relationLaneIds = useMemo(() => new Set(project.merge_relations.flatMap((relation) => (
     [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
   ))), [project.merge_relations]);
@@ -678,11 +691,20 @@ function FlowMap({
             {ranges.map((item) => <button aria-pressed={range === item.id} className="range-tab" key={item.id} type="button" onClick={() => onRangeChange(item.id)}>{item.label}</button>)}
           </div>
           <div className="flow-control-actions">
+            <label className="flow-branch-jump"><span>ブランチへ移動</span><select aria-label="グラフのブランチへ移動" value={lanes.some((lane) => lane.id === navigationLane) ? navigationLane : ""} onChange={(event) => {
+              const id = event.target.value;
+              setNavigationLane(id);
+              const button = laneButtonRefs.current.get(id);
+              if (!button) return;
+              button.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+              button.focus({ preventScroll: true });
+            }}><option value="">ブランチを選択</option>{lanes.map((lane) => <option key={lane.id} value={lane.id}>{laneLabel(lane)}</option>)}</select></label>
             {mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}
-            <button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: "smooth" })}>右端へ移動 →</button>
+            <button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })}>右端へ移動 →</button>
           </div>
         </div>
       </div>
+      {project.graph?.truncated && lanes.some((lane) => lane.head && !graphHashes.has(lane.head)) && <div className="graph-incomplete-note" role="status"><span>先端コミットが取得範囲外のブランチがあります。</span><button className="subtle-button" type="button" onClick={() => onRangeChange("all")}>全期間で確認</button></div>}
       <details className="flow-history" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
         <summary>履歴をたどる <span>{timeline === 100 ? "最新の観測" : "過去を表示中"} · {observationLabel}</span></summary>
         <div className="flow-observation">
@@ -765,7 +787,7 @@ function FlowMap({
                 <div className="flow-lane-label" ref={index === 0 ? firstLaneLabelRef : undefined}>
                   <div className="flow-lane-title">
                     <span className="lane-shape" aria-hidden="true" />
-                    <button className="flow-lane-button" aria-pressed={selectedLane === lane.id} title={laneLabel(lane)} type="button" onClick={() => onSelectLane(lane)}>{laneLabel(lane)}</button>
+                    <button ref={(node) => { if (node) laneButtonRefs.current.set(lane.id, node); else laneButtonRefs.current.delete(lane.id); }} className="flow-lane-button" aria-pressed={selectedLane === lane.id} title={laneLabel(lane)} type="button" onClick={() => onSelectLane(lane)}>{laneLabel(lane)}</button>
                   </div>
                   <div className="flow-lane-meta">
                     <span className={`lane-state ${laneStateClass(lane, project.default_branch)}`}>{laneState(lane, project.default_branch)}</span>
@@ -776,7 +798,7 @@ function FlowMap({
                   </div>
                 </div>
                 <div className="flow-track">
-                  {laneEvents.length === 0 && <span className="flow-track-empty">{!project.graph ? "履歴未取得" : timeline < 100 ? "選択日時までの表示対象コミットなし" : "この表示範囲にコミットなし"}</span>}
+                  {laneEvents.length === 0 && <span className="flow-track-empty">{!project.graph ? "履歴未取得" : lane.head && !graphHashes.has(lane.head) ? "先端コミットは取得範囲外" : timeline < 100 ? "選択日時までの表示対象コミットなし" : "この表示範囲にコミットなし"}</span>}
                   {laneEvents.map((event) => {
                     return (
                       <FlowEventButton
@@ -835,20 +857,20 @@ function FlowMap({
 }
 
 function LaneSummary({ lane, defaultBranch }: { lane: ProjectLane; defaultBranch: string | null }) {
-  const ahead = lane.default_ahead;
-  const behind = lane.default_behind;
-  return (
-    <>
-      <span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span>
-      <AgentFact task={currentLaneAgent(lane)} />
-      <span className="lane-diff">
-        {ahead === null || behind === null ? "既定差分 未取得" : `既定差分 +${ahead} / -${behind}`}
-      </span>
-    </>
-  );
+  return <><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={currentLaneAgent(lane)} /></>;
 }
 
+const laneFilters: { id: LaneFilter; label: string }[] = [
+  { id: "all", label: "すべて" },
+  { id: "dirty", label: "変更あり" },
+  { id: "conflict", label: "競合" },
+  { id: "ahead", label: "未push" },
+  { id: "behind", label: "未pull" },
+  { id: "worktree", label: "worktree" },
+];
+
 function WorkLanes({
+  searchQuery, onSearch, filter, onFilter, order, onOrder,
   project,
   selectedLane,
   onSelectLane,
@@ -856,6 +878,7 @@ function WorkLanes({
   showMerged,
   onShowMergedChange,
 }: {
+  searchQuery: string; onSearch: (query: string) => void; filter: LaneFilter; onFilter: (filter: LaneFilter) => void; order: LaneOrder; onOrder: (order: LaneOrder) => void;
   project: ProjectResponse;
   selectedLane: string | null;
   onSelectLane: (lane: ProjectLane) => void;
@@ -863,7 +886,6 @@ function WorkLanes({
   showMerged: boolean;
   onShowMergedChange: (value: boolean) => void;
 }) {
-  const [searchQuery, setSearchQuery] = useState("");
   const normalizedQuery = normalizedSearchQuery(searchQuery);
   const relationLaneIds = useMemo(() => new Set(project.merge_relations.flatMap((relation) => (
     [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
@@ -873,8 +895,8 @@ function WorkLanes({
     [project.lanes, relationLaneIds, showMerged, project.default_branch],
   );
   const lanes = useMemo(
-    () => visibleLanes.filter((lane) => laneMatchesSearch(lane, normalizedQuery)),
-    [normalizedQuery, visibleLanes],
+    () => sortWorkLanes(visibleLanes.filter((lane) => laneMatchesSearch(lane, normalizedQuery) && laneMatchesFilter(lane, filter)), order),
+    [filter, order, normalizedQuery, visibleLanes],
   );
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
   return (
@@ -883,66 +905,76 @@ function WorkLanes({
         <div>
 
           <h3 id="lanes-title">作業一覧</h3>
-          <p className="section-copy">ブランチごとの状態と、次に確認したいことをまとめています。</p>
+          <p className="section-copy">ブランチごとの状態と、次に確認したいことをまとめています。Git状態は取得時点の情報です。ターミナル操作後は「再走査」で更新できます。</p>
         </div>
-        {mergedCount > 0 && <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "merged を折り畳む" : `merged・完了を表示 (${mergedCount})`}</button>}
+        {mergedCount > 0 && <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "統合済みを折り畳む" : `統合済み・完了を表示 (${mergedCount})`}</button>}
       </div>
       <div className="project-search-toolbar" role="search" aria-label="作業レーンを検索">
         <label>
           <span>検索</span>
-          <input aria-label="作業レーンを検索" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="ブランチ・パス・名前" />
+          <input aria-label="作業レーンを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="ブランチ・パス・名前" />
         </label>
-        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => setSearchQuery("")}>クリア</button>
+        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>クリア</button>
+        <label>並び順<select aria-label="作業一覧の並び順" value={order} onChange={(event) => onOrder(event.target.value as LaneOrder)}><option value="name">名前</option><option value="attention">要確認順</option><option value="latest">最新コミット順</option></select></label>
         <span role="status">{lanes.length} / {visibleLanes.length} 件</span>
       </div>
+      <div className="lane-filters" role="group" aria-label="作業の状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{visibleLanes.filter((lane) => laneMatchesFilter(lane, item.id)).length}</span></button>)}</div>
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
-            <tr><th>作業</th><th>状態 / agent</th><th>最終活動</th><th>既定ブランチとの差</th><th>最新メッセージ</th><th>合流関係</th><th>次の工程 / 注意</th><th aria-label="操作" /></tr>
+            <tr><th scope="col">作業</th><th scope="col">状態 / agent</th><th scope="col">最終活動</th><th scope="col">既定ブランチとの差</th><th scope="col">最新メッセージ</th><th scope="col">合流関係</th><th scope="col">次の工程 / 注意</th><th scope="col" aria-label="操作" /></tr>
           </thead>
           <tbody id="project-lane-results">
             {lanes.map((lane) => (
               <tr className={selectedLane === lane.id ? "is-selected" : ""} key={lane.id}>
-                <td>
+                <td data-label="作業">
                   <button className="lane-name-button" type="button" onClick={() => onSelectLane(lane)}>
                     <strong>{laneLabel(lane)}</strong>
                     <code>{shortHash(lane.head)}</code>
                     <span title={lane.path ?? undefined}>{lane.path ?? "パス未取得"}</span>
                   </button>
                 </td>
-                <td><LaneSummary defaultBranch={project.default_branch} lane={lane} /></td>
-                <td>
+                <td data-label="状態 / agent"><LaneSummary defaultBranch={project.default_branch} lane={lane} /></td>
+                <td data-label="最終コミット">
                   <time dateTime={lane.last_commit?.date ?? undefined} title={exactDate(lane.last_commit?.date)}>{relativeTime(lane.last_commit?.date)}</time>
                   <span className="table-subvalue">{exactDate(lane.last_commit?.date)}</span>
                 </td>
-                <td className="mono-cell">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
-                <td className="unknown-cell">{currentLaneAgent(lane)?.summary || "報告内容なし"}</td>
-                <td className="unknown-cell">{laneMergeSummary(lane)}</td>
-                <td className="unknown-cell">{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</td>
-                <td><button className="table-action" type="button" onClick={() => onOpenGit(lane)}>Git詳細</button></td>
+                <td className="mono-cell" data-label="既定ブランチとの差">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
+                <td className="lane-message" data-label="最新メッセージ"><span title={lane.last_commit?.subject}>{lane.last_commit?.subject ?? "コミット未取得"}</span>{currentLaneAgent(lane)?.summary && <small>agent: {currentLaneAgent(lane)?.summary}</small>}</td>
+                <td className="unknown-cell" data-label="合流関係">{laneMergeSummary(lane)}</td>
+                <td className="unknown-cell" data-label="次の工程 / 注意">{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</td>
+                <td data-label="操作"><button className="table-action" type="button" disabled={!lane.path} title={!lane.path ? "このブランチには作業ディレクトリがありません" : undefined} onClick={() => onOpenGit(lane)}>Git詳細</button>{!lane.path && <small className="no-checkout">作業ディレクトリなし</small>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {lanes.length === 0 && <div className="empty-flow">{normalizedQuery ? "検索に一致する作業レーンはありません。" : "表示できる作業レーンはありません。"}</div>}
+      {lanes.length === 0 && <div className="empty-flow">{normalizedQuery ? "検索に一致する作業レーンはありません。" : "この条件に一致する作業レーンはありません。"}{(normalizedQuery || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); }}>絞り込みを解除</button>}</div>}
     </section>
   );
 }
 
+function ActivityBranches({ names }: { names: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  return <details className="activity-branches" onToggle={(event) => setExpanded(event.currentTarget.open)}>
+    <summary>関連ブランチ {names.length} 件</summary>
+    {expanded && <div>{names.map((name) => <code key={name}>{name}</code>)}</div>}
+  </details>;
+}
+
 function ActivityView({
+  searchQuery, onSearch, order, onOrder,
   project,
   filter,
   onFilter,
   onSelect,
 }: {
+  searchQuery: string; onSearch: (query: string) => void; order: ActivityOrder; onOrder: (order: ActivityOrder) => void;
   project: ProjectResponse;
   filter: ActivityFilter;
   onFilter: (filter: ActivityFilter) => void;
   onSelect: (event: ProjectEvent) => void;
 }) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [order, setOrder] = useState<ActivityOrder>("newest");
   const normalizedQuery = normalizedSearchQuery(searchQuery);
   const unifiedEvents = useMemo(() => project.events.map((event) => ({
     ...event,
@@ -973,12 +1005,12 @@ function ActivityView({
       <div className="project-search-toolbar" role="search" aria-label="アクティビティを検索">
         <label>
           <span>検索</span>
-          <input aria-label="アクティビティを検索" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="件名・概要・担当者・ブランチ" />
+          <input aria-label="アクティビティを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="件名・概要・担当者・ブランチ" />
         </label>
-        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => setSearchQuery("")}>クリア</button>
+        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>クリア</button>
         <label>
           <span>並び順</span>
-          <select aria-label="アクティビティの並び順" value={order} onChange={(event) => setOrder(event.target.value as ActivityOrder)}>
+          <select aria-label="アクティビティの並び順" value={order} onChange={(event) => onOrder(event.target.value as ActivityOrder)}>
             <option value="newest">新しい順</option>
             <option value="oldest">古い順</option>
           </select>
@@ -993,14 +1025,19 @@ function ActivityView({
         ))}
       </div>
       {events.length === 0 ? (
-        <div className="empty-activity">{normalizedQuery ? "検索に一致するイベントはありません。" : "この種別のイベントは未取得です。"}</div>
+        <div className="empty-activity">{normalizedQuery ? "検索に一致するイベントはありません。" : "この種別のイベントは未取得です。"}{(normalizedQuery || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); }}>絞り込みを解除</button>}</div>
       ) : (
         <ol className="activity-list">
           {events.map((event) => (
             <li key={event.id}>
               <div className="activity-time"><time dateTime={event.occurred_at ?? undefined}>{exactDate(event.occurred_at)}</time><span>{relativeTime(event.occurred_at)}</span></div>
               <span className="activity-source"><i aria-hidden="true" />{event.source === "agent" ? "agent" : event.source} · {event.type === "commit" ? "コミット" : event.agent_state ? agentStateLabel(event.agent_state) : event.type}</span>
-              <div className="activity-content"><strong>{event.subject || (event.type === "agent" ? "報告内容なし" : "(no subject)")}</strong><span>{event.lane_names?.length ? event.lane_names.join(" / ") : event.branch ?? "対象レーン未取得"} · {event.author ?? "author 未取得"}{event.task_id ? ` · task ${event.task_id}` : ""}</span>{event.attention && <span className="activity-attention">注意: {event.attention}</span>}</div>
+              <div className="activity-content">
+                <strong>{event.subject || (event.type === "agent" ? "報告内容なし" : "件名なし")}</strong>
+                <span>{event.author ?? "作成者未取得"}{event.task_id ? ` · タスク ${event.task_id}` : ""}</span>
+                {event.lane_names && event.lane_names.length > 3 ? <ActivityBranches names={event.lane_names} /> : <span>{event.lane_names?.length ? event.lane_names.join(" / ") : event.branch ?? "対象ブランチ未取得"}</span>}
+                {event.attention && <span className="activity-attention">注意: {event.attention}</span>}
+              </div>
               {event.commit_hash && <button className="activity-commit" type="button" onClick={() => onSelect(event)}>{shortHash(event.commit_hash)} 詳細</button>}
             </li>
           ))}
@@ -1018,27 +1055,27 @@ function ProjectInfo({ project }: { project: ProjectResponse }) {
         <div className="info-card info-card-wide"><span className="eyebrow">説明</span><p>{project.description || "説明なし"}</p></div>
         <InfoField label="リモート URL" value={project.remote} code />
         <InfoField label="既定ブランチ" value={project.default_branch} code />
-        <InfoField label="main checkout" value={project.main_path} code />
+        <InfoField label="メインの作業パス" value={project.main_path} code />
         <InfoField label="最終 fetch" value={project.fetched_at ? exactDate(new Date(project.fetched_at * 1000).toISOString()) : null} />
         <InfoField label="ローカルブランチ" value={project.branch_counts.local} />
         <InfoField label="リモートブランチ" value={project.branch_counts.remote} />
-        <InfoField label="merged" value={project.maintenance.merged} />
-        <InfoField label="prunable" value={project.maintenance.prunable} />
-        <InfoField label="locked worktree" value={project.maintenance.locked} />
+        <InfoField label="統合済みブランチ" value={project.maintenance.merged} />
+        <InfoField label="削除されたworktree" value={project.maintenance.prunable} />
+        <InfoField label="ロック中のworktree" value={project.maintenance.locked} />
         <InfoField label="使用言語" value={project.languages ? project.languages.join(", ") : null} />
         <InfoField label="主要ディレクトリ" value={project.directories ? project.directories.join(", ") : null} />
         <InfoField label="テストコマンド" value={project.test_commands ? project.test_commands.join(" / ") : null} />
         <InfoField label="関連 agent タスク" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
       <div className="info-subsection"><h4>関連 Codex タスク</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent 状態不明（関連タスク未取得）</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={task.task_id}><div><strong>{task.task_id}</strong><span>{task.agent_id || "agent 未取得"} · {agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">関連するタスクはありません。</div>}</div>
-      <div className="info-subsection"><h4>worktree 一覧</h4><div className="worktree-records">{project.worktrees.map((item) => <div className="worktree-record" key={item.path}><span className="worktree-shape" aria-hidden="true" /><strong>{item.branch ?? "detached HEAD"}</strong><code title={item.path}>{item.path}</code><span className={`lane-state ${item.state === "prunable" || item.state === "locked" ? "lane-state-warn" : "lane-state-ok"}`}>{item.state ?? "未取得"}</span></div>)}</div></div>
+      <div className="info-subsection"><h4>worktree 一覧</h4><div className="worktree-records">{project.worktrees.map((item) => <div className="worktree-record" key={item.path}><span className="worktree-shape" aria-hidden="true" /><strong>{item.branch ?? "detached HEAD"}</strong><code title={item.path}>{item.path}</code><CopyButton value={item.path} label={`${item.branch ?? "worktree"} のパスをコピー`} /><span className={`lane-state ${item.state === "prunable" || item.state === "locked" ? "lane-state-warn" : "lane-state-ok"}`}>{item.state ?? "未取得"}</span></div>)}</div></div>
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
     </section>
   );
 }
 
 function InfoField({ label, value, code = false }: { label: string; value: string | number | null | undefined; code?: boolean }) {
-  return <div className="info-field"><span>{label}</span>{code ? <code title={valueOrUnknown(value)}>{valueOrUnknown(value)}</code> : <strong>{valueOrUnknown(value)}</strong>}</div>;
+  return <div className="info-field"><span>{label}</span>{code ? <code title={valueOrUnknown(value)}>{valueOrUnknown(value)}</code> : <strong>{valueOrUnknown(value)}</strong>}{code && typeof value === "string" && value.length > 0 && <CopyButton value={value} label={`${label}をコピー`} />}</div>;
 }
 
 function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; defaultBranch: string | null; onOpenGit: (lane: ProjectLane) => void }) {
@@ -1048,7 +1085,7 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
       <h3>{laneLabel(lane)}</h3>
       <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={currentLaneAgent(lane)} /></div>
       <dl className="selection-list">
-        <div><dt>作業パス</dt><dd><code>{lane.path ?? "未取得"}</code></dd></div>
+        <div><dt>作業パス</dt><dd><code>{lane.path ?? "未取得"}</code>{lane.path && <CopyButton value={lane.path} label="作業パスをコピー" />}</dd></div>
         <div><dt>作業先端</dt><dd><code>{lane.head ?? "未取得"}</code></dd></div>
         <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.last_commit?.subject ?? "未取得"}<small>{exactDate(lane.last_commit?.date)}</small></dd></div>
@@ -1058,8 +1095,8 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
         <div><dt>このブランチへの合流</dt><dd>{lane.merge_targets.length ? lane.merge_targets.map((relation) => `${relation.source_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
         <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</dd></div>
       </dl>
-      {lane.next_command && <div className="selection-command"><span>Git 次コマンド</span><code>{lane.next_command.command}</code><small>{lane.next_command.reason}</small></div>}
-      <button className="primary-action" type="button" onClick={() => onOpenGit(lane)}>Git 詳細を開く</button>
+      {lane.next_command && <div className="selection-command"><span>Git 次コマンド</span><code>{lane.next_command.command}</code><CopyButton value={lane.next_command.command} label="コマンドをコピー" /><small>{lane.next_command.reason}</small></div>}
+      <button className="primary-action" type="button" disabled={!lane.path} onClick={() => onOpenGit(lane)}>Git 詳細を開く</button>{!lane.path && <p className="no-checkout">このブランチには作業ディレクトリがないため、Git状態の詳細は表示できません。</p>}
     </div>
   );
 }
@@ -1076,9 +1113,10 @@ function CommitDetail({
   onOpenGit: (lane: ProjectLane) => void;
 }) {
   const hash = "row" in event ? event.row.hash : event.commit_hash;
-  const path = lane?.path ?? project.main_path;
+  const path = project.main_path;
   const [state, setState] = useState<LoadState>("loading");
   const [detail, setDetail] = useState<CommitDetail | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
   useEffect(() => {
     if (!hash || !path) {
       setState("error");
@@ -1090,24 +1128,25 @@ function CommitDetail({
     const timer = window.setTimeout(() => {
       void fetch(`/api/repo/commit?path=${encodeURIComponent(path)}&hash=${encodeURIComponent(hash)}`, { cache: "no-store", signal: controller.signal })
         .then(async (response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return (await response.json()) as CommitDetail; })
-        .then((value) => { setDetail(value); setState("ready"); })
-        .catch((reason: unknown) => { if (reason instanceof DOMException && reason.name === "AbortError") return; setState("error"); });
+        .then((value) => { if (controller.signal.aborted) return; setDetail(value); setState("ready"); })
+        .catch((reason: unknown) => { if (controller.signal.aborted) return; setState("error"); });
     }, 150);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [hash, path]);
+  }, [hash, path, retryToken]);
   return (
     <div className="selection-content">
       <div className="selection-kicker">Git コミット</div>
       <h3>{detail?.subject ?? ("row" in event ? event.row.subject : event.subject) ?? "コミット詳細"}</h3>
-      <div className="selection-commit-meta"><code>{hash ?? "未取得"}</code><span>{"row" in event ? event.row.author : event.author ?? "author 未取得"}</span><time dateTime={"row" in event ? event.row.date ?? undefined : event.occurred_at ?? undefined}>{exactDate("row" in event ? event.row.date : event.occurred_at)}</time></div>
+      <div className="selection-commit-meta"><code>{hash ?? "未取得"}</code>{hash && <CopyButton value={hash} label="コミットIDをコピー" />}<span>{"row" in event ? event.row.author : event.author ?? "author 未取得"}</span><time dateTime={"row" in event ? event.row.date ?? undefined : event.occurred_at ?? undefined}>{exactDate("row" in event ? event.row.date : event.occurred_at)}</time></div>
       {state === "loading" && <div className="selection-loading" role="status">完全なコミット詳細を取得中…</div>}
-      {state === "error" && <div className="selection-error" role="alert">コミット詳細を取得できませんでした。</div>}
+      {state === "error" && <div className="selection-error" role="alert">コミット詳細を取得できませんでした。<button className="subtle-button" type="button" onClick={() => setRetryToken((value) => value + 1)}>再試行</button></div>}
       {state === "ready" && detail && <>
         <div className="selection-numstat"><span>変更ファイル {detail.files.length}</span><span className="additions">+{detail.files.reduce((sum, file) => sum + (typeof file.additions === "number" ? file.additions : 0), 0)}</span><span className="deletions">-{detail.files.reduce((sum, file) => sum + (typeof file.deletions === "number" ? file.deletions : 0), 0)}</span></div>
         <div className="selection-files">{detail.files.map((file) => <div key={file.path}><span>{file.additions}</span><span>{file.deletions}</span><code>{file.path}</code></div>)}</div>
         <pre className="selection-patch">{detail.patch}</pre>
+        {detail.patch_truncated && <p className="inline-note" role="status">差分が大きいため、一部を省略しています。全体は <code>git show {hash}</code> で確認できます。</p>}
       </>}
-      {lane && <button className="secondary-action" type="button" onClick={() => onOpenGit(lane)}>このレーンの Git 詳細</button>}
+      {lane?.path && <button className="secondary-action" type="button" onClick={() => onOpenGit(lane)}>このレーンの Git 詳細</button>}
     </div>
   );
 }
@@ -1132,14 +1171,20 @@ function useDialogKeyboard(
     const root = rootRef.current;
     if (!root) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
     const entry: DialogEntry = { root, onClose };
     dialogStack.push(entry);
+    // The selection becomes modal at the mobile breakpoint, potentially
+    // after Git details have opened. These layers follow DOM order, not the
+    // order in which resize effects registered their keyboard handlers.
+    dialogStack.sort((a, b) => a.root.compareDocumentPosition(b.root) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    const frame = window.requestAnimationFrame(() => {
+      if (dialogStack.at(-1) === entry && !document.querySelector("dialog[open]")) closeRef.current?.focus();
+    });
     const onKeyDown = (event: KeyboardEvent) => {
       // Nested Git details share the document listener. Only the topmost
       // dialog may consume Escape or trap Tab; lower selection state and its
       // URL remain intact until the nested dialog is closed.
-      if (dialogStack.at(-1) !== entry) return;
+      if (dialogStack.at(-1) !== entry || document.querySelector("dialog[open]")) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -1167,9 +1212,10 @@ function useDialogKeyboard(
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown, true);
+      const wasTop = dialogStack.at(-1) === entry;
       const index = dialogStack.indexOf(entry);
       if (index >= 0) dialogStack.splice(index, 1);
-      if (previous?.isConnected && !rootRef.current?.contains(previous)) previous.focus();
+      if (wasTop && previous?.isConnected && !rootRef.current?.contains(previous)) previous.focus();
     };
   }, [closeRef, onClose, rootRef, modal]);
 }
@@ -1200,6 +1246,11 @@ function SelectionPane({
     return () => media.removeEventListener("change", sync);
   }, []);
   useDialogKeyboard(panelRef, closeRef, onClose, modal);
+  useEffect(() => {
+    if (modal) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+  }, [modal]);
   const lane = project.lanes.find((item) => item.id === selectedLane) ?? (selectedEvent && "lane" in selectedEvent ? selectedEvent.lane : null);
   return (
     <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal={modal ? true : undefined} role={modal ? "dialog" : "complementary"} tabIndex={-1}>
@@ -1231,9 +1282,9 @@ function LegacyGitModal({
   useDialogKeyboard(panelRef, closeRef, onClose);
   return (
     <div className="legacy-overlay">
-      <div ref={panelRef} className="legacy-panel" role="dialog" aria-modal="true" aria-label="既存Git詳細" tabIndex={-1}>
+      <div ref={panelRef} className="legacy-panel" role="dialog" aria-modal="true" aria-label="Git詳細" tabIndex={-1}>
         <div className="legacy-panel-head">
-          <div><span className="eyebrow">EXISTING GIT DETAIL</span><strong>{repo.branch ?? repo.name}</strong></div>
+          <div><span className="eyebrow">GIT DETAIL</span><strong>{repo.branch ?? repo.name}</strong></div>
           <button ref={closeRef} className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={onClose}>×</button>
         </div>
         <RepoDetail activeTab={tab} copied={copied} onCopy={onCopy} onTabChange={onTabChange} repo={repo} />
@@ -1249,7 +1300,7 @@ function LegacyUnavailableModal({ onClose }: { onClose: () => void }) {
   useDialogKeyboard(panelRef, closeRef, onClose);
   return (
     <div className="legacy-overlay">
-      <div ref={panelRef} className="legacy-panel legacy-unavailable" role="dialog" aria-modal="true" aria-label="既存Git詳細" tabIndex={-1}>
+      <div ref={panelRef} className="legacy-panel legacy-unavailable" role="dialog" aria-modal="true" aria-label="Git詳細" tabIndex={-1}>
         <button ref={closeRef} className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={onClose}>×</button>
         <p>この Git checkout の状態は未取得です。</p>
       </div>
@@ -1260,9 +1311,20 @@ function LegacyUnavailableModal({ onClose }: { onClose: () => void }) {
 export default function ProjectControl() {
   const { repos, scanning, connected, latestAgentEvent } = useRepoStream();
   const { state: urlState, update: updateUrl } = useProjectUrl();
+  const homeQuery = useSearchParams().get("home");
+  const homeHref = homeReturnHref(homeQuery);
   const [project, setProject] = useState<ProjectResponse | null>(null);
   const [projectState, setProjectState] = useState<LoadState>("idle");
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const resourceKey = `${urlState.path}|${urlState.range}`;
+  const retryProject = () => setReloadToken((value) => value + 1);
+  const [laneQuery, setLaneQuery] = useState("");
+  const [laneFilter, setLaneFilter] = useState<LaneFilter>("all");
+  const [laneOrder, setLaneOrder] = useState<LaneOrder>("name");
+  const [activityQuery, setActivityQuery] = useState("");
+  const [activityOrder, setActivityOrder] = useState<ActivityOrder>("newest");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [gitPath, setGitPath] = useState<string | null>(null);
   const [gitTab, setGitTab] = useState<DetailTab>("status");
@@ -1297,29 +1359,29 @@ export default function ProjectControl() {
     if (!urlState.path) {
       setProject(null);
       setProjectState("error");
-      setProjectError("プロジェクトの path がありません");
+      setProjectError("プロジェクトが指定されていません。一覧からプロジェクトを選択してください。");
       return;
     }
     const controller = new AbortController();
     setProjectState("loading");
     setProjectError(null);
-    void fetch(`/api/project?path=${encodeURIComponent(urlState.path)}&range=${encodeURIComponent(urlState.range)}`, { cache: "no-store", signal: controller.signal })
-      .then(async (response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return (await response.json()) as ProjectResponse; })
-      .then((value) => { setProject(value); setProjectState("ready"); })
-      .catch((reason: unknown) => { if (reason instanceof DOMException && reason.name === "AbortError") return; setProjectState("error"); setProjectError(reason instanceof Error ? reason.message : "unknown error"); });
-    return () => controller.abort();
-  }, [projectSnapshotKey, scanning, urlState.path, urlState.range]);
+    const projectPath = urlState.path;
+    const timer = window.setTimeout(() => {
+    void fetch(`/api/project?path=${encodeURIComponent(projectPath)}&range=${encodeURIComponent(urlState.range)}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => { if (!response.ok) throw new Error(response.status === 404 ? "指定されたプロジェクトが見つかりません。一覧から選び直してください。" : `サーバーから情報を取得できませんでした（HTTP ${response.status}）。`); return (await response.json()) as ProjectResponse; })
+      .then((value) => { if (controller.signal.aborted) return; setProject(value); setLoadedKey(resourceKey); setProjectState("ready"); })
+      .catch((reason: unknown) => { if (controller.signal.aborted) return; setProjectState("error"); setProjectError(reason instanceof TypeError ? "サーバーとの通信を確認してから再試行してください。" : reason instanceof Error ? reason.message : "情報の取得に失敗しました。"); });
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [projectSnapshotKey, resourceKey, reloadToken, urlState.path, urlState.range]);
 
   useEffect(() => {
     if (!project || !latestAgentEvent) return;
-    const matches = (latestAgentEvent.project_id && latestAgentEvent.project_id === project.id)
-      || latestAgentEvent.worktree === project.main_path
-      || project.lanes.some((lane) => lane.path === latestAgentEvent.worktree || lane.branch === latestAgentEvent.branch);
-    if (!matches) return;
+    if (!projectMatchesAgentEvent(project, latestAgentEvent)) return;
     setProject((current) => {
       if (!current) return current;
       const summary = mergeAgentSnapshot(current, latestAgentEvent);
-      const lane = current.lanes.find((item) => item.path === latestAgentEvent.worktree || item.branch === latestAgentEvent.branch);
+      const lane = current.lanes.find((item) => laneMatchesAgentEvent(item, latestAgentEvent));
       const activity = {
         id: `agent:${latestAgentEvent.event_id}`,
         occurred_at: latestAgentEvent.occurred_at,
@@ -1349,7 +1411,7 @@ export default function ProjectControl() {
           : [...current.agent_events, latestAgentEvent],
         events: current.events.some((item) => item.id === activity.id) ? current.events : [...current.events, activity],
         lanes: current.lanes.map((item) => (
-          item.path === latestAgentEvent.worktree || item.branch === latestAgentEvent.branch
+          laneMatchesAgentEvent(item, latestAgentEvent)
             ? { ...item, agent: latestAgentEvent }
             : item
         )),
@@ -1362,13 +1424,13 @@ export default function ProjectControl() {
   useEffect(() => {
     if (!selectedHash && !selectedLane) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented || gitPath || document.querySelector("dialog[open]")) return;
       event.preventDefault();
       updateUrl({ event: null, lane: null });
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedHash, selectedLane, updateUrl]);
+  }, [selectedHash, selectedLane, updateUrl, gitPath]);
   const selectedEvent = useMemo(() => {
     if (!project || !selectedHash) return null;
     const lane = project.lanes.find((item) => item.id === selectedLane);
@@ -1420,8 +1482,8 @@ export default function ProjectControl() {
   const openGit = useCallback((lane: ProjectLane) => {
     setCopyError(null);
     if (lane.path) setGitPath(lane.path);
-    else if (project?.main_path) setGitPath(project.main_path);
-  }, [project?.main_path]);
+
+  }, []);
   const closeGit = useCallback(() => {
     setCopyError(null);
     setGitPath(null);
@@ -1429,22 +1491,23 @@ export default function ProjectControl() {
   const closeSelection = useCallback(() => updateUrl({ event: null, lane: null }), [updateUrl]);
   const selectedKey = selectedHash && selectedLane ? flowEventKey(selectedLane, selectedHash) : null;
 
-  if (projectState === "loading" || !project) {
+  if (!project || loadedKey !== resourceKey) {
     return (
-      <main className="control-shell"><header className="control-topbar"><a className="back-link" href="/">← プロジェクト一覧</a><span className="connection-state"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "同期中" : "接続待ち"}</span></header><div className="control-state" role="status">{projectState === "loading" ? "プロジェクト管制画面を取得中…" : projectError ?? "プロジェクトを選択してください"}</div></main>
+      <main className="control-shell" id="main-content" tabIndex={-1}>
+        <header className="control-topbar"><Link className="back-link" href={homeHref}>← プロジェクト一覧</Link><span className="connection-state"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}</span></header>
+        {projectState === "error" ? <div className="control-state control-error" role="alert"><strong>プロジェクト情報を取得できませんでした。</strong><span>{projectError}</span>{urlState.path && <button className="subtle-button" type="button" onClick={retryProject}>再試行</button>}</div> : <div className="control-state" role="status">プロジェクトを読み込み中…</div>}
+      </main>
     );
-  }
-  if (projectState === "error") {
-    return <main className="control-shell"><header className="control-topbar"><a className="back-link" href="/">← プロジェクト一覧</a></header><div className="control-state control-state-error" role="alert">プロジェクト情報を取得できませんでした。<span className="sr-only">{projectError}</span></div></main>;
   }
 
   return (
-    <main className="control-shell">
+    <main className="control-shell" id="main-content" tabIndex={-1}>
       <header className="control-topbar">
-        <a className="back-link" href="/">← プロジェクト一覧</a>
-        <div className="control-status"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "Git同期中" : "接続待ち"}{scanning && " · 走査中"}</div>
-        <button className="rescan-button" disabled={scanning} type="button" onClick={() => void fetch("/api/rescan", { method: "POST" })}>{scanning ? "走査中…" : "再走査"}</button>
+        <Link className="back-link" href={homeHref}>← プロジェクト一覧</Link>
+        <div className="control-status"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{projectState === "loading" && " · 情報を更新中"}</div>
+        <div className="control-topbar-tools"><ProjectSwitcher currentPath={urlState.path} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /></div>
       </header>
+      {projectState === "error" && <div className="project-refresh-error" role="alert"><span>最新情報を取得できませんでした。前回取得した内容を表示しています。</span><button className="subtle-button" type="button" onClick={retryProject}>再試行</button></div>}
       <section className="control-hero" aria-labelledby="project-title">
         <div className="control-hero-main"><div className="project-identity"><h1 id="project-title">{project.name}</h1><span className="project-baseline">既定 <strong>{project.default_branch ?? "未取得"}</strong></span><span className="project-lane-count">{project.lanes.length} ブランチ</span><span className="project-url-control"><button aria-describedby={projectUrlCopyState !== "idle" ? "project-url-copy-feedback" : undefined} className="subtle-button project-url-copy" type="button" onClick={copyCurrentProjectUrl}>{projectUrlCopyState === "success" ? "URLをコピーしました" : "この画面のURLをコピー"}</button><span aria-live="polite" className="project-url-feedback" id="project-url-copy-feedback" role={projectUrlCopyState === "error" ? "alert" : projectUrlCopyState === "success" ? "status" : undefined}>{projectUrlCopyState === "success" ? "現在のプロジェクト画面URLをコピーしました。" : projectUrlCopyState === "error" ? "URLをコピーできませんでした。ブラウザのクリップボード機能を利用できません。" : "\u00a0"}</span></span></div><details className="project-context"><summary>プロジェクトの概要・集計</summary><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div>
         <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>統合可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div></details></div>
@@ -1462,8 +1525,8 @@ export default function ProjectControl() {
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
           {urlState.tab === "flow" && <FlowMap selectedLane={selectedLane} onSelectLane={selectLane} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
-          {urlState.tab === "lanes" && <WorkLanes onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
-          {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView filter={activityFilter} onFilter={(filter) => { setActivityFilter(filter); updateUrl({ event: null }); }} onSelect={selectEvent} project={project} /></>}
+          {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
+          {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => { setActivityFilter(filter); updateUrl({ event: null }); }} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} />}
         </section>
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}

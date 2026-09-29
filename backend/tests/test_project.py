@@ -791,3 +791,30 @@ def test_project_marks_a_prunable_linked_worktree_as_foldable_git_fact(tmp_path:
     assert stale["is_worktree"] is True
     assert stale["worktree_state"] == "prunable"
     assert result["maintenance"]["prunable"] == 1
+
+
+def test_readme_html_intro_is_plain_prose(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text(
+        '<div align="center"><h1>Project title</h1>\n'
+        '<p><strong>Readable</strong> &amp; useful description.</p>\n'
+        '<p><img alt="badge" src="https://example.invalid/badge"></p></div>',
+        encoding="utf-8",
+    )
+    assert project._readme_description(str(tmp_path)) == "Readable & useful description."
+
+
+def test_readme_skips_markup_only_and_code_sections(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text(
+        '# Title\n\n```sh\nprintf ignored\n```\n\n'
+        '<script>ignored()</script><style>.ignored {}</style><pre>ignored code</pre>\n'
+        '<p>The actual explanation.</p>', encoding="utf-8",
+    )
+    assert project._readme_description(str(tmp_path)) == "The actual explanation."
+    (tmp_path / "README.md").write_text('<h1>Title</h1><img alt="badge" src="x">', encoding="utf-8")
+    assert project._readme_description(str(tmp_path)) is None
+
+
+def test_readme_plain_markdown_and_missing_file(tmp_path: Path) -> None:
+    assert project._readme_description(str(tmp_path)) is None
+    (tmp_path / "README.md").write_text('# Title\n\nA plain explanation.\nSecond line.\n\nLater paragraph.', encoding="utf-8")
+    assert project._readme_description(str(tmp_path)) == "A plain explanation. Second line."

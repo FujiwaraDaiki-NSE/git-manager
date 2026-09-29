@@ -1033,7 +1033,7 @@ async def get_projects() -> dict[str, Any]:
     """Return lightweight project cards without loading graph/diff data."""
     with STATE_LOCK:
         snapshot = {path: dict(repo) for path, repo in STATE.items()}
-    projects = project.summary_rows(snapshot)
+    projects = await asyncio.get_running_loop().run_in_executor(pool, project.summary_rows, snapshot)
     return {
         "count": len(projects),
         "scanning": scanning["active"],

@@ -126,3 +126,11 @@ test("favorites storage accepts only string ids and removes duplicates", () => {
   assert.equal(parseFavoriteIds("invalid"), null);
   assert.deepEqual(parseFavoriteIds(null), []);
 });
+
+test("returning to the list restores only local filter parameters", async () => {
+  const { homeReturnHref } = await import("../app/home-overview.mjs");
+  assert.equal(homeReturnHref(null), "/");
+  assert.equal(homeReturnHref("q=git&sort=name&density=compact"), "/?q=git&sort=name&density=compact");
+  assert.equal(homeReturnHref("https://external.example/path"), "/");
+  assert.equal(homeReturnHref("git=invalid"), "/?git=invalid");
+});

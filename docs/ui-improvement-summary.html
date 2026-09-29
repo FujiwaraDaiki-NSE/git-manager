@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>gitdash UI改善 — 2026-09-29</title>
+<style>
+:root{color-scheme:light dark;font-family:system-ui,sans-serif;background:#101722;color:#e4edf8}body{max-width:1040px;margin:auto;padding:48px 24px;line-height:1.8}h1{font-size:2.3rem;line-height:1.3}h2{margin-top:42px;font-size:1.4rem;color:#a8d8ff}p,li{color:#c4d2e3}header{border-bottom:1px solid #344356;padding-bottom:24px}.tag{color:#8fe2c1;font-weight:600}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.card{background:#1b2635;border:1px solid #344356;border-radius:12px;padding:20px}.card strong{display:block;font-size:1.9rem;color:#94d4ff}.card small{display:block;color:#b8c8dc}table{border-collapse:collapse;width:100%;font-size:.95rem}th,td{text-align:left;border-bottom:1px solid #344356;padding:12px;vertical-align:top}code{overflow-wrap:anywhere;color:#b5dfef}a{color:#94d4ff}.note{border-left:3px solid #74bbf0;padding:12px 20px;background:#1b2635}footer{margin-top:44px;color:#a4b4c8;font-size:.9rem}@media(max-width:600px){body{padding:28px 16px}table{font-size:.82rem}th,td{padding:8px}}
+</style></head><body>
+<header><p class="tag">gitdash · UI改善ループ · 2026年9月29日</p><h1>状態を読み取りやすく、<br>操作を途切れさせない画面へ</h1><p>複数プロジェクトの一覧から、ブランチ・worktree・コミットの詳細までを改善。実データを使ったGUI E2Eで問題を再現し、修正とコンテナ反映を繰り返した。</p></header>
+<h2>変更内容</h2><table><thead><tr><th>領域</th><th>内容と理由</th></tr></thead><tbody>
+<tr><td>プロジェクト一覧</td><td>見出し、カード、状態バッジ、選択中フィルターを整理。未取得の情報を折りたたみ、検索・並べ替え・表示密度を保ったまま詳細と一覧を往復できる。</td></tr>
+<tr><td>操作</td><td>Ctrl/Cmd+Kでプロジェクト切り替え、/で一覧検索、一覧からの再走査、ライト・ダーク・自動テーマ、パスやコマンドのコピーを追加。</td></tr>
+<tr><td>作業一覧</td><td>変更あり・競合・未push・未pull・worktreeの絞り込みと、名前・要対応・最新コミット順を追加。狭い画面では表をカード表示にする。</td></tr>
+<tr><td>履歴とグラフ</td><td>ブランチへの移動、取得範囲外の先端の明示、大きな差分の省略案内。多数の関連ブランチは開いて確認でき、閉じている間は個別名の描画を省く。実データの画面要素数は51,080から12,936へ減少。</td></tr>
+<tr><td>説明文</td><td>HTMLで装飾されたREADMEから説明文を抽出。見出し、画像バッジ、スクリプト・スタイル・コード例を説明として表示しない。</td></tr>
+<tr><td>状態の正確性</td><td>未取得を0や正常状態として扱わない。作業パスがないブランチのGit操作を無効化し理由を表示。別プロジェクトの同名ブランチへのagentイベント混入を修正。</td></tr>
+<tr><td>継続性と復帰</td><td>再走査中も検索と表示内容を保持。古い応答を破棄し、通信エラーを明示。プロジェクトとコミット詳細の再試行、入れ子の詳細画面のEscape・フォーカス復帰を調整。開いたまま画面幅を変更しても、最前面の詳細だけを閉じる。</td></tr>
+</tbody></table>
+<h2>実測した性能改善</h2><div class="cards">
+<div class="card"><small>94プロジェクトの一覧API</small><strong>1.267秒 → 約0.375秒</strong><p>Git状態の読み出しを最大4並列に制限。3回の測定は0.373 / 0.378 / 0.374秒。</p></div>
+<div class="card"><small>一覧取得中のhealth応答</small><strong>1.167秒 → 0.002秒</strong><p>ブロッキング処理をAPIのイベントループから分離。</p></div>
+<div class="card"><small>54ブランチ・1,078コミットの祖先探索</small><strong>15.8秒 → 約3ms</strong><p>共有祖先の重複探索を除去。全54ブランチで変更前と返す経路が一致。ページ全体の読み込み時間を示す数値ではない。</p></div>
+<div class="card"><small>frontend Docker送信コンテキスト</small><strong>474MB → 372KB</strong><p>node_modulesとビルド生成物を除外。lockfileに従ってnpm ciを実行。</p></div>
+</div><p class="note">単一の稼働環境・実データでの測定値。ハードウェアやリポジトリ規模によって所要時間は変わる。</p>
+<h2>確認結果</h2><ul>
+<li>frontend: 52テスト成功。共有祖先の多い履歴、20,000コミットの深い履歴、絞り込み、ソート、URL状態、イベントの関連付けを含む。</li>
+<li>backend: 69テスト成功。一覧処理中にもhealth APIが応答する回帰テストを追加。</li>
+<li>Next.jsの本番ビルド、Dockerビルドと起動を確認。standaloneの成果物が存在することをDockerビルド内で検証。</li>
+<li>GUI: 実データ94プロジェクト、検索・お気に入り・フィルター・表示密度・戻る操作・再走査・クイック切り替え・グラフ移動・履歴検索を確認。</li>
+<li>GUI: 320px/390pxとデスクトップ、ライト/ダーク、キーボード操作、コピー、入れ子の詳細画面を確認。モバイル詳細の画面端の切れを修正し、閉じるボタンをスクロール時にも保持。</li>
+<li>GUI: 通信遮断時のプロジェクト・コミット詳細エラーと再試行、再走査の未確認表示を検証。更新通信だけが失敗した場合も前回の一覧・検索を保持し、古い取得内容であることを明示。ブラウザだけのテスト用レスポンスで入力待ち・競合・未取得・パスなしを確認し、介入を解除。</li>
+</ul><p>レビューは依頼どおり実施していない。テストは上記の操作範囲を検証するもので、すべての環境・入力で不具合が存在しないことを保証するものではない。</p>
+<h2>状態更新について</h2><p>Git状態は取得時点の情報。ターミナルのpush後、参照の自動監視だけでは画面がすぐに更新されないケースを確認した。一覧・詳細の「再走査」で最新化できる。今回、監視対象ディレクトリを広げる変更は含めていない。</p>
+<h2>反映と運用</h2><p>作業ブランチ <code>codex/ui-improvement-loop</code>。既存の <code>.env</code> と永続ボリュームを維持してDocker Composeへ反映。pull/pushなどのGit操作は従来どおりユーザーがターミナルで行う。</p><p><a href="http://localhost:4412">稼働中のgitdashを開く</a></p>
+<footer>開発者向けサマリー。詳細な作業記録は <code>docs/ui-improvement-loop.md</code>。</footer></body></html>
