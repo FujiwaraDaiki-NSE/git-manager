@@ -343,7 +343,7 @@ function FlowEventPopover({
         変更 {event.row.stats ? `${event.row.stats.files} ファイル · +${event.row.stats.additions ?? "?"} / -${event.row.stats.deletions ?? "?"}` : "未取得"}
       </span>
       <span>
-        {event.row.stats?.paths.length ? `変更ファイル ${event.row.stats.paths.join(" · ")}` : "変更ファイル 未取得"}
+        {event.row.stats?.paths.length ? `変更ファイル ${event.row.stats.paths.join(" · ")}` : event.row.stats?.files === 0 ? "変更ファイルなし" : "変更ファイル 未取得"}
       </span>
       <span>
         branch {event.lane.branch ?? "未取得"} · {event.row.is_head ? "HEAD" : "HEAD ではない"}
@@ -1053,7 +1053,7 @@ function ActivityView({
         ))}
       </div>
       {events.length === 0 ? (
-        <div className="empty-activity">{normalizedQuery ? "検索に一致するイベントはありません。" : "この種別のイベントは未取得です。"}{(normalizedQuery || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); }}>絞り込みを解除</button>}</div>
+        <div className="empty-activity">{normalizedQuery ? "検索に一致するイベントはありません。" : "この条件に一致するイベントはありません。"}{(normalizedQuery || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); }}>絞り込みを解除</button>}</div>
       ) : (
         <ol className="activity-list" ref={listRef}>
           {shown.map((event) => (
@@ -1117,7 +1117,7 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
         <div><dt>作業パス</dt><dd><code>{lane.path ?? "未取得"}</code>{lane.path && <CopyButton value={lane.path} label="作業パスをコピー" />}</dd></div>
         <div><dt>作業先端</dt><dd><code>{lane.unborn ? "初回コミット前" : lane.head ?? "未取得"}</code></dd></div>
         <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
-        <div><dt>最終イベント</dt><dd>{lane.last_commit?.subject ?? "未取得"}<small>{exactDate(lane.last_commit?.date)}</small></dd></div>
+        <div><dt>最終イベント</dt><dd>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "未取得"}{!lane.unborn && <small>{exactDate(lane.last_commit?.date)}</small>}</dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
         <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}</dd></div>
         <div><dt>担当 agent</dt><dd>{currentLaneAgent(lane)?.agent_id || "未関連付け"}</dd></div>

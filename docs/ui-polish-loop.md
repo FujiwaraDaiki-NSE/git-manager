@@ -103,3 +103,9 @@
 - Real fixture: one commit adding 4,000 lines (4,007 patch lines including metadata). Before the change, initial rendering created 16,043 elements inside the patch view.
 - Render the first 300 patch lines, with explicit next-page/all-lines controls and a count. Initial patch DOM is now 1,219 elements, about 92% fewer. Parser output and copied patch stay complete.
 - GUI E2E: initial 300 → 600 → all 4,007 → first 300; focus moves to the first new row. Confirmed the last addition is `line 4000` and clipboard output includes it. At 390px in light mode the page width remained within the viewport.
+
+## Integrated large-project and empty-result checks
+
+- After the graph stats and detail changes, loaded the real design_db project: 1,078 commits/events, 54 lanes. The all-period API responded in 2.27 seconds in this local run (single observation, not a benchmark).
+- Activity initially renders 100 events; searching the earliest Japanese commit searches all 1,078. URL copying and reloading retained its Japanese query and oldest-first sort. The full-period graph rendered 217 visible commit controls and stayed within the viewport. No warning/error console entries during this pass.
+- Empty-commit graph tooltip reports 0 files and 変更ファイルなし. An event filter with zero matches states この条件に一致するイベントはありません rather than claiming unavailable data.
