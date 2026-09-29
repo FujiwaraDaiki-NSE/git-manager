@@ -251,7 +251,7 @@ export type ProjectSummary = {
   next_lane: string | null;
   largest_difference_lane: string | null;
   agent_counts: AgentCounts;
-  agent_tasks: AgentTask[];
+  agent_tasks: AgentTask[] | null;
   agent_state: AgentRunState | null;
   agent_priority_counts: AgentPriorityCounts;
   latest_agent_event: AgentEvent | null;
@@ -279,7 +279,7 @@ export type ProjectResponse = {
   languages: string[] | null;
   directories: string[] | null;
   test_commands: string[] | null;
-  agent_tasks: AgentTask[];
+  agent_tasks: AgentTask[] | null;
   agent_counts: AgentCounts;
   agent_priority_counts: AgentPriorityCounts;
   agent_state: AgentRunState | null;

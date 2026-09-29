@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentSnapshotAt, agentStateLabel, agentTaskState, laneAgentSnapshotAt, mergeAgentSnapshot } from "./agent-overview.mjs";
 import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, recentTimePosition, recentTimeAt, graphTimeTicks, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { activityMatchesSearch, compareActivityEvents, laneMatchesSearch, normalizedSearchQuery } from "./project-search.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -21,7 +22,9 @@ import type {
 type ControlTab = "flow" | "lanes" | "activity" | "info";
 type TimeRange = "current" | "24h" | "7d" | "all";
 type ActivityFilter = "all" | "commit" | "edit" | "test" | "review" | "input";
+type ActivityOrder = "newest" | "oldest";
 type LoadState = "idle" | "loading" | "ready" | "error";
+type CopyStatus = "idle" | "success" | "error";
 type ProjectUrlChanges = Record<string, string | number | boolean | null | undefined>;
 
 const tabs: { id: ControlTab; label: string; short: string }[] = [
@@ -35,7 +38,7 @@ const ranges: { id: TimeRange; label: string }[] = [
   { id: "current", label: "各ブランチの先端" },
   { id: "24h", label: "24時間" },
   { id: "7d", label: "7日" },
-  { id: "all", label: "取得済み履歴" },
+  { id: "all", label: "全期間" },
 ];
 
 const activityFilters: { id: ActivityFilter; label: string }[] = [
@@ -46,6 +49,16 @@ const activityFilters: { id: ActivityFilter; label: string }[] = [
   { id: "review", label: "レビュー" },
   { id: "input", label: "入力待ち" },
 ];
+
+async function writeClipboard(value: string) {
+  if (typeof navigator === "undefined" || !navigator.clipboard) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function relativeTime(iso: string | null | undefined) {
   if (!iso) return "未取得";
@@ -536,7 +549,9 @@ function FlowMap({
     const updateWidth = () => {
       const labelWidth = Math.round(label.getBoundingClientRect().width);
       setRenderedLabelWidth((current) => current === labelWidth ? current : labelWidth);
-      const next = Math.max(0, Math.round(scroll.clientWidth - labelWidth));
+      const scrollStyle = getComputedStyle(scroll);
+      const horizontalPadding = parseFloat(scrollStyle.paddingLeft) + parseFloat(scrollStyle.paddingRight);
+      const next = Math.max(0, Math.round(scroll.clientWidth - horizontalPadding - labelWidth));
       setAvailableTrackWidth((current) => current === next ? current : next);
     };
     updateWidth();
@@ -656,7 +671,7 @@ function FlowMap({
   return (
     <section className="flow-section" aria-labelledby="flow-map-title">
       <div className="flow-controls">
-        <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチ名で作業詳細、点でコミット詳細を開きます。</p></div><span className="flow-direction">過去を圧縮 → 直近を詳しく</span></div>
+        <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチを選ぶと作業の詳細、点を選ぶとコミットの詳細を開けます。</p></div><span className="flow-direction">過去を圧縮 → 直近を詳しく</span></div>
         <div className="flow-toolbar">
           <div className="range-tabs" role="group" aria-label="表示するコミット">
             <span className="flow-control-label">表示範囲</span>
@@ -814,7 +829,7 @@ function FlowMap({
         <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
         <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は合流元コミットの日時から合流コミットの日時へ進み、途中の矢印で合流方向を示します。その日時の間で線を分け、同時刻の場合は垂直に接続します。破線は合流元が表示範囲外です。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。agent状態は明示された報告を表示します。</p>
       </details>
-      {project.graph?.truncated && <div className="inline-note">全履歴の取得上限は 200 件です。表示範囲外の履歴は未取得です。</div>}
+      {project.graph?.truncated && <div className="inline-note">直近 200 件から表示しています。それ以前の履歴は「全期間」で確認できます。</div>}
     </section>
   );
 }
@@ -848,10 +863,19 @@ function WorkLanes({
   showMerged: boolean;
   onShowMergedChange: (value: boolean) => void;
 }) {
-  const relationLaneIds = new Set(project.merge_relations.flatMap((relation) => (
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedQuery = normalizedSearchQuery(searchQuery);
+  const relationLaneIds = useMemo(() => new Set(project.merge_relations.flatMap((relation) => (
     [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
-  )));
-  const lanes = project.lanes.filter((lane) => showMerged || relationLaneIds.has(lane.id) || lane.branch === project.default_branch || !isFoldedMerged(lane));
+  ))), [project.merge_relations]);
+  const visibleLanes = useMemo(
+    () => project.lanes.filter((lane) => showMerged || relationLaneIds.has(lane.id) || lane.branch === project.default_branch || !isFoldedMerged(lane)),
+    [project.lanes, relationLaneIds, showMerged, project.default_branch],
+  );
+  const lanes = useMemo(
+    () => visibleLanes.filter((lane) => laneMatchesSearch(lane, normalizedQuery)),
+    [normalizedQuery, visibleLanes],
+  );
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
   return (
     <section className="lanes-section" aria-labelledby="lanes-title">
@@ -859,16 +883,24 @@ function WorkLanes({
         <div>
 
           <h3 id="lanes-title">作業一覧</h3>
-          <p className="section-copy">Git の状態と agent の明示した現在地、次の判断を一覧します。</p>
+          <p className="section-copy">ブランチごとの状態と、次に確認したいことをまとめています。</p>
         </div>
         {mergedCount > 0 && <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "merged を折り畳む" : `merged・完了を表示 (${mergedCount})`}</button>}
+      </div>
+      <div className="project-search-toolbar" role="search" aria-label="作業レーンを検索">
+        <label>
+          <span>検索</span>
+          <input aria-label="作業レーンを検索" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="ブランチ・パス・名前" />
+        </label>
+        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => setSearchQuery("")}>クリア</button>
+        <span role="status">{lanes.length} / {visibleLanes.length} 件</span>
       </div>
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
             <tr><th>作業</th><th>状態 / agent</th><th>最終活動</th><th>既定ブランチとの差</th><th>最新メッセージ</th><th>合流関係</th><th>次の工程 / 注意</th><th aria-label="操作" /></tr>
           </thead>
-          <tbody>
+          <tbody id="project-lane-results">
             {lanes.map((lane) => (
               <tr className={selectedLane === lane.id ? "is-selected" : ""} key={lane.id}>
                 <td>
@@ -893,7 +925,7 @@ function WorkLanes({
           </tbody>
         </table>
       </div>
-      {lanes.length === 0 && <div className="empty-flow">表示できる作業レーンはありません。</div>}
+      {lanes.length === 0 && <div className="empty-flow">{normalizedQuery ? "検索に一致する作業レーンはありません。" : "表示できる作業レーンはありません。"}</div>}
     </section>
   );
 }
@@ -909,6 +941,9 @@ function ActivityView({
   onFilter: (filter: ActivityFilter) => void;
   onSelect: (event: ProjectEvent) => void;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [order, setOrder] = useState<ActivityOrder>("newest");
+  const normalizedQuery = normalizedSearchQuery(searchQuery);
   const unifiedEvents = useMemo(() => project.events.map((event) => ({
     ...event,
     commit_hash: event.commit_hash ?? null,
@@ -919,21 +954,36 @@ function ActivityView({
     agent_phase: event.source === "agent" ? event.phase ?? null : null,
     attention: event.source === "agent" ? event.attention ?? null : null,
   })), [project.events]);
-  const events = useMemo(() => {
-    const filtered = unifiedEvents.filter((event) => {
-      if (filter === "all") return true;
-      if (filter === "commit") return event.type === "commit";
-      if (filter === "edit") return event.agent_phase === "implementing";
-      if (filter === "test") return event.agent_phase === "testing";
-      if (filter === "review") return event.agent_state === "review_required" || event.agent_state === "reviewing";
-      return event.agent_state === "waiting_for_user";
-    });
-    return [...filtered].sort((a, b) => (b.occurred_at ?? "").localeCompare(a.occurred_at ?? "") || b.observed_at - a.observed_at);
-  }, [filter, unifiedEvents]);
+  const filterEvents = useMemo(() => unifiedEvents.filter((event) => {
+    if (filter === "all") return true;
+    if (filter === "commit") return event.type === "commit";
+    if (filter === "edit") return event.agent_phase === "implementing";
+    if (filter === "test") return event.agent_phase === "testing";
+    if (filter === "review") return event.agent_state === "review_required" || event.agent_state === "reviewing";
+    return event.agent_state === "waiting_for_user";
+  }), [filter, unifiedEvents]);
+  const events = useMemo(() => [...filterEvents]
+    .filter((event) => activityMatchesSearch(event, normalizedQuery))
+    .sort((a, b) => compareActivityEvents(a, b, order)), [filterEvents, normalizedQuery, order]);
   return (
     <section className="activity-section" aria-labelledby="activity-title">
       <div className="section-heading-row">
-        <div><h3 id="activity-title">アクティビティ</h3><p className="section-copy">Git と agent のイベントを絶対時刻順に表示します。発生元と状態は文字でも確認できます。</p></div>
+        <div><h3 id="activity-title">アクティビティ</h3><p className="section-copy">このプロジェクトで起きたことを、見やすい順番で確認できます。</p></div>
+      </div>
+      <div className="project-search-toolbar" role="search" aria-label="アクティビティを検索">
+        <label>
+          <span>検索</span>
+          <input aria-label="アクティビティを検索" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="件名・概要・担当者・ブランチ" />
+        </label>
+        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => setSearchQuery("")}>クリア</button>
+        <label>
+          <span>並び順</span>
+          <select aria-label="アクティビティの並び順" value={order} onChange={(event) => setOrder(event.target.value as ActivityOrder)}>
+            <option value="newest">新しい順</option>
+            <option value="oldest">古い順</option>
+          </select>
+        </label>
+        <span role="status">{events.length} / {filterEvents.length} 件</span>
       </div>
       <div className="activity-filters" role="toolbar" aria-label="イベント種別">
         {activityFilters.map((item) => (
@@ -943,7 +993,7 @@ function ActivityView({
         ))}
       </div>
       {events.length === 0 ? (
-        <div className="empty-activity">この種別のイベントは未取得です。</div>
+        <div className="empty-activity">{normalizedQuery ? "検索に一致するイベントはありません。" : "この種別のイベントは未取得です。"}</div>
       ) : (
         <ol className="activity-list">
           {events.map((event) => (
@@ -963,7 +1013,7 @@ function ActivityView({
 function ProjectInfo({ project }: { project: ProjectResponse }) {
   return (
     <section className="info-section" aria-labelledby="info-title">
-      <div className="section-heading-row"><div><h3 id="info-title">プロジェクト情報</h3><p className="section-copy">Git と明示的に取得できた保守情報だけを表示します。</p></div></div>
+      <div className="section-heading-row"><div><h3 id="info-title">プロジェクト情報</h3><p className="section-copy">このプロジェクトの基本情報と、今わかっている管理状況です。</p></div></div>
       <div className="info-grid">
         <div className="info-card info-card-wide"><span className="eyebrow">説明</span><p>{project.description || "説明なし"}</p></div>
         <InfoField label="リモート URL" value={project.remote} code />
@@ -978,9 +1028,9 @@ function ProjectInfo({ project }: { project: ProjectResponse }) {
         <InfoField label="使用言語" value={project.languages ? project.languages.join(", ") : null} />
         <InfoField label="主要ディレクトリ" value={project.directories ? project.directories.join(", ") : null} />
         <InfoField label="テストコマンド" value={project.test_commands ? project.test_commands.join(" / ") : null} />
-        <InfoField label="関連 agent タスク" value={`${project.agent_tasks.length} 件`} />
+        <InfoField label="関連 agent タスク" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
-      <div className="info-subsection"><h4>関連 Codex タスク</h4>{project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={task.task_id}><div><strong>{task.task_id}</strong><span>{task.agent_id || "agent 未取得"} · {agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">agent 状態不明（関連タスク未取得）</div>}</div>
+      <div className="info-subsection"><h4>関連 Codex タスク</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent 状態不明（関連タスク未取得）</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={task.task_id}><div><strong>{task.task_id}</strong><span>{task.agent_id || "agent 未取得"} · {agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">関連するタスクはありません。</div>}</div>
       <div className="info-subsection"><h4>worktree 一覧</h4><div className="worktree-records">{project.worktrees.map((item) => <div className="worktree-record" key={item.path}><span className="worktree-shape" aria-hidden="true" /><strong>{item.branch ?? "detached HEAD"}</strong><code title={item.path}>{item.path}</code><span className={`lane-state ${item.state === "prunable" || item.state === "locked" ? "lane-state-warn" : "lane-state-ok"}`}>{item.state ?? "未取得"}</span></div>)}</div></div>
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
     </section>
@@ -1163,6 +1213,7 @@ function LegacyGitModal({
   repo,
   tab,
   copied,
+  copyError,
   onClose,
   onCopy,
   onTabChange,
@@ -1170,6 +1221,7 @@ function LegacyGitModal({
   repo: Repo;
   tab: DetailTab;
   copied: string | null;
+  copyError: string | null;
   onClose: () => void;
   onCopy: (value: string) => void;
   onTabChange: (tab: DetailTab) => void;
@@ -1185,6 +1237,7 @@ function LegacyGitModal({
           <button ref={closeRef} className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={onClose}>×</button>
         </div>
         <RepoDetail activeTab={tab} copied={copied} onCopy={onCopy} onTabChange={onTabChange} repo={repo} />
+        {copyError && <div className="inline-error" role="alert">{copyError}</div>}
       </div>
     </div>
   );
@@ -1214,7 +1267,20 @@ export default function ProjectControl() {
   const [gitPath, setGitPath] = useState<string | null>(null);
   const [gitTab, setGitTab] = useState<DetailTab>("status");
   const [copied, setCopied] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [projectUrlCopyState, setProjectUrlCopyState] = useState<CopyStatus>("idle");
+  const copyRequestRef = useRef(0);
+  const projectUrlCopyRequestRef = useRef(0);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setShowMerged = useCallback((value: boolean) => updateUrl({ merged: value ? true : null }), [updateUrl]);
+
+  useEffect(() => () => {
+    if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    setProjectUrlCopyState("idle");
+  }, [urlState.at, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab]);
 
   const projectSnapshotKey = useMemo(() => {
     if (!urlState.path) return "";
@@ -1311,7 +1377,36 @@ export default function ProjectControl() {
     return project.events.find((event) => event.commit_hash === selectedHash) ?? null;
   }, [project, selectedHash, selectedLane]);
   const copy = useCallback((value: string) => {
-    void navigator.clipboard?.writeText(value).then(() => { setCopied(value); window.setTimeout(() => setCopied(null), 1500); });
+    const request = copyRequestRef.current + 1;
+    copyRequestRef.current = request;
+    if (copyResetTimerRef.current) {
+      clearTimeout(copyResetTimerRef.current);
+      copyResetTimerRef.current = null;
+    }
+    setCopied(null);
+    setCopyError(null);
+    void writeClipboard(value).then((success) => {
+      if (request !== copyRequestRef.current) return;
+      if (!success) {
+        setCopyError("コピーできませんでした。ブラウザのクリップボード機能を利用できません。");
+        return;
+      }
+      setCopied(value);
+      copyResetTimerRef.current = setTimeout(() => {
+        if (request !== copyRequestRef.current) return;
+        setCopied((current) => current === value ? null : current);
+        copyResetTimerRef.current = null;
+      }, 1500);
+    });
+  }, []);
+  const copyCurrentProjectUrl = useCallback(() => {
+    const request = projectUrlCopyRequestRef.current + 1;
+    projectUrlCopyRequestRef.current = request;
+    setProjectUrlCopyState("idle");
+    void writeClipboard(window.location.href).then((success) => {
+      if (request !== projectUrlCopyRequestRef.current) return;
+      setProjectUrlCopyState(success ? "success" : "error");
+    });
   }, []);
   const legacyRepo = gitPath ? repos.get(gitPath) ?? null : null;
 
@@ -1323,10 +1418,14 @@ export default function ProjectControl() {
   }, [project?.lanes, updateUrl]);
   const selectLane = useCallback((lane: ProjectLane) => updateUrl({ lane: lane.id, event: null }), [updateUrl]);
   const openGit = useCallback((lane: ProjectLane) => {
+    setCopyError(null);
     if (lane.path) setGitPath(lane.path);
     else if (project?.main_path) setGitPath(project.main_path);
   }, [project?.main_path]);
-  const closeGit = useCallback(() => setGitPath(null), []);
+  const closeGit = useCallback(() => {
+    setCopyError(null);
+    setGitPath(null);
+  }, []);
   const closeSelection = useCallback(() => updateUrl({ event: null, lane: null }), [updateUrl]);
   const selectedKey = selectedHash && selectedLane ? flowEventKey(selectedLane, selectedHash) : null;
 
@@ -1347,7 +1446,7 @@ export default function ProjectControl() {
         <button className="rescan-button" disabled={scanning} type="button" onClick={() => void fetch("/api/rescan", { method: "POST" })}>{scanning ? "走査中…" : "再走査"}</button>
       </header>
       <section className="control-hero" aria-labelledby="project-title">
-        <div className="control-hero-main"><div className="project-identity"><h1 id="project-title">{project.name}</h1><span className="project-baseline">既定 <strong>{project.default_branch ?? "未取得"}</strong></span><span className="project-lane-count">{project.lanes.length} ブランチ</span></div><details className="project-context"><summary>プロジェクトの概要・集計</summary><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div>
+        <div className="control-hero-main"><div className="project-identity"><h1 id="project-title">{project.name}</h1><span className="project-baseline">既定 <strong>{project.default_branch ?? "未取得"}</strong></span><span className="project-lane-count">{project.lanes.length} ブランチ</span><span className="project-url-control"><button aria-describedby={projectUrlCopyState !== "idle" ? "project-url-copy-feedback" : undefined} className="subtle-button project-url-copy" type="button" onClick={copyCurrentProjectUrl}>{projectUrlCopyState === "success" ? "URLをコピーしました" : "この画面のURLをコピー"}</button><span aria-live="polite" className="project-url-feedback" id="project-url-copy-feedback" role={projectUrlCopyState === "error" ? "alert" : projectUrlCopyState === "success" ? "status" : undefined}>{projectUrlCopyState === "success" ? "現在のプロジェクト画面URLをコピーしました。" : projectUrlCopyState === "error" ? "URLをコピーできませんでした。ブラウザのクリップボード機能を利用できません。" : "\u00a0"}</span></span></div><details className="project-context"><summary>プロジェクトの概要・集計</summary><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div>
         <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>統合可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div></details></div>
       </section>
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">
@@ -1369,7 +1468,7 @@ export default function ProjectControl() {
         </section>
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}
       </div>
-      {gitPath && legacyRepo && <LegacyGitModal copied={copied} onClose={closeGit} onCopy={copy} onTabChange={setGitTab} repo={legacyRepo} tab={gitTab} />}
+      {gitPath && legacyRepo && <LegacyGitModal copied={copied} copyError={copyError} onClose={closeGit} onCopy={copy} onTabChange={setGitTab} repo={legacyRepo} tab={gitTab} />}
       {gitPath && !legacyRepo && <LegacyUnavailableModal onClose={closeGit} />}
     </main>
   );

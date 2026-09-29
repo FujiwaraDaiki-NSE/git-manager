@@ -39,6 +39,23 @@ def init_repo(repo: Path) -> None:
     commit(repo, "base")
 
 
+def test_all_period_includes_history_beyond_commit_limit(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    commit(repo, "second")
+    commit(repo, "latest")
+
+    recent = project.build(str(repo), str(repo), limit=2, range_name="7d")
+    entire = project.build(str(repo), str(repo), limit=2, range_name="all")
+
+    assert recent is not None and entire is not None
+    assert recent["graph"]["truncated"] is True
+    assert len(recent["graph"]["rows"]) == 2
+    assert entire["graph"]["truncated"] is False
+    assert {row["subject"] for row in entire["graph"]["rows"]} == {"base", "second", "latest"}
+    assert any(event["subject"] == "base" for event in entire["events"])
+
+
 def test_build_keeps_git_facts_separate_and_resolves_linked_lane(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     origin = tmp_path / "origin.git"
