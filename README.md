@@ -9,8 +9,29 @@ PC内の Git リポジトリを自動で見つけて状態を一覧する、読�
 
 ## 起動
 
+共通hooksを設定済みの現在のホストでは、次のコマンドで起動・変更反映します。
+実行ディレクトリは任意です。
+
 ```bash
-cp .env.example .env
+/home/solution2024/.local/bin/gitdash-compose up -d --build
+```
+
+このコマンドは、リポジトリの `.env` に続けて
+`/home/solution2024/.config/gitdash/agent.env` を読み込みます。
+共通設定を含めて起動する場合は上記コマンドを使用してください。
+現在のAPIは認証不要のため、トークンをコンテナへ渡す必要はありません。
+
+```bash
+/home/solution2024/.local/bin/gitdash-compose ps
+/home/solution2024/.local/bin/gitdash-compose logs --tail=100 backend frontend
+/home/solution2024/.local/bin/gitdash-compose down
+```
+
+別のホストで初めて起動する場合は、リポジトリのルートで `.env` を用意します。
+既存の `.env` は上書きしないでください。
+
+```bash
+test -e .env || cp .env.example .env
 # GITDASH_SCAN_ROOT に走査したいディレクトリ、UID/GID に `id -u` `id -g` の値を入れる
 $EDITOR .env
 
@@ -126,7 +147,10 @@ XY コードにはツールチップを付け、状態は色だけでなく `ahe
 
 ## 設定
 
-`.env` で調整する。
+基本設定は `.env` で調整する。共通hooksを設定済みの現在のホストでは、
+`GITDASH_AGENT_ENDPOINT` は
+`~/.config/gitdash/agent.env` で管理する。`gitdash-compose` はこのファイルを
+後から読み込むため、同名の `.env` 設定より優先される。
 
 | 変数                          | 既定 | 意味                                 |
 | ----------------------------- | ---- | ------------------------------------ |
@@ -170,25 +194,41 @@ watch 数が爆発するのでやっていません。ブラウザにフォー�
 
 ## agent event integration
 
-agent status は `POST /api/agent-events`（frontend の `/api` proxy 経由でも利用可能）
-または localhost の Streamable HTTP MCP `/mcp` の `report_agent_status` で、認証なしに
-明示的に送信します。lifecycle event は
+現在のホストでは、Codexのユーザー共通hooksから `POST /api/agent-events` へ
+送信します。現在のAPIは認証不要で、frontendの `/api` proxy経由でも利用できます。
+MCPの設定・有効化は不要です。
+同じユーザー・ホスト上の全プロジェクトに適用されますが、保存対象はgitdashが
+認識しているGitリポジトリ／worktreeです。
+
+| 共通ファイル | 用途 |
+| --- | --- |
+| `~/.codex/hooks.json` | SessionStart、SubagentStart、Interrupt、SubagentStop、SessionEndの登録 |
+| `~/.codex/hooks/git_manager_agent_event.py` | プロジェクトの `.codex/hooks/report_agent_event.py` を基にした送信スクリプト。共通設定を直接読み込む |
+| `~/.config/gitdash/agent.env` | `GITDASH_AGENT_ENDPOINT` と `GITDASH_AGENT_TOKEN`。所有者のみ読み書き可能な権限 `600` で保存 |
+| `~/.local/bin/gitdash-compose` | リポジトリの `.env` と共通設定を読み込んでComposeを実行 |
+
+現在の送信先は `http://127.0.0.1:8762/api/agent-events` です。
+共通スクリプトが認証設定を読み込むため、Codex起動前の環境変数の `export` は不要です。
+上記スクリプトと起動コマンドには、このホストの絶対パスが含まれます。
+別のホストで使用する際は、配置先に合わせて設定してください。
+
+共通hooksの設定時に、5種類が有効・信頼済みであることと、
+当時稼働していたAPIにイベントが保存されることを確認しました。登録内容を変更した場合は、Codex CLIの `/hooks` で内容と信頼状態を確認します。
+リポジトリ内の `.codex/hooks.json` は共通設定とは別に読み込まれるため、
+同じ送信処理を両方で有効化しないでください。
+
+共通スクリプトと `agent.env` には以前の認証用トークンが残っていますが、
+現在のAPIでは使用しません。共通スクリプトが参照する設定は維持してください。
+ポートを変更する場合は `.env` の `GITDASH_AGENT_PORT` と共通設定のendpoint、
+共通 `hooks.json` のコマンド内にあるendpointを合わせて更新してください。
+認証トークンはリポジトリへコミットしません。
+
+lifecycle event は
 `run_state` のみを変更し、semantic status は `phase`、`attention`、`outcome`、
 `summary` を必ず明示します（値を消す場合は `null`）。イベントは `/data` の
-append-only SQLite に保存され、`.codex/hooks.json` が SessionStart、SubagentStart、
-Interrupt、SubagentStop、SessionEnd を command hook として送信します。SessionEnd
-は終了時に MCP が利用できないため command hook を使用します。hook は Codex の
-ホストプロセスで実行されるため、`GITDASH_AGENT_ENDPOINT` をホスト環境へ
-`export`（または Codex が同等に供給）し、`GITDASH_AGENT_PORT` を変更した場合は
-`.codex/config.toml` と endpoint も合わせます。
-
-MCP は通常セッションのコンテキストを増やさないよう、プロジェクト設定では既定で
-`enabled = false` です。意味的な agent status を報告したいセッションだけ、次のように
-明示して起動します。Hooks による lifecycle event の送信はこの設定と独立して動作します。
-
-```bash
-codex --config mcp_servers.gitdash-agent-events.enabled=true
-```
+append-only SQLite に保存されます。共通hooksが送信するのはlifecycle eventのみです。
+APIにはlocalhostのStreamable HTTP MCP `/mcp` の `report_agent_status` もありますが、
+プロジェクト設定では `enabled = false` のままです。
 
 ## 開発
 
