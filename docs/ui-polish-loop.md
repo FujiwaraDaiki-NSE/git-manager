@@ -70,3 +70,9 @@
 - Patch output explicitly uses `core.quotepath=false` so ordinary Japanese diff headings and raw copied patches are readable; the displayed command includes that option.
 - Added real-Git tests for rename pairs, binary and empty commits, unusual filenames and a separator character in the commit subject. Backend: 77 passed with warnings treated as errors.
 - GUI E2E: renamed `競合 ファイル.txt` to `名前変更後のファイル.txt` in the disposable repository. The activity detail displayed the original → new path and Japanese patch lines. A backend restart also exercised initial HTTP 502 and successful 再試行 recovery.
+
+## Diff file navigation
+
+- Added case-insensitive filename/path search inside multi-file diffs, matching file counts, explicit empty results, and expand/collapse limited to the matching files.
+- Search clearing restores the existing expansion state and keyboard focus. Clipboard action now explicitly says 差分全体をコピー.
+- GUI E2E with a six-file Japanese commit: `検索-3` showed exactly one file; expanding rendered just that file; copying retained all six diff headers. A no-match query disabled bulk expansion. Clearing restored six files and the previously expanded first/third files. Long lines wrapped correctly at 320px.
