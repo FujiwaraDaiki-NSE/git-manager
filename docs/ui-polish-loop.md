@@ -62,3 +62,11 @@
 - Graph/branches now refresh on the repository observation timestamp, retaining previous content during background fetches. A failed refresh explicitly labels the retained content as the previous result.
 - Isolated GUI E2E: added `e2e-live-updated` with the modal open; it appeared automatically. Blocked only `/api/repo/branches`, added `e2e-live-retry`, observed the error plus retained rows, removed the block and used 再取得; the new branch appeared.
 - Replaced the six-column branch row with a two-column name/hash and full-width metadata so worktree paths remain readable inside the dialog.
+
+## Commit filenames
+
+- Reproduced the commit API returning C-escaped Japanese filenames even after the working-file status fix.
+- Commit metadata and numstat now use NUL separators. Tabs, newlines, carriage returns, quotes, non-ASCII names and rename pairs remain exact. Added optional `old_path` for renamed files; both commit detail surfaces display the original and new names.
+- Patch output explicitly uses `core.quotepath=false` so ordinary Japanese diff headings and raw copied patches are readable; the displayed command includes that option.
+- Added real-Git tests for rename pairs, binary and empty commits, unusual filenames and a separator character in the commit subject. Backend: 77 passed with warnings treated as errors.
+- GUI E2E: renamed `競合 ファイル.txt` to `名前変更後のファイル.txt` in the disposable repository. The activity detail displayed the original → new path and Japanese patch lines. A backend restart also exercised initial HTTP 502 and successful 再試行 recovery.

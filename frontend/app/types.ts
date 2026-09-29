@@ -62,6 +62,7 @@ export type BranchRelationSummary = {
 };
 
 export type Numstat = {
+  old_path?: string;
   additions: number | "-";
   deletions: number | "-";
   path: string;

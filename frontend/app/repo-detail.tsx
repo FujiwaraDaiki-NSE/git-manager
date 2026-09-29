@@ -184,6 +184,7 @@ function CommitPane({
                 <span className="additions">{file.additions}</span>
                 <span className="deletions">{file.deletions}</span>
                 <span className="file-path">
+                  {file.old_path !== undefined && <><span className="renamed-from">{file.old_path}</span><span aria-label="変更後"> → </span></>}
                   {file.path}
                   {file.binary && <span className="binary"> (binary)</span>}
                 </span>

@@ -23,33 +23,38 @@ def valid_hash(value: str) -> bool:
 
 
 def _parse_numstat(raw: str) -> dict[str, Any] | None:
-    lines = raw.splitlines()
-    if not lines:
+    header = raw.split("\0", 5)
+    if len(header) != 6 or not header[0]:
         return None
-
-    header = lines[0].split(REF_SEPARATOR, 4)
-    if len(header) != 5 or not header[0]:
-        return None
-    commit_hash, subject, author, date, parents = header
-
+    commit_hash, subject, author, date, parents, body = header
+    records = iter(body.removeprefix("\n").split("\0"))
     files: list[dict[str, Any]] = []
-    for line in lines[1:]:
-        fields = line.split("\t", 2)
+    for record in records:
+        if not record:
+            continue
+        fields = record.split("\t", 2)
         if len(fields) != 3:
-            continue
+            return None
         additions, deletions, path = fields
+        old_path = None
+        if not path:
+            old_path = next(records, None)
+            path = next(records, None)
+            if old_path is None or path is None:
+                return None
         if additions != "-" and not additions.isdecimal():
-            continue
+            return None
         if deletions != "-" and not deletions.isdecimal():
-            continue
-        files.append(
-            {
-                "additions": additions if additions == "-" else int(additions),
-                "deletions": deletions if deletions == "-" else int(deletions),
-                "path": path,
-                "binary": additions == "-" and deletions == "-",
-            }
-        )
+            return None
+        file = {
+            "additions": additions if additions == "-" else int(additions),
+            "deletions": deletions if deletions == "-" else int(deletions),
+            "path": path,
+            "binary": additions == "-" and deletions == "-",
+        }
+        if old_path is not None:
+            file["old_path"] = old_path
+        files.append(file)
 
     return {
         "hash": commit_hash,
@@ -80,7 +85,8 @@ def get_commit(repo: str, commit_hash: str) -> dict[str, Any] | None:
             "--no-ext-diff",
             "--no-textconv",
             "--numstat",
-            "--format=%H%x1f%s%x1f%an%x1f%cI%x1f%P",
+            "-z",
+            "--format=%H%x00%s%x00%an%x00%cI%x00%P",
             commit_hash,
         ],
     )
@@ -93,6 +99,8 @@ def get_commit(repo: str, commit_hash: str) -> dict[str, Any] | None:
     patch = gitinfo._run_limited(
         repo,
         [
+            "-c",
+            "core.quotepath=false",
             "show",
             "--no-ext-diff",
             "--no-textconv",
@@ -107,7 +115,7 @@ def get_commit(repo: str, commit_hash: str) -> dict[str, Any] | None:
     if patch is None:
         return None
     result["patch"], result["patch_truncated"] = _truncate_patch(patch)
-    result["command"] = f"git show {commit_hash}"
+    result["command"] = f"git -c core.quotepath=false show {commit_hash}"
     return result
 
 
