@@ -195,6 +195,14 @@ function projectFromSearch(search: string) {
     event: parsed.event,
     lane: parsed.lane,
     at: parsed.at,
+    laneQuery: parsed.laneQuery,
+    laneFilter: parsed.laneFilter as LaneFilter,
+    laneOrder: parsed.laneOrder as LaneOrder,
+    activityQuery: parsed.activityQuery,
+    activityFilter: parsed.activityFilter as ActivityFilter,
+    activityOrder: parsed.activityOrder as ActivityOrder,
+    invalidParams: parsed.invalidParams,
+
   };
 }
 
@@ -213,12 +221,12 @@ function useProjectUrl() {
     // the native history event so a Link always supplies its path on mount.
     setState(projectFromSearch(search));
   }, [search]);
-  const update = useCallback((changes: ProjectUrlChanges) => {
+  const update = useCallback((changes: ProjectUrlChanges, historyMode: "push" | "replace" = "push") => {
     const nextHref = updateProjectUrl(window.location.href, changes);
     // Keep tab/range/selection navigable with browser back/forward. Slider
     // drags are the high-frequency exception and replace only the observation
     // point until the user chooses another URL-level control.
-    const replace = Object.keys(changes).length === 1 && Object.prototype.hasOwnProperty.call(changes, "at");
+    const replace = historyMode === "replace" || (Object.keys(changes).length === 1 && Object.prototype.hasOwnProperty.call(changes, "at"));
     window.history[replace ? "replaceState" : "pushState"]({}, "", nextHref);
     setState(projectFromSearch(new URL(nextHref, window.location.origin).search));
   }, []);
@@ -1321,13 +1329,14 @@ export default function ProjectControl() {
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const resourceKey = `${urlState.path}|${urlState.range}`;
+  const invalidUrlKey = urlState.invalidParams.join(",");
   const retryProject = () => setReloadToken((value) => value + 1);
-  const [laneQuery, setLaneQuery] = useState("");
-  const [laneFilter, setLaneFilter] = useState<LaneFilter>("all");
-  const [laneOrder, setLaneOrder] = useState<LaneOrder>("name");
-  const [activityQuery, setActivityQuery] = useState("");
-  const [activityOrder, setActivityOrder] = useState<ActivityOrder>("newest");
-  const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
+  const { laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder } = urlState;
+  const setLaneQuery = (value: string) => updateUrl({ laneQuery: value }, "replace");
+  const setLaneFilter = (value: LaneFilter) => updateUrl({ laneFilter: value === "all" ? null : value });
+  const setLaneOrder = (value: LaneOrder) => updateUrl({ laneOrder: value === "name" ? null : value });
+  const setActivityQuery = (value: string) => updateUrl({ activityQuery: value }, "replace");
+  const setActivityOrder = (value: ActivityOrder) => updateUrl({ activityOrder: value === "newest" ? null : value });
   const [gitPath, setGitPath] = useState<string | null>(null);
   const [gitTab, setGitTab] = useState<DetailTab>("status");
   const [copied, setCopied] = useState<string | null>(null);
@@ -1344,7 +1353,7 @@ export default function ProjectControl() {
 
   useEffect(() => {
     setProjectUrlCopyState("idle");
-  }, [urlState.at, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab]);
+  }, [urlState.at, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder]);
 
   const projectSnapshotKey = useMemo(() => {
     if (!urlState.path) return "";
@@ -1358,6 +1367,7 @@ export default function ProjectControl() {
   }, [repos, urlState.path]);
 
   useEffect(() => {
+    if (invalidUrlKey) return;
     if (!urlState.path) {
       setProject(null);
       setProjectState("error");
@@ -1375,7 +1385,7 @@ export default function ProjectControl() {
       .catch((reason: unknown) => { if (controller.signal.aborted) return; setProjectState("error"); setProjectError(reason instanceof TypeError ? "サーバーとの通信を確認してから再試行してください。" : reason instanceof Error ? reason.message : "情報の取得に失敗しました。"); });
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [projectSnapshotKey, resourceKey, reloadToken, urlState.path, urlState.range]);
+  }, [invalidUrlKey, projectSnapshotKey, resourceKey, reloadToken, urlState.path, urlState.range]);
 
   useEffect(() => {
     if (!project || !latestAgentEvent) return;
@@ -1493,6 +1503,13 @@ export default function ProjectControl() {
   const closeSelection = useCallback(() => updateUrl({ event: null, lane: null }), [updateUrl]);
   const selectedKey = selectedHash && selectedLane ? flowEventKey(selectedLane, selectedHash) : null;
 
+  if (urlState.invalidParams.length) {
+    return <main className="control-shell" id="main-content" tabIndex={-1}>
+      <Link className="back-link" href={homeHref}>← プロジェクト一覧</Link>
+      <div className="control-state control-error" role="alert"><strong>URLの表示条件を認識できませんでした。</strong><span>確認が必要な条件: {urlState.invalidParams.join("、")}</span><button className="subtle-button" type="button" onClick={() => updateUrl(Object.fromEntries(urlState.invalidParams.map((key) => [key, null])))}>認識できない条件を解除</button></div>
+    </main>;
+  }
+
   if (!project || loadedKey !== resourceKey) {
     return (
       <main className="control-shell" id="main-content" tabIndex={-1}>
@@ -1528,7 +1545,7 @@ export default function ProjectControl() {
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
           {urlState.tab === "flow" && <FlowMap selectedLane={selectedLane} onSelectLane={selectLane} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
-          {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => { setActivityFilter(filter); updateUrl({ event: null }); }} onSelect={selectEvent} project={project} /></>}
+          {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} />}
         </section>
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}

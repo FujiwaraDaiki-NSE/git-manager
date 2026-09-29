@@ -22,3 +22,11 @@
 - Closed an existing test HTTP server socket exposed by warnings-as-errors.
 - Backend 73 tests pass with `-W error`.
 - Real Docker GUI E2E: isolated local-origin project, commit updates unpushed 0→1, local push updates 1→0 without a rescan. Existing user repositories were not modified by this test.
+
+## Loop 3: shareable and restorable filtered views
+
+- Work/activity query, filter and order are URL state. Reload and copied links preserve the view; tab and sort changes remain navigable with Back/Forward.
+- Explicitly invalid tab/range/filter/order/merged/timeline values now show an error with an action that removes only invalid conditions.
+- GUI: `ui-` work search persists on reload; Back/Forward switches name/latest and retains query. Activity `graph` + oldest copied URL exactly matches browser location.
+- GUI: invalid activity filter and timeline=101 show both invalid keys; recovery preserves valid path, tab, queries and order.
+- Frontend 58 tests and production build pass; frontend container rebuilt.
