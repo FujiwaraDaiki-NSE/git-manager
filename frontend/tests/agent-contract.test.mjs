@@ -4,10 +4,13 @@ import test from "node:test";
 import { projectPriority, projectLatestTime } from "../app/agent-overview.mjs";
 
 const task = {
-  task_id: "task-1",
-  agent_id: "agent-1",
+  task_id: null,
+  agent_id: null,
+  project_id: "repo",
   worktree: "/workspace/feature",
   branch: "feature",
+  kind: "status",
+  status: "waiting_for_user",
   run_state: "active",
   phase: "testing",
   attention: "waiting_for_user",
@@ -78,14 +81,14 @@ const detailPayload = {
   merge_target: null,
 };
 
-test("frontend contract follows backend legacy and priority agent fields", () => {
+test("frontend contract follows explicit branch status and priority fields", () => {
   assert.equal(summaryPayload.agent_counts.waiting_for_user, 1);
   assert.equal(summaryPayload.agent_priority_counts.waiting_for_user, 1);
   assert.equal(projectPriority(summaryPayload), 0);
   assert.equal(summaryPayload.agent_state, "waiting_for_user");
   assert.equal(summaryPayload.latest_agent_event.summary, "テスト結果を確認してください");
   assert.equal(detailPayload.agent_latest_event.event_id, "event-1");
-  assert.equal(detailPayload.lanes[0].agent.task_id, "task-1");
+  assert.equal(detailPayload.lanes[0].agent.branch, "feature");
   assert.equal(detailPayload.events.filter((event) => event.source === "agent").length, detailPayload.agent_events.length);
   assert.equal(projectLatestTime(summaryPayload), Date.parse(task.occurred_at));
   for (const key of ["waiting_for_user", "blocked", "review_required", "merge_ready", "active", "completed"]) {

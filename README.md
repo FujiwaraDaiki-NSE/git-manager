@@ -223,38 +223,67 @@ MCPの設定・有効化は不要です。
 共通 `hooks.json` のコマンド内にあるendpointを合わせて更新してください。
 認証トークンはリポジトリへコミットしません。
 
-lifecycle event は
-`run_state` のみを変更し、semantic status は `phase`、`attention`、`outcome`、
-`summary` を必ず明示します（値を消す場合は `null`）。イベントは `/data` の
-append-only SQLite に保存されます。共通hooksが送信するのはlifecycle eventのみです。
-APIにはlocalhostのStreamable HTTP MCP `/mcp` の `report_agent_status` もありますが、
-プロジェクト設定では `enabled = false` のままです。
+イベントは `/data` のappend-only SQLiteに保存されます。
+hooksの開始・中断・終了はアクティビティの履歴として表示し、明示的に報告された
+ブランチの状態を上書きしません。たとえば「レビュー待ち」の報告後にセッションが
+終了しても、ブランチは「レビュー待ち」のままです。
 
-MCPを利用する場合も、ツールは `report_agent_status` の1つだけです。
-MCPは現在の作業状況（`status`）の報告に絞り、開始・終了などはhooksのREST送信で扱います。
-必須引数は `task_id`、`worktree`、`run_state`、`phase`、`attention`、`outcome`、`summary`。
-`agent_id` は任意です。`task_id` は同じタスクで固定し、hooksの報告と関連付ける場合は
-同じセッションIDとagent IDを使用します。`worktree` はgitdashが認識する絶対パスを指定します。
-`phase`、`attention`、`outcome`、`summary` は毎回明示し、消す値には `null` を指定します。
-`summary` は短い要約にし、ログや差分の全文は送信しません。
+MCPツールは `report_agent_status` の1つだけです。プロジェクト設定は
+`enabled = false` のままで、今回の変更でMCPを有効化することはありません。
+MCPを利用する場合の必須引数は次の3つです。
+
+| 引数 | 内容 |
+| --- | --- |
+| `worktree` | 作業中のGitルートの絶対パス。gitdashが認識するパスを指定 |
+| `status` | ブランチの現在の作業状態。下表のいずれか |
+| `summary` | 短い状況説明。不要なら `null` を明示 |
+
+ツールの説明文:
+
+> ブランチの作業状況が変わったときに報告する。worktreeには作業中のGitルートの絶対パス、statusには現在の状態、summaryには短い説明（不要ならnull）を指定する。
+
+| `status` | GUI表示 |
+| --- | --- |
+| `investigating` | 調査中 |
+| `implementing` | 実装中 |
+| `testing` | テスト中 |
+| `reviewing` | レビュー中 |
+| `waiting_for_user` | 入力待ち |
+| `blocked` | 問題あり |
+| `review_required` | レビュー待ち |
+| `merge_ready` | マージ可能 |
+| `completed` | 完了 |
+| `stopped` | 中断 |
 
 ```json
 {
-  "task_id": "<session-id>",
   "worktree": "/home/solution2024/git-manager",
-  "run_state": "idle",
-  "phase": "reviewing",
-  "attention": "review_required",
-  "outcome": null,
+  "status": "review_required",
   "summary": "修正とテスト完了。レビュー待ち。"
 }
 ```
 
+サーバーは受け付けた作業ディレクトリの現在のブランチをGitから確認します。
+不明なパスやdetached HEADは推測で補わずエラーにします。
+管理単位はリポジトリとブランチの組み合わせで、同じブランチへの報告は
+セッションやworktreeが変わっても最新の報告に更新されます。
+別リポジトリの同名ブランチは別々に管理します。
+ブランチを切り替えた後の報告は切り替え先へ関連付け、以前の報告を移し替えません。
+
 成功時の返り値は `ok` のみで、状態全体や履歴はエージェントへ返しません。
-GUIには従来どおり保存後の状態を通知します。イベントIDと発生時刻はサーバーが生成するため、
-MCPでの時刻は報告を処理した時刻となり、再呼び出しは新しいイベントとして記録されます。
-過去時刻の指定やイベントIDによる重複排除が必要な送信には、従来のREST APIを使用します。
-従来のMCP呼び出しに含まれていた `event_id`、`occurred_at`、`kind`、`action` は不要です。
+GUIには保存後の状態を通知し、一覧と集計はタスク数ではなくブランチごとにまとめます。
+状態をまだ報告していないブランチについて、hooksの履歴から作業状況を推測しません。
+イベントIDと時刻はサーバーが生成します。再呼び出しは新しい履歴として記録されます。
+
+従来のMCP引数 `task_id`、`agent_id`、`run_state`、`phase`、`attention`、`outcome`、
+`event_id`、`occurred_at`、`kind`、`action` は送信しません。
+hooksと既存のRESTクライアント用の入力契約は維持します。
+RESTの `status` イベントでは従来どおり `phase`、`attention`、`outcome`、`summary` を
+明示します。過去時刻の指定やイベントIDによる重複排除が必要な場合もRESTを使います。
+既存RESTの報告のうち、上記10種類の状態に対応しないもの（作業段階・待ち状態・結果が
+すべて `null` の報告など）は履歴に残し、ブランチの作業状態を更新しません。
+
+変更の背景とGUIへの反映は、[開発者向けサマリー](docs/branch-status-summary.html)を参照してください。
 
 
 ## 開発
@@ -274,7 +303,7 @@ BACKEND_ORIGIN=http://127.0.0.1:8762 npm run dev
 
 ## プロジェクトを探す
 
-プロジェクト一覧では、上部のエージェント状態サマリーを選ぶと、その状態のタスクを
+プロジェクト一覧では、上部の状態サマリーを選ぶと、その状態のブランチを
 含むプロジェクトだけを表示する。未取得は0件として扱わず、未取得対象だけを確認できる。
 Gitの変更・競合・ahead・behindでも絞り込め、名前・パス・リモートの検索と組み合わせられる。
 並び順は優先度・名前・最新活動から選べる。

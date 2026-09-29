@@ -30,6 +30,9 @@ def event_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str,
     worktree = tmp_path / "repo"
     worktree.mkdir()
     subprocess.run(["git", "-C", str(worktree), "init", "-q", "-b", "main"], check=True)
+    subprocess.run(["git", "-C", str(worktree), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(worktree), "config", "user.email", "test@example.com"], check=True)
+    subprocess.run(["git", "-C", str(worktree), "commit", "--allow-empty", "-qm", "base"], check=True)
     state = {
         str(worktree): {
             "path": str(worktree),
@@ -188,7 +191,7 @@ def test_multiple_agents_have_mutually_exclusive_priority_counts(event_context: 
     assert counts == {"waiting_for_user": 1, "blocked": 1, "review_required": 1, "merge_ready": 1, "active": 1, "completed": 1}
 
 
-def test_same_worktree_preserves_distinct_tasks_and_agents(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
+def test_same_repo_branch_collapses_distinct_tasks_to_latest_snapshot(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
     worktree, state = event_context
     responses = []
     for task_id, agent_id, summary in (("task-a", None, "root"), ("task-b", "subagent-b", "subagent")):
@@ -197,9 +200,11 @@ def test_same_worktree_preserves_distinct_tasks_and_agents(event_context: tuple[
     assert responses[0].snapshot is not None and responses[0].snapshot["task_id"] == "task-a"
     assert responses[1].snapshot is not None and responses[1].snapshot["task_id"] == "task-b"
     snapshots = agent_events.snapshots(project_id=worktree, state=state)
-    assert {(item["task_id"], item["agent_id"]) for item in snapshots.values()} == {
-        ("task-a", None), ("task-b", "subagent-b")
-    }
+    assert len(snapshots) == 1
+    snapshot = next(iter(snapshots.values()))
+    assert snapshot["task_id"] == agent_events.task_key(worktree, "main")
+    assert snapshot["agent_id"] is None
+    assert snapshot["summary"] == "subagent"
 
 
 def test_close_reopen_persistence_and_as_of(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
@@ -252,11 +257,21 @@ def test_sse_is_not_published_when_commit_fails(event_context: tuple[str, dict[s
 
 
 def mcp_status_payload(worktree: str, **changes: object) -> dict[str, object]:
-    payload = status_payload(worktree)
-    for key in ("event_id", "occurred_at", "kind"):
-        del payload[key]
+    payload: dict[str, object] = {
+        "worktree": worktree,
+        "status": "implementing",
+        "summary": "working",
+    }
     payload.update(changes)
     return payload
+
+
+def init_test_repo(path: Path, branch: str = "main") -> None:
+    path.mkdir()
+    subprocess.run(["git", "-C", str(path), "init", "-q", "-b", branch], check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@example.com"], check=True)
+    subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-qm", "base"], check=True)
 
 
 def test_fastmcp_compact_status_persists_and_publishes(
@@ -269,10 +284,8 @@ def test_fastmcp_compact_status_persists_and_publishes(
     tools = asyncio.run(mcp_server.mcp.list_tools())
     assert [tool.name for tool in tools] == ["report_agent_status"]
     schema = tools[0].inputSchema
-    assert set(schema["properties"]) == {
-        "task_id", "worktree", "run_state", "phase", "attention", "outcome", "summary", "agent_id",
-    }
-    assert set(schema["required"]) == set(schema["properties"]) - {"agent_id"}
+    assert set(schema["properties"]) == {"worktree", "status", "summary"}
+    assert set(schema["required"]) == {"worktree", "status", "summary"}
     assert tools[0].outputSchema is None
     before = datetime.now(timezone.utc)
     result = asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(worktree)))
@@ -280,23 +293,23 @@ def test_fastmcp_compact_status_persists_and_publishes(
     rows = agent_events.events()
     assert len(rows) == 1
     row = rows[0]
-    assert row["kind"] == "status" and row["task_id"] == "task-1"
-    assert row["phase"] == "implementing" and row["summary"] == "working"
+    assert row["kind"] == "status" and row["task_id"] == agent_events.task_key(worktree, "main")
+    assert row["status"] == "implementing" and row["phase"] == "implementing" and row["summary"] == "working"
     assert before <= datetime.fromisoformat(row["occurred_at"]) <= datetime.now(timezone.utc)
     assert len(published) == 1 and published[0]["event_id"] == row["event_id"]
     assert published[0]["snapshot"]["summary"] == "working"
 
     asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(
-        worktree, run_state="ended", phase=None, attention=None, outcome="completed", summary=None,
+        worktree, status="completed", summary=None,
     )))
     rows = agent_events.events()
     assert len({item["event_id"] for item in rows}) == 2
-    snapshot = agent_events.projection(worktree, task_id="task-1", state=state)
+    snapshot = agent_events.projection(worktree, task_id=agent_events.task_key(worktree, "main"), state=state)
     assert snapshot["outcome"] == "completed"
     assert snapshot["phase"] is None and snapshot["summary"] is None
 
 
-@pytest.mark.parametrize("field", ["phase", "attention", "outcome", "summary"])
+@pytest.mark.parametrize("field", ["worktree", "status", "summary"])
 def test_mcp_rejects_missing_status_fields(event_context, monkeypatch, field):
     worktree, state = event_context
     monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
@@ -308,8 +321,7 @@ def test_mcp_rejects_missing_status_fields(event_context, monkeypatch, field):
 
 
 @pytest.mark.parametrize("changes", [
-    {"run_state": "unknown"}, {"phase": "unknown"}, {"attention": "unknown"},
-    {"outcome": "unknown"}, {"worktree": "/unknown/worktree"}, {"task_id": ""},
+    {"status": "unknown"}, {"worktree": "/unknown/worktree"}, {"worktree": "relative/repo"},
 ])
 def test_mcp_rejects_invalid_status_without_publishing(event_context, monkeypatch, changes):
     worktree, state = event_context
@@ -330,6 +342,188 @@ def test_mcp_storage_failure_does_not_publish(event_context, monkeypatch):
     with pytest.raises(Exception):
         asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(worktree)))
     assert published == []
+
+
+def test_mcp_resolves_current_git_branch_instead_of_cached_branch(
+    event_context: tuple[str, dict[str, dict[str, object]]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree, state = event_context
+    subprocess.run(["git", "-C", worktree, "switch", "-q", "-c", "feature"], check=True)
+    state[worktree]["branch"] = "main"
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+
+    result = asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(worktree)))
+
+    assert result[0].text == "ok"
+    row = agent_events.events()[0]
+    assert row["branch"] == "feature"
+    assert row["task_id"] == agent_events.task_key(worktree, "feature")
+    assert list(agent_events.snapshots(project_id=worktree, state=state).values())[0]["branch"] == "feature"
+
+
+def test_mcp_rejects_unknown_detached_and_non_root_paths(
+    event_context: tuple[str, dict[str, dict[str, object]]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree, state = event_context
+    nested = str(Path(worktree) / "nested")
+    Path(nested).mkdir()
+    state[nested] = {"path": nested, "common_dir": worktree, "is_worktree": True, "branch": "main"}
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    payload = mcp_status_payload(worktree)
+
+    with pytest.raises(Exception):
+        asyncio.run(mcp_server.mcp.call_tool("report_agent_status", {**payload, "worktree": "/tmp/unknown"}))
+    with pytest.raises(Exception):
+        asyncio.run(mcp_server.mcp.call_tool("report_agent_status", {**payload, "worktree": nested}))
+
+    subprocess.run(["git", "-C", worktree, "switch", "--detach", "-q", "HEAD"], check=True)
+    with pytest.raises(Exception):
+        asyncio.run(mcp_server.mcp.call_tool("report_agent_status", payload))
+    assert agent_events.events() == []
+
+
+def test_same_repo_branch_across_worktrees_keeps_one_latest_snapshot(
+    event_context: tuple[str, dict[str, dict[str, object]]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree, state = event_context
+    subprocess.run(["git", "-C", worktree, "switch", "-q", "-c", "feature"], check=True)
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(
+        worktree, status="implementing", summary="first checkout",
+    )))
+    subprocess.run(["git", "-C", worktree, "switch", "-q", "main"], check=True)
+    linked = str(Path(worktree).parent / "linked-feature")
+    subprocess.run(["git", "-C", worktree, "worktree", "add", "-q", linked, "feature"], check=True)
+    state[linked] = {"path": linked, "common_dir": worktree, "is_worktree": True, "branch": "stale"}
+    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(
+        linked, status="review_required", summary="latest checkout",
+    )))
+
+    snapshots = agent_events.snapshots(project_id=worktree, state=state)
+    assert len(snapshots) == 1
+    snapshot = next(iter(snapshots.values()))
+    assert snapshot["branch"] == "feature"
+    assert snapshot["worktree"] == linked
+    assert snapshot["summary"] == "latest checkout"
+    assert snapshot["task_id"] == agent_events.task_key(worktree, "feature")
+
+
+def test_same_branch_name_in_different_repositories_stays_separate(
+    event_context: tuple[str, dict[str, dict[str, object]]], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    worktree, state = event_context
+    other = tmp_path / "other"
+    init_test_repo(other)
+    state[str(other)] = {"path": str(other), "common_dir": str(other), "is_worktree": False, "branch": "stale"}
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+
+    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(
+        worktree, status="implementing", summary="repo one",
+    )))
+    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(
+        str(other), status="testing", summary="repo two",
+    )))
+
+    first = agent_events.snapshots(project_id=worktree, state=state)
+    second = agent_events.snapshots(project_id=str(other), state=state)
+    assert len(first) == 1 and len(second) == 1
+    assert next(iter(first.values()))["branch"] == "main"
+    assert next(iter(second.values()))["branch"] == "main"
+    assert next(iter(first.values()))["task_id"] != next(iter(second.values()))["task_id"]
+
+
+def test_lifecycle_history_does_not_replace_explicit_branch_state(
+    event_context: tuple[str, dict[str, dict[str, object]]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree, state = event_context
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(
+        worktree, status="review_required", summary="keep this state",
+    )))
+    lifecycle = agent_events.AgentEventRequest.model_validate({
+        "event_id": "hook-session-end",
+        "task_id": "hook-session",
+        "worktree": worktree,
+        "occurred_at": ts(2).isoformat(),
+        "kind": "lifecycle",
+        "run_state": "ended",
+        "action": "session_end",
+    })
+    agent_events.append(lifecycle, state)
+
+    snapshot = next(iter(agent_events.snapshots(project_id=worktree, state=state).values()))
+    history = agent_events.project_events(worktree, state=state)
+    assert snapshot["status"] == "review_required" and snapshot["summary"] == "keep this state"
+    assert history[-1]["kind"] == "lifecycle" and history[-1]["status"] is None
+    result = project.build(worktree, worktree, state)
+    assert result is not None
+    lane = next(item for item in result["lanes"] if item["branch"] == "main")
+    assert lane["agent"]["status"] == "review_required"
+
+
+def test_as_of_ignores_future_status_and_newer_noncanonical_rest_clear(
+    event_context: tuple[str, dict[str, dict[str, object]]],
+) -> None:
+    worktree, state = event_context
+    first = agent_events.AgentEventRequest.model_validate(status_payload(
+        worktree, "first", occurred_at=ts(1).isoformat(), phase="implementing", summary="first",
+    ))
+    second = agent_events.AgentEventRequest.model_validate(status_payload(
+        worktree, "second", occurred_at=ts(2).isoformat(), run_state="ended",
+        phase=None, attention=None, outcome="completed", summary="done",
+    ))
+    clear = agent_events.AgentEventRequest.model_validate(status_payload(
+        worktree, "clear", occurred_at=ts(3).isoformat(), run_state="idle",
+        phase=None, attention=None, outcome=None, summary=None,
+    ))
+    agent_events.append(first, state)
+    agent_events.append(second, state)
+    agent_events.append(clear, state)
+
+    current = next(iter(agent_events.snapshots(project_id=worktree, state=state).values()))
+    historical = next(iter(agent_events.snapshots(project_id=worktree, state=state, as_of=ts(1)).values()))
+    assert current["status"] == "completed" and current["summary"] == "done"
+    assert historical["status"] == "implementing" and historical["summary"] == "first"
+    assert agent_events.events()[-1]["status"] is None
+
+
+def test_legacy_status_derivation_prioritizes_attention_over_outcome(
+    event_context: tuple[str, dict[str, dict[str, object]]],
+) -> None:
+    worktree, state = event_context
+    body = status_payload(
+        worktree,
+        run_state="ended",
+        phase=None,
+        attention="blocked",
+        outcome="completed",
+    )
+    agent_events.append(agent_events.AgentEventRequest.model_validate(body), state)
+    assert agent_events.events()[0]["status"] == "blocked"
+
+
+def test_project_summary_prioritizes_completed_over_stopped(
+    event_context: tuple[str, dict[str, dict[str, object]]],
+) -> None:
+    worktree, state = event_context
+    feature = str(Path(worktree).parent / "feature-status")
+    state[feature] = {"path": feature, "common_dir": worktree, "is_worktree": True, "branch": "feature"}
+    completed = status_payload(
+        worktree, "completed", run_state="ended", phase=None, attention=None,
+        outcome="completed", summary="done",
+    )
+    stopped = status_payload(
+        feature, "stopped", task_id="feature-task", run_state="ended", phase=None,
+        attention=None, outcome="stopped", summary="stopped",
+    )
+    agent_events.append(agent_events.AgentEventRequest.model_validate(completed), state)
+    agent_events.append(agent_events.AgentEventRequest.model_validate(stopped), state)
+
+    summary = project.summary_rows(state)[0]
+    assert summary["agent_state"] == "completed"
+    assert summary["agent_priority_counts"]["completed"] == 1
+    assert {item["status"] for item in summary["agent_tasks"]} == {"completed", "stopped"}
 
 
 def test_mcp_http_is_available_without_authorization(

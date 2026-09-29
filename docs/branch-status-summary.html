@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ブランチ単位の作業状況報告</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#172b42;background:#f5f7fa}body{max-width:900px;margin:0 auto;padding:32px 20px;line-height:1.8}h1{line-height:1.4}h2{margin-top:32px}table{width:100%;border-collapse:collapse;background:white}th,td{padding:12px;border:1px solid #ccd5df;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}pre{padding:20px;background:#e7edf4;overflow:auto}a{color:#125baa}.note{border-left:4px solid #3478b7;padding:12px 20px;background:white}
+</style>
+</head>
+<body>
+<h1>ブランチ単位の作業状況報告</h1>
+<p>MCPの入力を <code>worktree</code>、<code>status</code>、<code>summary</code> の3項目に集約します。エージェントがタスクIDや時刻を生成する必要をなくし、GUIはリポジトリとブランチごとに最新の報告を表示します。</p>
+<h2>MCPの契約</h2>
+<p>公開ツールは <code>report_agent_status</code> の1つ。説明文は次のとおりです。</p>
+<blockquote>ブランチの作業状況が変わったときに報告する。worktreeには作業中のGitルートの絶対パス、statusには現在の状態、summaryには短い説明（不要ならnull）を指定する。</blockquote>
+<table><thead><tr><th>引数</th><th>役割</th></tr></thead><tbody>
+<tr><td><code>worktree</code></td><td>対象を確実に特定するためのGitルートの絶対パス。未知のパスやdetached HEADは拒否します。</td></tr>
+<tr><td><code>status</code></td><td>調査中・実装中・テスト中・レビュー中・入力待ち・問題あり・レビュー待ち・マージ可能・完了・中断のいずれかを明示します。</td></tr>
+<tr><td><code>summary</code></td><td>短い状況説明。説明が不要ならnullを明示します。</td></tr>
+</tbody></table>
+<pre><code>{
+  "worktree": "/home/solution2024/git-manager",
+  "status": "review_required",
+  "summary": "修正とテスト完了。レビュー待ち。"
+}</code></pre>
+<p>成功応答はテキスト <code>ok</code> のみ。返り値に状態全体や履歴は含めません。イベントIDと時刻はサーバーが生成し、再呼び出しは別の履歴になります。MCPは自動で有効化しません。</p>
+<h2>hooksとGUIの責任</h2>
+<p>ブランチの状態は明示的な作業状況報告から表示します。hooksは開始・中断・終了の履歴を残します。たとえば「レビュー待ち」の報告後にSessionEndが届いても、ブランチの状態は「レビュー待ち」を維持します。</p>
+<p>同じブランチに異なるセッションやworktreeから報告しても、状態と件数は1ブランチとして扱います。別リポジトリの同名ブランチは分離します。同じ作業ディレクトリでブランチを切り替えても、以前のブランチの報告を移し替えません。hooksだけが届いている場合、作業状況は推測しません。</p>
+<h2>確認結果</h2><ul><li>バックエンド84テスト、フロントエンド55テストが成功。</li><li>Next.jsのproduction buildとDocker Composeの検証環境ビルドが成功。</li><li>実際のMCP通信で3必須引数・okのみの返り値を確認。</li><li>実hooksスクリプトのSessionEnd送信後もブランチのレビュー待ちが維持され、終了は履歴に残ることをAPIとGUIで確認。</li><li>GUIのライブ更新、ブランチ1件への集約、再読み込み後の状態維持を確認。最終レビューの修正必須事項は解消済み。</li></ul><h2>互換性と確認範囲</h2>
+<p>hooks／RESTの既存入力契約と保存済み履歴を維持します。従来のMCPの引数形式は新しい3項目へ置き換わります。GUIの一覧・集計・作業一覧・アクティビティ・過去時点の表示で、ブランチ単位の状態と履歴を分けて扱います。</p>
+<p class="note">既存のフロントエンドは別のUI改善worktreeから稼働しているため、今回の変更は独立したCompose環境で確認します。検証用GUIはlocalhost:4413、MCPはlocalhost:8763。通常のlocalhost:4412を上書きしません。</p>
+<p><a href="../README.md">設定と利用方法はREADMEを参照</a></p>
+</body>
+</html>
