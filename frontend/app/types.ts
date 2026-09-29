@@ -168,6 +168,9 @@ export type AgentPriorityCounts = {
 };
 
 export type ProjectMergeRelation = {
+  kind?: "branch" | "merge" | "commit";
+  pr_number?: number | null;
+  pr_url?: string | null;
   commit_hash: string;
   occurred_at: string | null;
   target_parent: string;
@@ -179,6 +182,9 @@ export type ProjectMergeRelation = {
 };
 
 export type ProjectLane = {
+  historical?: boolean;
+  flow_hashes?: string[];
+  alias_lane_id?: string | null;
   unborn?: boolean;
   id: string;
   name: string;
@@ -277,6 +283,8 @@ export type ProjectSummary = {
 };
 
 export type ProjectResponse = {
+  github: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
+  flow: { lanes: ProjectLane[]; connections: ProjectMergeRelation[]; integrations: { number: number; url: string; source: string; target: string; commit_hash: string }[] };
   id: string;
   name: string;
   description: string | null;

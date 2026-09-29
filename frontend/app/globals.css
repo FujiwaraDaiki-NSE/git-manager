@@ -4154,3 +4154,11 @@ html[data-theme="dark"] {
 }
 .patch-more > span { flex-basis: 100%; font: 11px var(--sans); color: var(--muted); }
 .patch-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Parent edges remain visible even when historical branch names are unknown. */
+.flow-connection-commit { opacity: .7; }
+.flow-connection-commit .flow-merge-link { stroke: var(--control-green); }
+.flow-connection-branch .flow-merge-link,
+.flow-connection-branch .flow-merge-direction { stroke: var(--control-green); }
+.flow-pr-status { color: var(--control-muted); font-size: 12px; margin-top: 8px; }
+.flow-connection-default .flow-merge-link { stroke: var(--control-blue); }

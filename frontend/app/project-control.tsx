@@ -13,7 +13,7 @@ import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentReportKey, agentSnapshotAt, agentStateLabel, agentTaskState, isExplicitAgentStatus, laneAgentSnapshotAt, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
-import { ancestryRows, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, mergeBasePosition, recentTimePosition, recentTimeAt, graphTimeTicks, mergeRelationInWindow, mergeRelationLinks, routeMergeLinks, mergeRelationTimes, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { topologyConnections, topologyRelationTimes, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, recentTimePosition, recentTimeAt, graphTimeTicks, mergeRelationInWindow, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
@@ -92,8 +92,15 @@ function shortHash(hash: string | null | undefined) {
   return hash ? hash.slice(0, 8) : "未取得";
 }
 
+function flowLanes(project: ProjectResponse): ProjectLane[] {
+  const current = new Map(project.lanes.map((lane) => [lane.id, lane]));
+  return project.flow.lanes.map((lane) => ({ ...lane, ...current.get(lane.id),
+    merge_sources: lane.merge_sources, merge_targets: lane.merge_targets,
+  }));
+}
+
 function laneLabel(lane: ProjectLane) {
-  return lane.branch || "detached HEAD";
+  return lane.historical ? lane.name : lane.branch || "detached HEAD";
 }
 
 function laneMergeSummary(lane: ProjectLane) {
@@ -103,6 +110,7 @@ function laneMergeSummary(lane: ProjectLane) {
 }
 
 function laneState(lane: ProjectLane, defaultBranch: string | null = null) {
+  if (lane.historical) return "履歴";
   if (lane.conflict === true) return "競合";
   if (lane.dirty === true) return "変更あり";
   if (lane.worktree_state === "prunable") return "作業先なし";
@@ -547,7 +555,10 @@ function FlowMap({
   }, [project.default_branch, project.lanes, relationLaneIds, showMerged]);
 
   const laneRows = useMemo(
-    () => new Map(lanes.map((lane) => [lane.id, ancestryRows(graphRows, lane.head, lane.merge_base)])),
+    () => {
+      const rows = new Map(graphRows.map((row) => [row.hash, row]));
+      return new Map(lanes.map((lane) => [lane.id, (lane.flow_hashes ?? []).flatMap((hash) => { const row = rows.get(hash); return row ? [row] : []; })]));
+    },
     [graphRows, lanes],
   );
   const visibleEventHashes = useMemo(
@@ -603,7 +614,7 @@ function FlowMap({
     return value !== null && (rangeCutoff === null || value >= rangeCutoff);
   });
   const rangeTimes = rangeEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
-  const relationTimes = mergeRelationTimes(project.merge_relations, range, now);
+  const relationTimes = topologyRelationTimes(project.merge_relations, range, now);
   const displayedTimes = [...rangeTimes, ...relationTimes];
   const minTime = Math.min(now - 1, ...(displayedTimes.length ? displayedTimes : allTimes.length ? allTimes : [now]));
   const maxTime = now;
@@ -630,7 +641,6 @@ function FlowMap({
       pointOffset: 0,
       id: flowEventKey(lane.id, row.hash),
     }));
-  const mergeLinks = mergeRelationLinks(project.merge_relations, lanes, minTime, maxTime, observationTime, graphRows);
   const minimumTrackWidth = Math.max(440, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
   // A track grows to the available viewport width when it fits, and becomes
   // horizontally scrollable when 44px hit areas need more room.  The same
@@ -644,22 +654,9 @@ function FlowMap({
   ));
   const eventsByLane = new Map<string, FlowEvent[]>();
   for (const event of events) eventsByLane.set(event.lane.id, [...(eventsByLane.get(event.lane.id) ?? []), event]);
-  const mergeBasePositions = new Map(lanes.map((lane) => {
-    const mergeBaseRow = lane.merge_base ? graphRows.find((row) => row.hash === lane.merge_base) : undefined;
-    return [lane.id, {
-      ...mergeBasePosition(mergeBaseRow?.date ?? null, minTime, maxTime),
-      date: mergeBaseRow?.date ?? null,
-      afterObservation: mergeBaseRow !== undefined && eventDate(mergeBaseRow) !== null && eventDate(mergeBaseRow)! > observationTime,
-    }];
-  }));
-  const unavailableMergeTimeCount = mergeLinks.filter((link: { sourceX: number | null }) => link.sourceX === null).length;
   const visibleMergeKeys = new Set(project.merge_relations
-    .filter((relation) => mergeRelationInWindow(relation, minTime, maxTime, observationTime))
+    .filter((relation) => relation.kind === "merge" && mergeRelationInWindow(relation, minTime, maxTime, observationTime))
     .map((relation) => `${relation.commit_hash}:${relation.source_parent}`));
-  const unresolvedMergeCount = project.merge_relations.filter((relation) => (
-    mergeRelationInWindow(relation, minTime, maxTime, observationTime)
-    && (!relation.source_lane_id || !relation.target_lane_id)
-  )).length;
   const registerEventButton = useCallback((id: string, node: HTMLButtonElement | null) => {
     if (node) eventButtonRefs.current.set(id, node);
     else eventButtonRefs.current.delete(id);
@@ -686,9 +683,8 @@ function FlowMap({
       button.focus();
     }
   }, [eventsByLane, lanes]);
-  const defaultIndex = lanes.findIndex((lane) => lane.branch === project.default_branch);
   const rowHeight = 88;
-  const routedMergeLinks = routeMergeLinks(mergeLinks, trackWidth, rowHeight);
+  const routedMergeLinks: (ProjectMergeRelation & { path: string; arrow: string | null; outside: boolean; clockSkew: boolean })[] = topologyConnections(project.merge_relations, lanes, graphRows, minTime, maxTime, observationTime, trackWidth, rowHeight);
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
 
   return (
@@ -753,39 +749,19 @@ function FlowMap({
           >
             {timeTicks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={lanes.length * rowHeight} />)}
             <line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={lanes.length * rowHeight} />
-            {lanes.map((lane, index) => {
-              const laneEvents = eventsByLane.get(lane.id) ?? [];
-              const last = laneEvents.at(-1);
-              const baseline = defaultIndex >= 0 ? defaultIndex * rowHeight + rowHeight / 2 : null;
-              const y = index * rowHeight + rowHeight / 2;
-              const mergeBase = mergeBasePositions.get(lane.id);
-              const startX = mergeBase?.available ? mergeBase.x * trackWidth / 100 : 0;
-              const endX = last ? last.x * trackWidth / 100 : startX;
-              const isDefault = lane.branch === project.default_branch;
-              if (!isDefault && mergeBase?.afterObservation) return null;
-              return (
-                <g key={lane.id}>
-                  <line className={isDefault ? "flow-base-line" : "flow-lane-line"} x1={isDefault ? 0 : startX} x2={isDefault ? trackWidth : endX} y1={y} y2={y} />
-                  {!isDefault && baseline !== null && (
-                    <line className={lane.merge_base ? "flow-branch-link" : "flow-branch-link flow-branch-link-unknown"} x1={startX} x2={startX} y1={baseline} y2={y} />
-                  )}
-                </g>
-              );
-            })}
             {routedMergeLinks.map((link) => {
               const related = selectedLane === link.source_lane_id || selectedLane === link.target_lane_id;
               return (
-                <g className={`flow-merge-route${selectedLane ? related ? " is-emphasized" : " is-muted" : ""}`} key={`${link.commit_hash}:${link.source_parent}`}>
-                  <title>{`${link.source_branch} → ${link.target_branch} · ${shortHash(link.commit_hash)}`}</title>
-                  <path className={`flow-merge-link${link.outside || link.sourceOutside ? " flow-merge-link-outside" : ""}`} d={link.path} />
-                  <path className="flow-merge-direction" d={link.arrow} />
+                <g data-connection-kind={link.kind} data-source-lane={link.source_lane_id} data-target-lane={link.target_lane_id} className={`flow-merge-route flow-connection-${link.kind}${link.kind === "commit" && link.target_branch === project.default_branch ? " flow-connection-default" : ""}${selectedLane ? related ? " is-emphasized" : " is-muted" : ""}`} key={`${link.commit_hash}:${link.source_parent}`}>
+                  <title>{`${link.kind === "branch" ? "履歴上の分岐" : link.kind === "merge" ? "合流" : "コミット"}: ${link.source_branch} → ${link.target_branch} · ${shortHash(link.commit_hash)}${link.pr_number ? ` · PR #${link.pr_number}` : ""}${link.clockSkew ? " · 親子の記録日時が逆転しています" : ""}`}</title>
+                  <path className={`flow-merge-link${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />
+                  {link.arrow && <path className="flow-merge-direction" d={link.arrow} />}
                 </g>
               );
             })}
           </svg>
           {lanes.map((lane, index) => {
             const laneEvents = eventsByLane.get(lane.id) ?? [];
-            const mergeBase = mergeBasePositions.get(lane.id);
             const visibleRelations = [
               ...lane.merge_sources.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => `→ ${relation.target_branch ?? "不明"}`),
               ...lane.merge_targets.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => `${relation.source_branch ?? "不明"} →`),
@@ -801,10 +777,10 @@ function FlowMap({
                   </div>
                   <div className="flow-lane-meta">
                     <span className={`lane-state ${laneStateClass(lane, project.default_branch)}`}>{laneState(lane, project.default_branch)}</span>
-                    <span title={snapshot?.summary ?? undefined}>{snapshot ? agentStateLabel(agentTaskState(snapshot)) : "ブランチ状態不明"}</span>
+                    <span title={snapshot?.summary ?? undefined}>{snapshot ? agentStateLabel(agentTaskState(snapshot)) : lane.historical ? "現在の作業ブランチではありません" : "作業状況の報告なし"}</span>
                   </div>
                   <div className="flow-lane-relation" title={visibleRelations}>
-                    {lane.unborn ? "コミットを作成すると履歴が表示されます" : visibleRelations ? visibleRelations : mergeBase?.afterObservation ? "分岐点は選択日時より後" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点は表示範囲外" : "分岐点を表示中"}
+                    {lane.unborn ? "コミットを作成すると履歴が表示されます" : visibleRelations ? visibleRelations : lane.alias_lane_id ? `先端は ${laneLabel(project.lanes.find((item) => item.id === lane.alias_lane_id)!)} と共有` : "コミットの親子関係を表示"}
                   </div>
                 </div>
                 <div className="flow-track">
@@ -845,21 +821,18 @@ function FlowMap({
         <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span>
         <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
         <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
-        <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span>
+        <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span><span>緑の矢印: 履歴上の分岐</span>
         <span className="flow-time-direction">時間 →（直近ほど広く）</span>
       </div>
       {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
-      {unavailableMergeTimeCount > 0 && <div className="inline-note" role="status">合流関係 {unavailableMergeTimeCount} 件は、合流元コミットの日時が未取得または合流日時より後のため、線を表示していません。</div>}
-      {unresolvedMergeCount > 0 && (
-        <div className="inline-note" role="status">
-          {`合流関係 ${unresolvedMergeCount} 件はブランチを特定できないため、線を表示していません。`}
-        </div>
-      )}
+      {project.github.status === "unavailable" && <div className="inline-note" role="status">{project.github.reason}。Gitの親子関係は表示しています。</div>}
+      {project.github.status === "available" && <div className="flow-pr-status">PR情報: GitHubから取得済み · {exactDate(project.github.checked_at === null ? null : new Date(project.github.checked_at * 1000).toISOString())}</div>}
+      {project.flow.integrations.length > 0 && <details className="flow-help"><summary>通常のマージ線で表せないPR ({project.flow.integrations.length})</summary><p>取り込み先のコミットに複数の親がないため、Gitの合流線を作成しません。Squash・Rebaseなどの取り込みはPRで確認できます。</p>{project.flow.integrations.map((pr) => <p key={pr.number}><a href={pr.url} target="_blank" rel="noreferrer">PR #{pr.number}</a> {pr.source} → {pr.target} · {shortHash(pr.commit_hash)}</p>)}</details>}
       <details className="flow-help">
         <summary>グラフの見方・キーボード操作</summary>
         <p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進みます。直近を広く、過去を圧縮した時間軸です。同じ横幅が同じ時間間隔を表すとは限りません。</p>
         <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
-        <p>分岐点は既定ブランチとの共通祖先（merge-base）です。合流線は合流元コミットの日時から合流コミットの日時へ進み、途中の矢印で合流方向を示します。その日時の間で線を分け、同時刻の場合は垂直に接続します。破線は合流元が表示範囲外です。ブランチを選ぶと関係する合流線を強調します。Gitの履歴から特定できた合流関係のみ表示します。ブランチ作業状況は明示された報告を表示します。</p>
+        <p>線はGitのコミットの親子関係です。緑の矢印は履歴上の分岐、紫の矢印は合流で、先端は変更を受け取るコミットを示します。ブランチ作成の正確な日時を示すものではありません。行の名前には現在のブランチと、コミットが一致したPR情報を使います。当時の所属を保証するものではなく、名前不明の経路も残します。破線は接続元が表示範囲外です。親子の記録日時が逆転した場合も、矢印は親から子へ向けます。ブランチ作業状況は明示された報告を表示します。</p>
       </details>
       {project.graph?.truncated && <div className="inline-note">直近 200 件から表示しています。それ以前の履歴は「全期間」で確認できます。</div>}
     </section>
@@ -1295,7 +1268,7 @@ function SelectionPane({
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
-  const lane = project.lanes.find((item) => item.id === selectedLane) ?? (selectedEvent && "lane" in selectedEvent ? selectedEvent.lane : null);
+  const lane = flowLanes(project).find((item) => item.id === selectedLane) ?? (selectedEvent && "lane" in selectedEvent ? selectedEvent.lane : null);
   return (
     <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal={modal ? true : undefined} role={modal ? "dialog" : "complementary"} tabIndex={-1}>
       <div className="selection-head"><span className="selection-title">選択した項目の詳細</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
@@ -1492,7 +1465,7 @@ export default function ProjectControl() {
   }, [selectedHash, selectedLane, updateUrl, gitPath]);
   const selectedEvent = useMemo(() => {
     if (!project || !selectedHash) return null;
-    const lane = project.lanes.find((item) => item.id === selectedLane);
+    const lane = flowLanes(project).find((item) => item.id === selectedLane);
     const row = project.graph?.rows.find((item) => item.hash === selectedHash);
     if (row && lane) return { row, lane, x: 0, hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(lane.id, row.hash) } as FlowEvent;
     return project.events.find((event) => event.commit_hash === selectedHash) ?? null;
@@ -1590,7 +1563,7 @@ export default function ProjectControl() {
       </nav>
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
-          {urlState.tab === "flow" && <FlowMap selectedLane={selectedLane} onSelectLane={selectLane} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={project} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
+          {urlState.tab === "flow" && <FlowMap selectedLane={selectedLane} onSelectLane={selectLane} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={{ ...project, lanes: flowLanes(project), merge_relations: project.flow.connections }} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} />}

@@ -420,3 +420,50 @@ export function eventLeaderGeometry(timestampX, hitX, trackWidth = 440) {
     width: Math.abs(offset),
   };
 }
+
+/** Draw every observed parent edge. A branch name is never a drawing gate. */
+export function topologyConnections(relations, lanes, graphRows, minTime, maxTime, observationTime, trackWidth, rowHeight) {
+  const byHash = new Map(graphRows.map((row) => [row.hash, row]));
+  const indexes = new Map(lanes.map((lane, index) => [lane.id, index]));
+  return relations.flatMap((relation) => {
+    const sourceIndex = indexes.get(relation.source_lane_id);
+    const targetIndex = indexes.get(relation.target_lane_id);
+    const parent = byHash.get(relation.source_parent);
+    const child = byHash.get(relation.commit_hash);
+    if (sourceIndex === undefined || targetIndex === undefined || !parent || !child) return [];
+    const sourceTime = new Date(parent.date).getTime();
+    const targetTime = new Date(child.date).getTime();
+    if (!Number.isFinite(sourceTime) || !Number.isFinite(targetTime)
+      || Math.max(sourceTime, targetTime) > observationTime
+      || Math.max(sourceTime, targetTime) < minTime) return [];
+    const startX = recentTimePosition(sourceTime, minTime, maxTime) * trackWidth / 100;
+    const endX = recentTimePosition(targetTime, minTime, maxTime) * trackWidth / 100;
+    const sourceY = (sourceIndex + .5) * rowHeight;
+    const targetY = (targetIndex + .5) * rowHeight;
+    const channel = (startX + endX) / 2;
+    let path, arrow;
+    if (sourceIndex === targetIndex && relation.kind !== "merge") {
+      path = `M ${startX} ${sourceY} H ${endX}`;
+      arrow = null;
+    } else if (sourceIndex === targetIndex) {
+      // A merge can connect two commits on the same display lane.
+      path = `M ${startX} ${sourceY} C ${startX} ${sourceY - 24} ${endX} ${targetY - 24} ${endX} ${targetY}`;
+      arrow = `M ${endX - 4} ${targetY - 7} L ${endX} ${targetY} L ${endX + 4} ${targetY - 7}`;
+    } else if (Math.abs(endX - startX) < 16) {
+      path = `M ${startX} ${sourceY} H ${endX} V ${targetY}`;
+      const sign = Math.sign(targetY - sourceY);
+      arrow = `M ${endX - 4} ${targetY - sign * 7} L ${endX} ${targetY} L ${endX + 4} ${targetY - sign * 7}`;
+    } else {
+      path = `M ${startX} ${sourceY} H ${channel} V ${targetY} H ${endX}`;
+      const sign = Math.sign(endX - startX);
+      arrow = `M ${endX - sign * 7} ${targetY - 4} L ${endX} ${targetY} L ${endX - sign * 7} ${targetY + 4}`;
+    }
+    return [{ ...relation, path, arrow, sourceIndex, targetIndex, outside: sourceTime < minTime,
+      clockSkew: sourceTime > targetTime }];
+  });
+}
+
+/** Head-only points still need the observed forks/merges in their time window. */
+export function topologyRelationTimes(relations, range, now) {
+  return mergeRelationTimes(relations.filter((relation) => relation.kind !== "commit"), range === "current" ? "all" : range, now);
+}
