@@ -90,3 +90,10 @@
 - Added a real-Git regression test from initial branch through first commit. Backend: 78 passed with warnings treated as errors.
 - GUI E2E: the empty branch now shows main / 初回コミット前 / まだコミットがありません. Creating the first commit made the graph point appear automatically. A subsequent actual detached checkout still displayed detached HEAD separately; returned the disposable repo to main afterward.
 - Header counts are labeled 作業レーン because detached worktrees and unborn branches are included in that count.
+
+## Graph stats and comparison guidance
+
+- Reproduced C-escaped Japanese paths in graph hover stats separately from commit detail. The batched lightweight Git query now uses NUL records and consumes rename paths without splitting filenames on whitespace.
+- A real-Git regression test checks Unicode/tab/newline/CR paths, rename and binary totals, empty commits, and exactly one Git process for three commits. Backend: 79 passed with warnings treated as errors.
+- GUI E2E: keyboard focus on the graph point shows readable 差分検索-1/2/3.txt and correct +12/-0 across six files.
+- Added the actual upstream comparison to work details and an expandable explanation of ahead/behind, working changes, and comparison targets. Show observed counts instead of implying that a push operation was acknowledged.

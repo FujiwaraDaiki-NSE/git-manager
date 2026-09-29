@@ -144,8 +144,7 @@ function upstreamLabel(lane: ProjectLane) {
   if (lane.upstream_ahead === null || lane.upstream_behind === null) {
     return `upstream ${lane.upstream} · push 状態未取得`;
   }
-  const pushState = lane.upstream_ahead > 0 ? `未push ${lane.upstream_ahead}` : "push済み";
-  return `upstream ${lane.upstream} · ${pushState} · behind ${lane.upstream_behind}`;
+  return `追跡先 ${lane.upstream} · ahead ${lane.upstream_ahead} · behind ${lane.upstream_behind}`;
 }
 
 function agentElapsed(occurredAt: string | null | undefined) {
@@ -1120,11 +1119,18 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
         <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.last_commit?.subject ?? "未取得"}<small>{exactDate(lane.last_commit?.date)}</small></dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
+        <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}</dd></div>
         <div><dt>担当 agent</dt><dd>{currentLaneAgent(lane)?.agent_id || "未関連付け"}</dd></div>
         <div><dt>このブランチからの合流</dt><dd>{lane.merge_sources.length ? lane.merge_sources.map((relation) => `${relation.target_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
         <div><dt>このブランチへの合流</dt><dd>{lane.merge_targets.length ? lane.merge_targets.map((relation) => `${relation.source_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
         <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</dd></div>
       </dl>
+      <details className="flow-help selection-help">
+        <summary>Git状態と比較先の見方</summary>
+        <p>「変更なし」は作業ディレクトリに未コミットの変更がない状態です。追跡先にまだ送っていないコミットがある場合もあります。</p>
+        <p><code>ahead</code> は比較先にない、このブランチのコミット数です。<code>behind</code> はこのブランチにない、比較先のコミット数です。</p>
+        <p>「既定ブランチとの差」と「追跡先との差」は比較する相手が異なることがあります。追跡先がリモートブランチなら、ahead は未push、behind は未pullの目安です。リモートの情報は直近のfetch時点のものです。</p>
+      </details>
       {lane.next_command && <div className="selection-command"><span>Git 次コマンド</span><code>{lane.next_command.command}</code><CopyButton value={lane.next_command.command} label="コマンドをコピー" /><small>{lane.next_command.reason}</small></div>}
       <button className="primary-action" type="button" disabled={!lane.path} onClick={() => onOpenGit(lane)}>Git 詳細を開く</button>{!lane.path && <p className="no-checkout">このブランチには作業ディレクトリがないため、Git状態の詳細は表示できません。</p>}
     </div>

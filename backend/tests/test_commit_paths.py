@@ -48,3 +48,40 @@ def test_empty_commit_has_no_files(tmp_path):
     assert result['files'] == []
     assert result['parents'] == []
     assert result['patch'] == ''
+
+
+def test_batched_graph_stats_keep_exact_paths_without_per_commit_processes(tmp_path, monkeypatch):
+    from app import gitinfo, project
+
+    git(tmp_path, 'init', '-q', '-b', 'main')
+    git(tmp_path, 'config', 'user.name', 'Test')
+    git(tmp_path, 'config', 'user.email', 'test@example.invalid')
+    original = '日本語\tファイル\n.txt '
+    (tmp_path / original).write_text('first\nsecond\n')
+    git(tmp_path, 'add', '.')
+    git(tmp_path, 'commit', '-qm', 'first')
+    first = git(tmp_path, 'rev-parse', 'HEAD').strip()
+    renamed = '新しい\r名前.txt'
+    git(tmp_path, 'mv', '--', original, renamed)
+    (tmp_path / 'binary.bin').write_bytes(b'\0\1\2')
+    git(tmp_path, 'add', '.')
+    git(tmp_path, 'commit', '-qm', 'rename and binary')
+    second = git(tmp_path, 'rev-parse', 'HEAD').strip()
+    git(tmp_path, 'commit', '--allow-empty', '-qm', 'empty')
+    empty = git(tmp_path, 'rev-parse', 'HEAD').strip()
+    calls = []
+    run = gitinfo._run
+
+    def tracked(repo, args, *rest, **kwargs):
+        calls.append(args)
+        return run(repo, args, *rest, **kwargs)
+
+    monkeypatch.setattr(gitinfo, '_run', tracked)
+    result = project._commit_stats_many(str(tmp_path), [first, second, empty])
+    assert len(calls) == 1
+    assert result[first] == {'files': 1, 'additions': 2, 'deletions': 0, 'paths': [original]}
+    assert result[second]['files'] == 2
+    assert set(result[second]['paths']) == {renamed, 'binary.bin'}
+    assert result[second]['additions'] is None
+    assert result[second]['deletions'] is None
+    assert result[empty] == {'files': 0, 'additions': 0, 'deletions': 0, 'paths': []}
