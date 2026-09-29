@@ -4,7 +4,7 @@
 
 限界: 作業ツリーのファイルを編集しても .git は変化しないため M / ?? は拾えない。
 作業ツリーごと watch するのは .gitignore の解釈が要る上に watch 数が爆発するので
-やらない。フロント側でフォーカス復帰時に取り直すことで補う。
+やらない。画面の「再走査」で取り直す。
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ WATCH_FLAGS = 0
 if flags is not None:
     WATCH_FLAGS = (
         flags.CLOSE_WRITE | flags.MOVED_TO | flags.CREATE | flags.DELETE
+        | flags.DELETE_SELF | flags.MOVE_SELF
     )
 
 
@@ -55,6 +56,8 @@ class Watcher:
 
     def stop(self) -> None:
         self._stop.set()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2)
         if self._inotify is not None:
             try:
                 self._inotify.close()
@@ -62,14 +65,12 @@ class Watcher:
                 pass
 
     def watch(self, repo: str) -> None:
-        """1 リポジトリを監視対象に加える。既に登録済みなら何もしない。"""
+        """1 リポジトリの Git 管理ディレクトリと参照 namespace を監視する。"""
         if self._inotify is None:
             return
         repo = os.path.abspath(repo)
         with self._lock:
-            if repo in self._repo_to_wds:
-                return
-            wds: list[int] = []
+            wds = list(self._repo_to_wds.get(repo, []))
             layout = scanner.repo_layout(repo)
             if layout is None:
                 return
@@ -77,22 +78,11 @@ class Watcher:
             # A linked worktree's .git is a pointer file.  Watch the actual
             # per-worktree gitdir (HEAD/logs/index) and the shared refs/logs
             # directories instead of the pointer itself.
-            private_targets = [
-                layout.git_dir,
-                os.path.join(layout.git_dir, "refs"),
-                os.path.join(layout.git_dir, "logs"),
-                os.path.join(layout.git_dir, "logs", "refs"),
-            ]
+            private_targets = self._git_targets(layout.git_dir)
             targets = list(private_targets)
             if layout.common_git_dir != layout.git_dir:
-                targets.extend(
-                    (
-                        layout.common_git_dir,
-                        os.path.join(layout.common_git_dir, "refs"),
-                        os.path.join(layout.common_git_dir, "logs"),
-                        os.path.join(layout.common_git_dir, "logs", "refs"),
-                    )
-                )
+                targets.extend(self._git_targets(layout.common_git_dir))
+            private_paths = {os.path.realpath(path) for path in private_targets}
 
             seen_targets: set[str] = set()
             for candidate in targets:
@@ -114,11 +104,47 @@ class Watcher:
                     self._wd_to_repo[wd] = repo
                 users = self._wd_users.setdefault(wd, set())
                 users.add(repo)
-                if target in {os.path.realpath(path) for path in private_targets}:
+                if target in private_paths:
                     self._wd_private_users.setdefault(wd, set()).add(repo)
                 wds.append(wd)
             if wds:
                 self._repo_to_wds[repo] = list(dict.fromkeys(wds))
+
+    @staticmethod
+    def _git_targets(git_dir: str) -> list[str]:
+        # Recurse only through refs/reflogs, never objects or worktree files.
+        targets = [git_dir, os.path.join(git_dir, "logs")]
+        for root in (os.path.join(git_dir, "refs"), os.path.join(git_dir, "logs", "refs")):
+            targets.extend(directory for directory, _, _ in os.walk(root, followlinks=False))
+        return targets
+
+    def _refresh_watches_for_events(self, events: list[object]) -> None:
+        """New namespaces and deleted/recreated directories need fresh watches."""
+        refresh: set[str] = set()
+        with self._lock:
+            for event in events:
+                wd = getattr(event, "wd", None)
+                mask = getattr(event, "mask", 0)
+                users = set(self._wd_users.get(wd, set()))
+                invalidated = mask & (flags.IGNORED | flags.DELETE_SELF | flags.MOVE_SELF)
+                if invalidated:
+                    self._wd_users.pop(wd, None)
+                    self._wd_private_users.pop(wd, None)
+                    self._wd_to_repo.pop(wd, None)
+                    for directory, descriptor in list(self._dir_to_wd.items()):
+                        if descriptor == wd:
+                            self._dir_to_wd.pop(directory)
+                    for repo in users:
+                        self._repo_to_wds[repo] = [value for value in self._repo_to_wds.get(repo, []) if value != wd]
+                    if not mask & flags.IGNORED:
+                        try:
+                            self._inotify.rm_watch(wd)
+                        except OSError:
+                            pass
+                if invalidated or (mask & flags.ISDIR and mask & (flags.CREATE | flags.MOVED_TO | flags.DELETE)):
+                    refresh.update(users)
+        for repo in refresh:
+            self.watch(repo)
 
     def unwatch(self, repo: str) -> None:
         if self._inotify is None:
@@ -209,7 +235,11 @@ class Watcher:
         while not self._stop.is_set():
             try:
                 events = self._inotify.read(timeout=1000)
-            except OSError:
+            except (OSError, ValueError):
+                if not self._stop.is_set():
+                    raise
                 break
-            for repo in self._callbacks_for_events(events):
+            callbacks = self._callbacks_for_events(events)
+            self._refresh_watches_for_events(events)
+            for repo in callbacks:
                 self._on_change(repo)
