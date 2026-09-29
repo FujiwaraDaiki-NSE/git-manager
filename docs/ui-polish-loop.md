@@ -55,3 +55,10 @@
 - Use ~/.local/bin/gitdash-compose with explicit worktree project-directory/file overrides, preserving the two environment files.
 - Another task rebuilt the shared runtime from codex/compact-agent-status during E2E. Subsequent verification uses isolated git-manager-ui-e2e Compose project: frontend 14412, host-local API 18762, separate data volume, automatic fetch disabled. Config is generated at /tmp/gitdash-ui-e2e-compose.json.
 - Normal user runtime is no longer overwritten during iterative testing. Final integration/deployment will use current main and be explicitly reported.
+
+## Git detail live refresh and recovery
+
+- Reproduced: adding `e2e-live-branch` updated the project but left the open branch detail unchanged.
+- Graph/branches now refresh on the repository observation timestamp, retaining previous content during background fetches. A failed refresh explicitly labels the retained content as the previous result.
+- Isolated GUI E2E: added `e2e-live-updated` with the modal open; it appeared automatically. Blocked only `/api/repo/branches`, added `e2e-live-retry`, observed the error plus retained rows, removed the block and used 再取得; the new branch appeared.
+- Replaced the six-column branch row with a two-column name/hash and full-width metadata so worktree paths remain readable inside the dialog.

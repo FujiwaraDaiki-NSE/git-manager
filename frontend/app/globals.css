@@ -967,12 +967,10 @@ body {
 }
 .branch-row {
   display: grid;
-  grid-template-columns:
-    minmax(120px, 1.2fr) 70px minmax(100px, 1fr)
-    auto minmax(130px, auto) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: baseline;
-  padding: 5px 0;
+  padding: 12px 0;
   border-top: 1px solid var(--rule);
   min-width: 0;
 }
@@ -983,9 +981,17 @@ body {
 .branch-name,
 .branch-upstream,
 .branch-track {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.branch-upstream,
+.branch-track,
+.branch-date,
+.branch-state {
+  grid-column: 1 / -1;
+}
+.branch-state:empty {
+  display: none;
 }
 .branch-name.current {
   color: var(--accent);
@@ -1248,9 +1254,6 @@ body {
   }
   .worktree-item::after {
     width: 10px;
-  }
-  .branch-row {
-    grid-template-columns: minmax(120px, 1fr) 60px auto;
   }
   .branch-upstream {
     grid-column: 1 / -1;

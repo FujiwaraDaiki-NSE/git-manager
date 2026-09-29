@@ -228,7 +228,7 @@ function BranchRow({
       </span>
       <code>{branch.hash}</code>
       {branch.upstream && (
-        <span className="branch-upstream">{branch.upstream}</span>
+        <span className="branch-upstream">追跡先 <code>{branch.upstream}</code></span>
       )}
       {branch.track && <span className="branch-track">{branch.track}</span>}
       <time className="branch-date" dateTime={branch.date}>
@@ -237,12 +237,12 @@ function BranchRow({
       <span className="branch-state">
         {branch.worktree && (
           <span className="branch-worktree" title={branch.worktree}>
-            作業中 @ {branch.worktree}
+            作業場所 · {branch.worktree}
           </span>
         )}
         {abandonedCandidate && (
           <span className="branch-action">
-            <span className="branch-abandoned">merged · 削除候補</span>
+            <span className="branch-abandoned">統合済み · 削除候補</span>
             <button
               className="branch-delete"
               type="button"
@@ -253,7 +253,7 @@ function BranchRow({
           </span>
         )}
         {collapsedMerged && !abandonedCandidate && (
-          <span className="branch-merged">merged</span>
+          <span className="branch-merged">統合済み</span>
         )}
       </span>
     </div>
@@ -305,19 +305,19 @@ function BranchesPane({
       </div>
       {state === "loading" && (
         <div className="loading" role="status">
-          ブランチを取得中…
+          {data ? "ブランチを更新中…" : "ブランチを取得中…"}
         </div>
       )}
       {state === "error" && (
         <div className="inline-error" role="alert">
-          ブランチを取得できませんでした。
+          {data ? "ブランチを更新できませんでした。前回取得した内容を表示しています。" : "ブランチを取得できませんでした。"}
           <button className="copy" type="button" onClick={onRetry}>
             再取得
           </button>
           {error && <span className="sr-only">{error}</span>}
         </div>
       )}
-      {(state === "loading" || state === "ready") && data && (
+      {data && (
         <div className="branch-groups">
           <div className="branch-group">
             <h4>ローカル</h4>
@@ -381,7 +381,12 @@ export default function RepoDetail({
     setCommitState("idle");
     setCommitError(null);
     setShowMerged(false);
+    setBranches(null);
   }, [repo.path]);
+
+  useEffect(() => {
+    setGraph(null);
+  }, [repo.path, allRefs]);
 
   useEffect(() => {
     if (activeTab !== "graph") {
@@ -389,7 +394,6 @@ export default function RepoDetail({
       return;
     }
     const controller = new AbortController();
-    setGraph(null);
     setGraphState("loading");
     setGraphError(null);
     void getJson<GraphResponse>(
@@ -416,6 +420,7 @@ export default function RepoDetail({
     graphRetry,
     repo.branch,
     repo.last_commit?.hash,
+    repo.checked_at,
     repo.path,
   ]);
 
@@ -425,7 +430,6 @@ export default function RepoDetail({
       return;
     }
     const controller = new AbortController();
-    setBranches(null);
     setBranchesState("loading");
     setBranchesError(null);
     void getJson<BranchesResponse>(
@@ -451,6 +455,7 @@ export default function RepoDetail({
     branchesRetry,
     repo.branch,
     repo.last_commit?.hash,
+    repo.checked_at,
     repo.path,
   ]);
 
@@ -610,7 +615,7 @@ export default function RepoDetail({
               --all
             </label>
           </div>
-          {graphState === "loading" && (
+          {graphState === "loading" && !graph && (
             <div
               className="graph-skeletons"
               role="status"
@@ -621,9 +626,10 @@ export default function RepoDetail({
               ))}
             </div>
           )}
+          {graphState === "loading" && graph && <div className="muted-line" role="status">コミットグラフを更新中…</div>}
           {graphState === "error" && (
             <div className="inline-error" role="alert">
-              コミットグラフを取得できませんでした。
+              {graph ? "コミットグラフを更新できませんでした。前回取得した内容を表示しています。" : "コミットグラフを取得できませんでした。"}
               <button
                 className="copy"
                 type="button"
@@ -634,7 +640,7 @@ export default function RepoDetail({
               {graphError && <span className="sr-only">{graphError}</span>}
             </div>
           )}
-          {(graphState === "loading" || graphState === "ready") && graph && (
+          {graph && (
             <>
               {branchRelationSummary && (
                 <BranchRelationSummary summary={branchRelationSummary} />
