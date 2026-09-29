@@ -1,6 +1,8 @@
 "use client";
 
 import PatchView from "./patch-view";
+import CommitFiles from "./commit-files";
+import GitGuide from "./git-guide";
 
 import Link from "next/link";
 import { homeReturnHref } from "./home-overview.mjs";
@@ -919,8 +921,7 @@ function CommitDetail({
       {state === "loading" && <div className="selection-loading" role="status">完全なコミット詳細を取得中…</div>}
       {state === "error" && <div className="selection-error" role="alert">コミット詳細を取得できませんでした。<button className="subtle-button" type="button" onClick={() => setRetryToken((value) => value + 1)}>再試行</button></div>}
       {state === "ready" && detail && <>
-        <div className="selection-numstat"><span>変更ファイル {detail.files.length}</span><span className="additions">+{detail.files.reduce((sum, file) => sum + (typeof file.additions === "number" ? file.additions : 0), 0)}</span><span className="deletions">-{detail.files.reduce((sum, file) => sum + (typeof file.deletions === "number" ? file.deletions : 0), 0)}</span></div>
-        <div className="selection-files">{detail.files.map((file) => <div key={file.path}><span>{file.additions}</span><span>{file.deletions}</span><code>{file.old_path !== undefined && <><span className="renamed-from">{file.old_path}</span><span aria-label="変更後"> → </span></>}{file.path}</code></div>)}</div>
+        <CommitFiles key={detail.hash} files={detail.files} downloadName={`${detail.hash}-files.tsv`} />
         <PatchView key={detail.hash} patch={detail.patch} />
         {detail.patch_truncated && <p className="inline-note" role="status">差分が大きいため、一部を省略しています。全体は <code>git show {hash}</code> で確認できます。</p>}
       </>}
@@ -1348,6 +1349,7 @@ export default function ProjectControl() {
         </section>
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}
       </div>
+      <GitGuide key={project.main_path} path={project.main_path} />
       {gitPath && legacyRepo && <LegacyGitModal copied={copied} copyError={copyError} onClose={closeGit} onCopy={copy} onTabChange={setGitTab} repo={legacyRepo} tab={gitTab} />}
       {gitPath && !legacyRepo && <LegacyUnavailableModal onClose={closeGit} />}
     </main>

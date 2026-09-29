@@ -1,7 +1,16 @@
 "use client";
 
 import PatchView from "./patch-view";
+import CommitFiles from "./commit-files";
+import CopyButton from "./copy-button";
 import { fileStatusDescription, fileStatusGroups } from "./file-status.mjs";
+import {
+  BRANCH_FILTERS,
+  BRANCH_SORTS,
+  changedPathList,
+  visibleBranches,
+} from "./repo-tools.mjs";
+import "./repo-tools.css";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -23,6 +32,8 @@ type RepoDetailProps = {
 };
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type BranchFilter = "all" | "current" | "worktree" | "untracked-upstream";
+type BranchSort = "name" | "date";
 
 const GRAPH_LIMIT = 200;
 const COMMIT_FETCH_DEBOUNCE_MS = 150;
@@ -105,13 +116,13 @@ function StatusPane({ repo }: { repo: Repo }) {
     <section className="status-pane" aria-labelledby="status-pane-title">
       <div className="section-head"><h3 id="status-pane-title">変更ファイル</h3><code className="cmdhint">git status --short</code></div>
       {entries === undefined || repo.error || repo.pending ? <div className="inline-error" role="status">変更ファイルの状態は未取得です。{repo.error && <span>{repo.error}。</span>}再走査で最新の状態を取得できます。</div> : <>
-        <div className="status-file-tools"><label><span className="sr-only">変更ファイルを検索</span><input type="search" aria-label="変更ファイルを検索" placeholder="ファイル名・パスで検索" value={query} onChange={(event) => setQuery(event.target.value)} /></label><span role="status">{visible?.length} / {entries.length} ファイル</span></div>
+        <div className="status-file-tools"><label><span className="sr-only">変更ファイルを検索</span><input type="search" aria-label="変更ファイルを検索" placeholder="ファイル名・パスで検索" value={query} onChange={(event) => setQuery(event.target.value)} /></label><span role="status">{visible?.length} / {entries.length} ファイル</span>{visible && visible.length > 0 && <CopyButton value={changedPathList(visible)} label="表示中のパスをコピー" />}</div>
         <div className="status-file-filters" role="group" aria-label="変更ファイルの状態で絞り込み">{filters.map(({ key, label }) => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}<span>{entries.filter((entry) => fileStatusGroups(entry.xy)[key]).length}</span></button>)}</div>
         <div className="status-file-list">
-          {visible?.map((entry) => <div className="status-file-row" key={entry.xy + entry.path}><code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code><code className="status-file-path">{entry.path}</code><span className="status-file-description">{fileStatusDescription(entry.xy)}</span></div>)}
+          {visible?.map((entry) => <div className="status-file-row" key={entry.xy + entry.path}><code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code><code className="status-file-path">{entry.path}</code><span className="status-file-description">{fileStatusDescription(entry.xy)}</span><span className="status-file-copy"><CopyButton value={entry.path} label={`${entry.path} のパスをコピー`} /></span></div>)}
           {visible?.length === 0 && <div className="status-file-empty">{entries.length === 0 ? "未コミットの変更はありません。" : "条件に一致する変更ファイルはありません。"}{(query || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { setQuery(""); setFilter("all"); }}>絞り込みを解除</button>}</div>}
         </div>
-        <details className="status-file-guide"><summary>ステージと状態記号の見方</summary><p>ステージ済みは次のコミットに含める変更、未ステージは作業ディレクトリだけにある変更です。同じファイルに両方の変更がある場合は、それぞれの絞り込みに表示します。</p><p>記号は左がステージ、右が作業ディレクトリです。M: 変更、A: 追加、D: 削除、R: 名前変更、??: 未追跡。競合はファイルを確認して解消します。</p></details>
+        <details className="status-file-guide"><summary>ステージと状態記号の見方</summary><div className="status-flow" aria-label="作業ディレクトリからステージ、コミットへの流れ"><div className="status-flow-node"><strong>作業ディレクトリ</strong><span>未ステージ</span><code>git diff</code></div><div className="status-flow-arrow"><code>git add</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>ステージ（index）</strong><span>ステージ済み</span><code>git diff --cached</code></div><div className="status-flow-arrow"><code>git commit</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>コミット</strong><span>履歴に保存</span></div></div><p>ステージ済みは次のコミットに含める変更、未ステージは作業ディレクトリだけにある変更です。同じファイルに両方の変更がある場合は、それぞれの絞り込みに表示します。</p><p>記号は左がステージ、右が作業ディレクトリです。M: 変更、A: 追加、D: 削除、R: 名前変更、??: 未追跡。競合はファイルを確認して解消します。</p></details>
       </>}
     </section>
   );
@@ -173,27 +184,7 @@ function CommitPane({
             <span>{detail.author}</span>
             <span>{detail.date}</span>
           </div>
-          <div className="numstat" aria-label="変更ファイルの集計">
-            <div className="numstat-head">
-              <span>追加</span>
-              <span>削除</span>
-              <span>パス</span>
-            </div>
-            {detail.files.map((file) => (
-              <div className="numstat-row" key={file.path}>
-                <span className="additions">{file.additions}</span>
-                <span className="deletions">{file.deletions}</span>
-                <span className="file-path">
-                  {file.old_path !== undefined && <><span className="renamed-from">{file.old_path}</span><span aria-label="変更後"> → </span></>}
-                  {file.path}
-                  {file.binary && <span className="binary"> (binary)</span>}
-                </span>
-              </div>
-            ))}
-            {detail.files.length === 0 && (
-              <div className="muted-line">変更ファイルはありません</div>
-            )}
-          </div>
+          <CommitFiles key={detail.hash} files={detail.files} downloadName={`${detail.hash}-files.tsv`} />
           <PatchView key={detail.hash} patch={detail.patch} />
           {detail.patch_truncated && (
             <div className="truncated" role="status">
@@ -232,8 +223,8 @@ function BranchRow({
         <span className="branch-upstream">追跡先 <code>{branch.upstream}</code></span>
       )}
       {branch.track && <span className="branch-track">{branch.track}</span>}
-      <time className="branch-date" dateTime={branch.date}>
-        {branch.date}
+      <time className="branch-date" dateTime={branch.date || undefined}>
+        {branch.date || "日付未取得"}
       </time>
       <span className="branch-state">
         {branch.worktree && (
@@ -278,16 +269,19 @@ function BranchesPane({
   onRetry: () => void;
   onCopy: (command: string) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<BranchFilter>("all");
+  const [sort, setSort] = useState<BranchSort>("name");
   if (state === "idle") return null;
   const local = data?.local ?? [];
   const remote = data?.remotes ?? [];
+  const branchOptions = { query, filter, showMerged, sort } as const;
   // A merged branch checked out in another worktree remains active and must
   // stay visible in the default view.
-  const visibleLocal = showMerged
-    ? local
-    : local.filter(
-        (branch) => branch.current || !branch.merged || branch.worktree,
-      );
+  const visibleLocal = visibleBranches(local, branchOptions);
+  const visibleRemote = visibleBranches(remote, branchOptions);
+  const resultCount = visibleLocal.length + visibleRemote.length;
+  const totalCount = local.length + remote.length;
   const mergedCount = local.filter(
     (branch) => !branch.current && branch.merged && !branch.worktree,
   ).length;
@@ -319,7 +313,36 @@ function BranchesPane({
         </div>
       )}
       {data && (
-        <div className="branch-groups">
+        <>
+          <div className="repo-tools-toolbar" aria-label="ブランチの表示条件">
+            <label className="repo-tools-search">
+              ブランチを検索
+              <input
+                type="search"
+                aria-label="ブランチ名・追跡先・作業場所を検索"
+                placeholder="名前・追跡先・作業場所"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+            <label>
+              並び順
+              <select aria-label="ブランチの並び順" value={sort} onChange={(event) => setSort(event.target.value as BranchSort)}>
+                {BRANCH_SORTS.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+              </select>
+            </label>
+            <span className="repo-tools-count" role="status">{resultCount} / {totalCount} ブランチ</span>
+            <button className="repo-tools-reset" type="button" disabled={!query.trim()} onClick={() => setQuery("")}>検索をリセット</button>
+          </div>
+          <div className="branch-filter-list" role="group" aria-label="ブランチの種類で絞り込み">
+            {BRANCH_FILTERS.map((option) => {
+              const optionFilter = option.key as BranchFilter;
+              const count = visibleBranches(local, { query, filter: optionFilter, showMerged, sort }).length
+                + visibleBranches(remote, { query, filter: optionFilter, showMerged, sort }).length;
+              return <button key={option.key} type="button" aria-pressed={filter === optionFilter} onClick={() => setFilter(optionFilter)}>{option.label}<span>{count}</span></button>;
+            })}
+          </div>
+          <div className="branch-groups">
           <div className="branch-group">
             <h4>ローカル</h4>
             {visibleLocal.map((branch) => (
@@ -335,19 +358,20 @@ function BranchesPane({
               </button>
             )}
             {visibleLocal.length === 0 && mergedCount === 0 && (
-              <div className="muted-line">ローカルブランチはありません</div>
+              <div className="muted-line">{local.length === 0 ? "ローカルブランチはありません" : "条件に一致するローカルブランチはありません"}</div>
             )}
           </div>
           <div className="branch-group">
             <h4>リモート</h4>
-            {remote.map((branch) => (
+            {visibleRemote.map((branch) => (
               <BranchRow key={branch.name} branch={branch} onCopy={onCopy} />
             ))}
-            {remote.length === 0 && (
-              <div className="muted-line">リモートブランチはありません</div>
+            {visibleRemote.length === 0 && (
+              <div className="muted-line">{remote.length === 0 ? "リモートブランチはありません" : "条件に一致するリモートブランチはありません"}</div>
             )}
           </div>
-        </div>
+          </div>
+        </>
       )}
     </section>
   );

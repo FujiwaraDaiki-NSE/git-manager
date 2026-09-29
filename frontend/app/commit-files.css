@@ -1,0 +1,218 @@
+.commit-files {
+  margin-top: 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.commit-files-heading,
+.commit-files-tools,
+.commit-files-filters,
+.commit-files-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.commit-files-heading {
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.commit-files-heading h4 {
+  margin: 0;
+  font: 700 13px/1.4 var(--sans);
+}
+
+.commit-files-heading p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font: 11px/1.5 var(--sans);
+}
+
+.commit-files-export,
+.commit-files-order,
+.commit-files-filters button,
+.commit-files-empty button {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  font: 11px var(--sans);
+  padding: 7px 10px;
+}
+
+.commit-files-export {
+  border-color: var(--accent);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.commit-files-download-status {
+  flex-basis: 100%;
+  color: var(--c-index);
+  font: 11px var(--sans);
+}
+
+.commit-files-download-status.is-error { color: var(--c-conflict); }
+
+.commit-files-export:hover,
+.commit-files-order:hover,
+.commit-files-filters button:hover,
+.commit-files-empty button:hover {
+  border-color: var(--accent);
+  background: var(--selected);
+}
+
+.commit-files-tools {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--rule);
+}
+
+.commit-files-search {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 4px;
+  min-width: 180px;
+  color: var(--muted);
+  font: 11px var(--sans);
+}
+
+.commit-files-search input,
+.commit-files-sort select {
+  min-height: 34px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 12px var(--sans);
+  padding: 7px 9px;
+}
+
+.commit-files-sort {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font: 11px var(--sans);
+}
+
+.commit-files-sort select {
+  min-width: 118px;
+}
+
+.commit-files-result-count {
+  margin-left: auto;
+  color: var(--muted);
+  font: 11px var(--sans);
+  white-space: nowrap;
+}
+
+.commit-files-filters {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.commit-files-filters button {
+  color: var(--muted);
+}
+
+.commit-files-filters button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--selected);
+  color: var(--accent);
+}
+
+.commit-files-metrics {
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  gap: 0;
+  padding: 0;
+}
+
+.commit-files-metrics > div {
+  display: grid;
+  gap: 1px;
+  min-width: 112px;
+  flex: 1 1 0;
+  padding: 9px 12px;
+  border-right: 1px solid var(--rule);
+}
+
+.commit-files-metrics > div:last-child { border-right: 0; }
+.commit-files-metrics span,
+.commit-files-metrics small { color: var(--muted); font: 10px var(--sans); }
+.commit-files-metrics strong { font: 700 17px var(--mono); font-variant-numeric: tabular-nums; }
+.commit-files-metrics small { color: var(--c-behind); }
+
+.commit-files-table-wrap { overflow-x: auto; }
+.commit-files-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; }
+.commit-files-table th,
+.commit-files-table td { padding: 8px 10px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+.commit-files-table th { background: var(--paper); color: var(--muted); font: 10px var(--sans); white-space: nowrap; }
+.commit-files-table td { font: 12px var(--mono); }
+.commit-files-table tbody tr:hover { background: var(--hover); }
+.commit-files-table tbody tr:last-child td { border-bottom: 0; }
+.commit-files-table th:nth-child(-n+3),
+.commit-files-table td:nth-child(-n+3) { width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+.commit-files-volume { color: var(--accent); }
+.commit-files-unknown { color: var(--muted); }
+
+.commit-files-paths { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; min-width: 0; }
+.commit-files-path { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.commit-files-path code { overflow-wrap: anywhere; }
+.commit-files-path-old code { color: var(--muted); text-decoration: line-through; }
+.commit-files-arrow { color: var(--muted); }
+.commit-files-path .copy-control { flex: 0 0 auto; }
+.commit-files-path .copy-button { min-height: 26px; padding: 3px 6px; font-size: 10px; }
+.commit-files-binary { color: var(--c-behind); font: 10px var(--sans); white-space: nowrap; }
+
+.commit-files-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 18px 12px; color: var(--muted); font: 12px var(--sans); }
+.commit-files-note { margin: 0; padding: 8px 12px 10px; color: var(--muted); font: 11px/1.6 var(--sans); }
+
+@media (max-width: 680px) {
+  .commit-files-heading { align-items: flex-start; flex-direction: column; }
+  .commit-files-export { width: 100%; }
+  .commit-files-result-count { width: 100%; margin-left: 0; }
+  .commit-files-metrics > div { min-width: 50%; border-bottom: 1px solid var(--rule); }
+  .commit-files-metrics > div:nth-child(2) { border-right: 0; }
+  .commit-files-metrics > div:nth-last-child(-n+2) { border-bottom: 0; }
+}
+
+@container (max-width: 680px) {
+  .commit-files-heading { align-items: flex-start; flex-direction: column; }
+  .commit-files-export { width: 100%; }
+  .commit-files-result-count { width: 100%; margin-left: 0; }
+  .commit-files-metrics > div { min-width: 50%; border-bottom: 1px solid var(--rule); }
+  .commit-files-metrics > div:nth-child(2) { border-right: 0; }
+  .commit-files-metrics > div:nth-last-child(-n+2) { border-bottom: 0; }
+  .commit-files-tools { align-items: stretch; }
+  .commit-files-search { flex-basis: 100%; }
+  .commit-files-sort { flex: 1; }
+  .commit-files-order { align-self: flex-end; }
+  .commit-files-table th:nth-child(-n+3),
+  .commit-files-table td:nth-child(-n+3) { width: 50px; }
+  .commit-files-table th,
+  .commit-files-table td { padding: 7px 6px; }
+  .commit-files-path { align-items: flex-start; flex-direction: column; }
+  .commit-files-table { font-size: 11px; }
+}
+
+@media (max-width: 440px) {
+  .commit-files-tools { align-items: stretch; }
+  .commit-files-search { flex-basis: 100%; }
+  .commit-files-sort { flex: 1; }
+  .commit-files-order { align-self: flex-end; }
+  .commit-files-table { min-width: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .commit-files * { scroll-behavior: auto; }
+}

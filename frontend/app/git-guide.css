@@ -1,0 +1,19 @@
+.command-guide { margin: 24px 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; font-family: var(--sans); }
+.command-guide > summary { padding: 16px 20px; cursor: pointer; font-weight: 650; }
+.command-guide-caption { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 16px; }
+.command-guide-body { border-top: 1px solid var(--rule); padding: 20px; }
+.command-guide-body > p { color: var(--muted); margin-top: 0; }
+.command-guide-path { display: block; overflow-wrap: anywhere; margin-bottom: 14px; }
+.command-guide-tools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 18px; }
+.command-guide-tools label { display: grid; gap: 6px; }
+.command-guide-tools label:first-child { flex: 1; min-width: min(100%, 220px); }
+.command-guide-tools input, .command-guide-tools select { min-height: 36px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; }
+.command-guide-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,280px),1fr)); gap: 12px; }
+.command-guide-card { padding: 16px; background: var(--hover); border: 1px solid var(--rule); border-radius: 10px; min-width: 0; }
+.command-guide-card h3 { font-size: 14px; margin: 8px 0; }
+.command-guide-card > code { display: block; color: var(--accent); overflow-wrap: anywhere; }
+.command-guide-card p { color: var(--muted); line-height: 1.7; }
+.command-guide-group { font-size: 11px; border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; }
+.command-guide-card .copy-button { white-space: normal; text-align: left; }
+.workspace-export { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+@media(max-width:600px) { .command-guide-caption { display: block; margin: 6px 0 0; } .command-guide-body { padding: 12px; } }

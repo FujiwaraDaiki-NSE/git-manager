@@ -1,0 +1,209 @@
+/* Patch-view-only additions. The base patch palette remains in globals.css. */
+.patch-search {
+  align-items: stretch;
+  gap: 10px;
+}
+
+.patch-search-group {
+  display: flex;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.patch-search-group label {
+  flex: 1 1 180px;
+}
+
+.patch-search-group > button {
+  align-self: flex-end;
+  min-height: 34px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.patch-search-group > button:disabled { opacity: .55; cursor: default; }
+
+.patch-search-group > span {
+  align-self: flex-end;
+  min-height: 34px;
+  padding: 8px 0;
+  white-space: nowrap;
+}
+
+.patch-content-search {
+  border-left: 1px solid var(--rule);
+  padding-left: 10px;
+}
+
+.patch-content-search input:focus-visible,
+.patch-file-search input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.patch-toolbar {
+  align-items: center;
+}
+
+.patch-view-note {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font: 11px/1.5 var(--sans);
+}
+
+.patch-file > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.patch-file-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.patch-file-summary {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font: 10px var(--sans);
+  white-space: nowrap;
+}
+
+.patch-file-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.patch-file-stat strong {
+  font-weight: 700;
+}
+
+.patch-file-stat-addition {
+  color: var(--c-index);
+  background: color-mix(in srgb, var(--c-index) 12%, var(--panel));
+}
+
+.patch-file-stat-deletion {
+  color: var(--c-worktree);
+  background: color-mix(in srgb, var(--c-worktree) 12%, var(--panel));
+}
+
+.patch-file-stat-binary {
+  color: var(--accent);
+  background: var(--selected);
+}
+
+.patch-file-summary-empty {
+  gap: 4px;
+}
+
+.patch-file-copy {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.patch-file-copy .copy-control {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.patch-file-copy .copy-button {
+  max-width: 100%;
+  padding: 3px 6px;
+  font-size: 10px;
+  white-space: normal;
+  text-align: left;
+}
+
+.patch-file-copy .copy-button > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+
+.patch-file-copy .copy-feedback {
+  position: absolute;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.patch-file-copy .copy-feedback.is-error {
+  position: static;
+  clip: auto;
+  clip-path: none;
+  width: auto;
+  height: auto;
+  max-width: 18rem;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  white-space: normal;
+}
+
+.patch-match {
+  border-radius: 2px;
+  padding: 1px 0;
+  color: inherit;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.patch-match-active {
+  background: color-mix(in srgb, var(--accent) 55%, var(--panel));
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.patch-line-active {
+  outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -1px;
+}
+
+.patch-lines-changed-only .patch-line-context {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .patch-content-search {
+    border-left: 0;
+    border-top: 1px solid var(--rule);
+    padding-top: 10px;
+    padding-left: 0;
+  }
+
+  .patch-file > summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .patch-file-title {
+    flex-basis: calc(100% - 30px);
+  }
+
+  .patch-file-summary {
+    margin-left: 20px;
+  }
+
+  .patch-file-copy {
+    margin-left: auto;
+  }
+}

@@ -1,0 +1,189 @@
+.repo-tools-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin: 12px 0;
+}
+
+.repo-tools-toolbar label,
+.repo-tools-toolbar .repo-tools-search {
+  display: grid;
+  gap: 5px;
+  min-width: 180px;
+  flex: 1 1 220px;
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+
+.repo-tools-toolbar input,
+.repo-tools-toolbar select {
+  min-height: 34px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: var(--panel);
+  font: 12px var(--sans);
+}
+
+.repo-tools-toolbar select {
+  min-width: 120px;
+  flex: 0 1 150px;
+}
+
+.repo-tools-toolbar .repo-tools-count {
+  color: var(--muted);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+}
+
+.repo-tools-toolbar .repo-tools-reset {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--ink);
+  background: var(--panel);
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.repo-tools-toolbar .repo-tools-reset:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.branch-filter-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.branch-filter-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--muted);
+  background: var(--panel);
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.branch-filter-list button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--selected);
+}
+
+.branch-filter-list button span {
+  font-variant-numeric: tabular-nums;
+}
+
+.branch-copy-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.branch-copy-tools .copy-control {
+  margin-left: auto;
+}
+
+.status-file-row {
+  grid-template-columns: 3ch minmax(0, 1fr) auto auto;
+}
+
+.status-file-copy {
+  justify-self: end;
+}
+
+.status-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+  margin: 12px 0 14px;
+}
+
+.status-flow-node {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.status-flow-node strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.status-flow-node span {
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+
+.status-flow-node code,
+.status-flow-arrow code {
+  color: var(--accent);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.status-flow-arrow {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 3px;
+  color: var(--accent);
+  font-size: 18px;
+}
+
+.status-flow-arrow code {
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .repo-tools-toolbar .repo-tools-search,
+  .repo-tools-toolbar label {
+    min-width: 100%;
+  }
+
+  .repo-tools-toolbar select {
+    flex: 1 1 130px;
+  }
+
+  .branch-copy-tools .copy-control {
+    margin-left: 0;
+  }
+
+  .status-file-row {
+    grid-template-columns: 3ch minmax(0, 1fr) auto;
+  }
+
+  .status-file-copy {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .status-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .status-flow-arrow {
+    grid-auto-flow: column;
+    justify-content: center;
+  }
+
+  .status-flow-arrow > span {
+    transform: rotate(90deg);
+  }
+}
