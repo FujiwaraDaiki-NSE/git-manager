@@ -818,3 +818,31 @@ def test_readme_plain_markdown_and_missing_file(tmp_path: Path) -> None:
     assert project._readme_description(str(tmp_path)) is None
     (tmp_path / "README.md").write_text('# Title\n\nA plain explanation.\nSecond line.\n\nLater paragraph.', encoding="utf-8")
     assert project._readme_description(str(tmp_path)) == "A plain explanation. Second line."
+
+
+def test_unborn_branch_is_not_reported_as_detached(tmp_path: Path) -> None:
+    repo = tmp_path / "unborn"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "first-branch")
+    result = project.build(str(repo), str(repo))
+    assert result is not None
+    assert result["graph"]["rows"] == []
+    assert len(result["lanes"]) == 1
+    lane = result["lanes"][0]
+    assert lane["id"] == "branch:first-branch"
+    assert lane["name"] == "first-branch"
+    assert lane["branch"] == "first-branch"
+    assert lane["unborn"] is True
+    assert lane["detached"] is False
+    assert lane["head"] is None
+    assert lane["last_commit"] is None
+    assert lane["default_ahead"] is None
+
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.invalid")
+    commit(repo, "first commit")
+    created = project.build(str(repo), str(repo))
+    assert created is not None
+    assert created["lanes"][0]["id"] == lane["id"]
+    assert created["lanes"][0]["head"] == git(repo, "rev-parse", "HEAD").strip()
+    assert not created["lanes"][0].get("unborn", False)

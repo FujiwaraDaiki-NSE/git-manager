@@ -109,6 +109,7 @@ function laneState(lane: ProjectLane, defaultBranch: string | null = null) {
   if (lane.worktree_state === "locked") return "ロック中";
   if (defaultBranch && lane.branch === defaultBranch) return "既定";
   if (lane.merged === true) return "統合済み";
+  if (lane.unborn === true) return "初回コミット前";
   if (lane.detached === true) return "ブランチ未接続";
   if (lane.error) return "Git情報未取得";
   if (lane.dirty === false) return "変更なし";
@@ -804,11 +805,11 @@ function FlowMap({
                     <span title={snapshot?.summary ?? undefined}>{snapshot ? agentStateLabel(agentTaskState(snapshot)) : "agent 状態不明"}</span>
                   </div>
                   <div className="flow-lane-relation" title={visibleRelations}>
-                    {visibleRelations ? visibleRelations : mergeBase?.afterObservation ? "分岐点は選択日時より後" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点は表示範囲外" : "分岐点を表示中"}
+                    {lane.unborn ? "コミットを作成すると履歴が表示されます" : visibleRelations ? visibleRelations : mergeBase?.afterObservation ? "分岐点は選択日時より後" : !mergeBase?.available ? "分岐点 未取得" : mergeBase.outside ? "分岐点は表示範囲外" : "分岐点を表示中"}
                   </div>
                 </div>
                 <div className="flow-track">
-                  {laneEvents.length === 0 && <span className="flow-track-empty">{!project.graph ? "履歴未取得" : lane.head && !graphHashes.has(lane.head) ? "先端コミットは取得範囲外" : timeline < 100 ? "選択日時までの表示対象コミットなし" : "この表示範囲にコミットなし"}</span>}
+                  {laneEvents.length === 0 && <span className="flow-track-empty">{lane.unborn ? "まだコミットがありません" : !project.graph ? "履歴未取得" : lane.head && !graphHashes.has(lane.head) ? "先端コミットは取得範囲外" : timeline < 100 ? "選択日時までの表示対象コミットなし" : "この表示範囲にコミットなし"}</span>}
                   {laneEvents.map((event) => {
                     return (
                       <FlowEventButton
@@ -941,7 +942,7 @@ function WorkLanes({
                   <button className="lane-name-button" type="button" onClick={() => onSelectLane(lane)}>
                     <strong>{laneLabel(lane)}</strong>
                     <code>{shortHash(lane.head)}</code>
-                    <span title={lane.path ?? undefined}>{lane.path ?? "パス未取得"}</span>
+                    <span title={lane.path ?? undefined}>{lane.path ?? "作業ディレクトリなし"}</span>
                   </button>
                 </td>
                 <td data-label="状態 / agent"><LaneSummary defaultBranch={project.default_branch} lane={lane} /></td>
@@ -950,7 +951,7 @@ function WorkLanes({
                   <span className="table-subvalue">{exactDate(lane.last_commit?.date)}</span>
                 </td>
                 <td className="mono-cell" data-label="既定ブランチとの差">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
-                <td className="lane-message" data-label="最新メッセージ"><span title={lane.last_commit?.subject}>{lane.last_commit?.subject ?? "コミット未取得"}</span>{currentLaneAgent(lane)?.summary && <small>agent: {currentLaneAgent(lane)?.summary}</small>}</td>
+                <td className="lane-message" data-label="最新メッセージ"><span title={lane.last_commit?.subject}>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "コミット未取得"}</span>{currentLaneAgent(lane)?.summary && <small>agent: {currentLaneAgent(lane)?.summary}</small>}</td>
                 <td className="unknown-cell" data-label="合流関係">{laneMergeSummary(lane)}</td>
                 <td className="unknown-cell" data-label="次の工程 / 注意">{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</td>
                 <td data-label="操作"><button className="table-action" type="button" disabled={!lane.path} title={!lane.path ? "このブランチには作業ディレクトリがありません" : undefined} onClick={() => onOpenGit(lane)}>Git詳細</button>{!lane.path && <small className="no-checkout">作業ディレクトリなし</small>}</td>
@@ -1115,7 +1116,7 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
       <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact task={currentLaneAgent(lane)} /></div>
       <dl className="selection-list">
         <div><dt>作業パス</dt><dd><code>{lane.path ?? "未取得"}</code>{lane.path && <CopyButton value={lane.path} label="作業パスをコピー" />}</dd></div>
-        <div><dt>作業先端</dt><dd><code>{lane.head ?? "未取得"}</code></dd></div>
+        <div><dt>作業先端</dt><dd><code>{lane.unborn ? "初回コミット前" : lane.head ?? "未取得"}</code></dd></div>
         <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.last_commit?.subject ?? "未取得"}<small>{exactDate(lane.last_commit?.date)}</small></dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
@@ -1548,7 +1549,7 @@ export default function ProjectControl() {
       </header>
       {projectState === "error" && <div className="project-refresh-error" role="alert"><span>最新情報を取得できませんでした。前回取得した内容を表示しています。</span><button className="subtle-button" type="button" onClick={retryProject}>再試行</button></div>}
       <section className="control-hero" aria-labelledby="project-title">
-        <div className="control-hero-main"><div className="project-identity"><h1 id="project-title">{project.name}</h1><span className="project-baseline">既定 <strong>{project.default_branch ?? "未取得"}</strong></span><span className="project-lane-count">{project.lanes.length} ブランチ</span><span className="project-url-control"><button aria-describedby={projectUrlCopyState !== "idle" ? "project-url-copy-feedback" : undefined} className="subtle-button project-url-copy" type="button" onClick={copyCurrentProjectUrl}>{projectUrlCopyState === "success" ? "URLをコピーしました" : "この画面のURLをコピー"}</button><span aria-live="polite" className="project-url-feedback" id="project-url-copy-feedback" role={projectUrlCopyState === "error" ? "alert" : projectUrlCopyState === "success" ? "status" : undefined}>{projectUrlCopyState === "success" ? "現在のプロジェクト画面URLをコピーしました。" : projectUrlCopyState === "error" ? "URLをコピーできませんでした。ブラウザのクリップボード機能を利用できません。" : "\u00a0"}</span></span></div><details className="project-context"><summary>プロジェクトの概要・集計</summary><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div>
+        <div className="control-hero-main"><div className="project-identity"><h1 id="project-title">{project.name}</h1><span className="project-baseline">既定 <strong>{project.default_branch ?? "未取得"}</strong></span><span className="project-lane-count">{project.lanes.length} 作業レーン</span><span className="project-url-control"><button aria-describedby={projectUrlCopyState !== "idle" ? "project-url-copy-feedback" : undefined} className="subtle-button project-url-copy" type="button" onClick={copyCurrentProjectUrl}>{projectUrlCopyState === "success" ? "URLをコピーしました" : "この画面のURLをコピー"}</button><span aria-live="polite" className="project-url-feedback" id="project-url-copy-feedback" role={projectUrlCopyState === "error" ? "alert" : projectUrlCopyState === "success" ? "status" : undefined}>{projectUrlCopyState === "success" ? "現在のプロジェクト画面URLをコピーしました。" : projectUrlCopyState === "error" ? "URLをコピーできませんでした。ブラウザのクリップボード機能を利用できません。" : "\u00a0"}</span></span></div><details className="project-context"><summary>プロジェクトの概要・集計</summary><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div>
         <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>統合可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div></details></div>
       </section>
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">

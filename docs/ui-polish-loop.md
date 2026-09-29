@@ -82,3 +82,11 @@
 - GUI E2E reproduced focus falling to the page after opening a detail, changing between desktop/mobile width, and closing it. Capture the original trigger for the panel lifetime instead of recapturing a child on every breakpoint change.
 - Verified desktop → 390px → desktop → close restores the original commit button. At 390px, nested Git detail closes with the first Escape and returns to its opener; the second Escape closes selection and returns to the original commit button. Shift+Tab/Tab wrap between the first and last controls after content loads.
 - Quick switch: Ctrl+K focuses search, Japanese/path search works, ArrowDown moves to the first result, Escape closes it.
+
+## Empty repositories and unborn branches
+
+- Created a fresh `git init -b main` repository and reproduced it being shown as detached HEAD with a supposedly out-of-range all-zero commit.
+- Preserve the actual branch from `git worktree list`; mark Git's all-zero named HEAD as unborn and expose no commit hash. The lane ID stays `branch:<name>` after the first commit.
+- Added a real-Git regression test from initial branch through first commit. Backend: 78 passed with warnings treated as errors.
+- GUI E2E: the empty branch now shows main / 初回コミット前 / まだコミットがありません. Creating the first commit made the graph point appear automatically. A subsequent actual detached checkout still displayed detached HEAD separately; returned the disposable repo to main afterward.
+- Header counts are labeled 作業レーン because detached worktrees and unborn branches are included in that count.

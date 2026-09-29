@@ -166,6 +166,7 @@ export type ProjectMergeRelation = {
 };
 
 export type ProjectLane = {
+  unborn?: boolean;
   id: string;
   name: string;
   branch: string | null;

@@ -793,8 +793,8 @@ def build(
         for lane in lanes
         if isinstance(lane.get("path"), str)
     }
-    # Detached linked worktrees have no local branch row but are still Git
-    # work lanes. Include them with an explicit null branch.
+    # Detached and unborn worktrees have no local branch ref row. Preserve
+    # the branch reported by Git instead of assuming every missing ref is detached.
     for worktree in worktrees:
         if _key(worktree["path"]) in known_worktree_paths:
             continue
@@ -804,15 +804,20 @@ def build(
             state_row = normalized_state.get(_key(path))
         status = _repo_status(state_row)
         head = worktree.get("head")
+        branch_name = worktree.get("branch")
+        unborn = isinstance(branch_name, str) and isinstance(head, str) and bool(head) and set(head) == {"0"}
+        if unborn:
+            head = None
         ahead, behind = _count_against_default(repo, default_ref, head) if head else (None, None)
         base = _merge_base(repo, default_ref, head) if head else None
         commit = _commit_metadata(repo, head)
         lane_agents = _agents_for_worktree(agent_snapshots, path)
         lanes.append(
             {
-                "id": f"worktree:{path}",
-                "name": "detached HEAD",
-                "branch": None,
+                "id": f"branch:{branch_name}" if branch_name is not None else f"worktree:{path}",
+                "name": branch_name if branch_name is not None else "detached HEAD",
+                "branch": branch_name,
+                "unborn": unborn,
                 "path": path,
                 "is_worktree": not worktree.get("is_main", False),
                 "worktree_state": worktree.get("state"),
@@ -823,7 +828,7 @@ def build(
                 "merged": None,
                 "dirty": status["dirty"],
                 "conflict": status["conflict"],
-                "detached": True,
+                "detached": worktree["detached"],
                 "upstream": status["upstream"],
                 "upstream_ahead": status["upstream_ahead"],
                 "upstream_behind": status["upstream_behind"],
