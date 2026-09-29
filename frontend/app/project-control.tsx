@@ -1276,10 +1276,11 @@ function SelectionPane({
   }, []);
   useDialogKeyboard(panelRef, closeRef, onClose, modal);
   useEffect(() => {
-    if (modal) return;
+    // Keep the original trigger across responsive changes between a side panel
+    // and a modal. Recapturing on resize can point to a disappearing child.
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }); };
-  }, [modal]);
+  }, []);
   const lane = project.lanes.find((item) => item.id === selectedLane) ?? (selectedEvent && "lane" in selectedEvent ? selectedEvent.lane : null);
   return (
     <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal={modal ? true : undefined} role={modal ? "dialog" : "complementary"} tabIndex={-1}>

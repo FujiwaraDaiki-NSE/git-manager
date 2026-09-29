@@ -76,3 +76,9 @@
 - Added case-insensitive filename/path search inside multi-file diffs, matching file counts, explicit empty results, and expand/collapse limited to the matching files.
 - Search clearing restores the existing expansion state and keyboard focus. Clipboard action now explicitly says 差分全体をコピー.
 - GUI E2E with a six-file Japanese commit: `検索-3` showed exactly one file; expanding rendered just that file; copying retained all six diff headers. A no-match query disabled bulk expansion. Clearing restored six files and the previously expanded first/third files. Long lines wrapped correctly at 320px.
+
+## Responsive keyboard continuity
+
+- GUI E2E reproduced focus falling to the page after opening a detail, changing between desktop/mobile width, and closing it. Capture the original trigger for the panel lifetime instead of recapturing a child on every breakpoint change.
+- Verified desktop → 390px → desktop → close restores the original commit button. At 390px, nested Git detail closes with the first Escape and returns to its opener; the second Escape closes selection and returns to the original commit button. Shift+Tab/Tab wrap between the first and last controls after content loads.
+- Quick switch: Ctrl+K focuses search, Japanese/path search works, ArrowDown moves to the first result, Escape closes it.
