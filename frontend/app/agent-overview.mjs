@@ -1,6 +1,26 @@
-// Pure presentation helpers for the agent overview.  Keeping these functions
-// free of React and API knowledge makes snapshots easy to test and replace.
+// Pure presentation and projection helpers for agent branch reports.
+//
+// The backend owns the current status. This module only projects that
+// contract into cards, lanes, and historical views. A lifecycle event is
+// activity history; it is never a replacement for the latest explicit status
+// report of a project branch.
 
+export const AGENT_STATUS_PRIORITY = [
+  "waiting_for_user",
+  "blocked",
+  "review_required",
+  "merge_ready",
+  "investigating",
+  "implementing",
+  "testing",
+  "reviewing",
+  "completed",
+  "stopped",
+];
+
+// Keep this list for consumers that use the older priority bucket name. The
+// first four active statuses are deliberately projected into `active` for
+// aggregate counters while their precise labels remain visible per branch.
 export const AGENT_STATE_PRIORITY = [
   "waiting_for_user",
   "blocked",
@@ -8,36 +28,44 @@ export const AGENT_STATE_PRIORITY = [
   "merge_ready",
   "active",
   "completed",
+  "stopped",
 ];
 
 export const AGENT_STATE_LABELS = {
+  investigating: "調査中",
+  implementing: "実装中",
+  testing: "テスト中",
+  reviewing: "レビュー中",
   waiting_for_user: "入力待ち",
   blocked: "問題あり",
   review_required: "レビュー待ち",
-  merge_ready: "統合可能",
-  active: "実行中",
+  merge_ready: "マージ可能",
   completed: "完了",
+  stopped: "中断",
 };
 
 const priority = new Map(AGENT_STATE_PRIORITY.map((state, index) => [state, index]));
-const activeStates = new Set(["active", "investigating", "implementing", "testing", "reviewing"]);
-const attentionStates = new Set(["waiting_for_user", "blocked", "review_required", "merge_ready"]);
+const activeStatuses = new Set(["investigating", "implementing", "testing", "reviewing"]);
+const knownStatuses = new Set(AGENT_STATUS_PRIORITY);
 
 export function agentStateLabel(state) {
-  return state ? AGENT_STATE_LABELS[state] || state : "agent 状態不明";
+  return state ? AGENT_STATE_LABELS[state] || state : "ブランチ状態不明";
 }
 
 export function agentStatePriority(state) {
-  if (activeStates.has(state)) return priority.get("active");
+  if (activeStatuses.has(state)) return priority.get("active");
   return state && priority.has(state) ? priority.get(state) : AGENT_STATE_PRIORITY.length;
 }
 
+/**
+ * Return only an explicit branch status. Lifecycle records intentionally do
+ * not fall back to run_state, phase, attention, or outcome. Reports without a
+ * canonical status marker remain unknown.
+ */
 export function agentTaskState(task) {
   if (!task) return null;
-  if (attentionStates.has(task.attention)) return task.attention;
-  if (activeStates.has(task.run_state)) return "active";
-  if (task.outcome === "completed") return "completed";
-  return task.run_state || task.phase || null;
+  if (task.kind === "lifecycle") return null;
+  return task.kind === "status" && knownStatuses.has(task.status) ? task.status : null;
 }
 
 export function eventTime(value) {
@@ -50,12 +78,68 @@ function latestTime(item) {
   return eventTime(item?.occurred_at) ?? 0;
 }
 
+/** True for a report that is allowed to change branch state. */
+export function isExplicitAgentStatus(item) {
+  return Boolean(item && item.kind === "status" && knownStatuses.has(item.status));
+}
+
+/** Stable identity for the branch unit represented by a report. */
+export function agentReportKey(item) {
+  if (!item) return null;
+  const project = typeof item.project_id === "string" ? item.project_id : null;
+  const branch = typeof item.branch === "string" && item.branch ? item.branch : null;
+  return project && branch ? `project:${project}\u001fbranch:${branch}` : null;
+}
+
+function sequenceValue(item) {
+  return typeof item?.sequence === "number" && Number.isFinite(item.sequence)
+    ? item.sequence
+    : null;
+}
+
+function observedValue(item) {
+  return typeof item?.observed_at === "number" && Number.isFinite(item.observed_at)
+    ? item.observed_at
+    : null;
+}
+
+/** Compare the same branch report using the backend's occurred/sequence order. */
+export function compareAgentEvents(left, right) {
+  const leftTime = eventTime(left?.occurred_at);
+  const rightTime = eventTime(right?.occurred_at);
+  if (leftTime !== null && rightTime !== null && leftTime !== rightTime) return leftTime - rightTime;
+  if (leftTime !== null && rightTime === null) return 1;
+  if (leftTime === null && rightTime !== null) return -1;
+  const leftSequence = sequenceValue(left);
+  const rightSequence = sequenceValue(right);
+  if (leftSequence !== null && rightSequence !== null && leftSequence !== rightSequence) {
+    return leftSequence - rightSequence;
+  }
+  if (leftSequence !== null && rightSequence === null) return 1;
+  if (leftSequence === null && rightSequence !== null) return -1;
+  const leftObserved = observedValue(left);
+  const rightObserved = observedValue(right);
+  if (leftObserved !== null && rightObserved !== null && leftObserved !== rightObserved) {
+    return leftObserved - rightObserved;
+  }
+  if (leftObserved !== null && rightObserved === null) return 1;
+  if (leftObserved === null && rightObserved !== null) return -1;
+  return String(left?.event_id || "").localeCompare(String(right?.event_id || ""));
+}
+
+export function isNewerAgentEvent(next, current) {
+  if (!current) return true;
+  return compareAgentEvents(next, current) > 0;
+}
+
 export function topAgentTasks(tasks, limit = 3) {
   return [...(tasks || [])]
-    .filter((task) => task && task.task_id)
+    .filter((task) => Boolean(task))
     .sort((a, b) => {
       const byState = agentStatePriority(agentTaskState(a)) - agentStatePriority(agentTaskState(b));
-      return byState || latestTime(b) - latestTime(a) || String(a.task_id).localeCompare(String(b.task_id));
+      return byState
+        || latestTime(b) - latestTime(a)
+        || String(a.branch || a.worktree || a.event_id || "").localeCompare(String(b.branch || b.worktree || b.event_id || ""));
     })
     .slice(0, limit);
 }
@@ -66,6 +150,13 @@ export function highestAgentState(tasks) {
 
 export function latestAgentTask(tasks) {
   return [...(tasks || [])].sort((a, b) => latestTime(b) - latestTime(a))[0] || null;
+}
+
+function counterBucket(state) {
+  if (activeStatuses.has(state)) return "active";
+  if (state === "active") return "active";
+  if (state === "waiting_for_user" || state === "blocked" || state === "review_required" || state === "merge_ready" || state === "completed") return state;
+  return null;
 }
 
 export function countsFromTasks(tasks) {
@@ -80,10 +171,13 @@ export function countsFromTasks(tasks) {
   };
   for (const task of tasks || []) {
     const state = agentTaskState(task);
-    if (!state || !priority.has(state)) continue;
-    const bucket = state;
-    counts[bucket] += 1;
+    if (!state) continue;
+    // `total` describes every explicit branch status, including stopped,
+    // while the legacy priority buckets intentionally keep only active,
+    // attention, and completed counts.
     counts.total += 1;
+    const bucket = counterBucket(state);
+    if (bucket) counts[bucket] += 1;
   }
   return counts;
 }
@@ -110,14 +204,23 @@ export function sortProjects(projects) {
   });
 }
 
+/** Select reports by one exact branch or, for detached reports, one path. */
 export function laneAgentTasks(lane, tasks) {
-  const lanePath = lane?.path;
   const laneBranch = lane?.branch;
-  return (tasks || []).filter((task) =>
-    (lanePath && task.worktree === lanePath) || (laneBranch && task.branch === laneBranch),
-  );
+  return laneBranch ? (tasks || []).filter((task) => task?.branch === laneBranch) : [];
 }
 
+function historicalKey(event) {
+  const key = agentReportKey(event);
+  if (key) return key;
+  return null;
+}
+
+/**
+ * Reconstruct explicit branch statuses as of one observation point. Lifecycle
+ * events remain available from `project.events` for the activity timeline,
+ * but cannot change this branch projection.
+ */
 export function agentSnapshotAt(events, at) {
   const cutoff = typeof at === "number" ? at : eventTime(at);
   const ordered = [...(events || [])]
@@ -125,41 +228,36 @@ export function agentSnapshotAt(events, at) {
       const time = eventTime(event?.occurred_at);
       return time !== null && (cutoff === null || time <= cutoff);
     })
-    .sort((a, b) => (eventTime(a.occurred_at) ?? 0) - (eventTime(b.occurred_at) ?? 0) || (a.sequence ?? 0) - (b.sequence ?? 0));
+    .sort(compareAgentEvents);
   const byKey = new Map();
   for (const event of ordered) {
-    const key = [event.task_id, event.agent_id, event.worktree || event.branch].filter(Boolean).join("\u001f");
+    const key = historicalKey(event);
     if (!key) continue;
-    const current = byKey.get(key) || {};
-    // Lifecycle records intentionally carry no semantic status. Inherit the
-    // last status event while advancing only the runtime state and timeline
-    // identity, matching backend projection semantics.
-    const projected = { ...current, ...event };
-    if (event.kind === "lifecycle") {
-      for (const field of ["phase", "attention", "outcome", "summary"]) {
-        projected[field] = current[field] ?? null;
-      }
+    const current = byKey.get(key);
+    if (!isExplicitAgentStatus(event)) continue;
+    if (!current || isNewerAgentEvent(event, current)) {
+      byKey.set(key, { ...event, kind: "status" });
     }
-    byKey.set(key, projected);
   }
   return [...byKey.values()].sort((a, b) => latestTime(b) - latestTime(a));
 }
 
 export function laneAgentSnapshotAt(lane, events, at) {
-  return agentSnapshotAt(events, at).filter((event) =>
-    (lane?.path && event.worktree === lane.path) || (lane?.branch && event.branch === lane.branch),
-  );
+  const snapshots = agentSnapshotAt(events, at);
+  return lane?.branch ? snapshots.filter((event) => event.branch === lane.branch) : [];
 }
 
-/** Apply one persisted snapshot locally without requesting a new Git graph. */
+/** Apply one persisted explicit status report without requesting new Git data. */
 export function mergeAgentSnapshot(project, event) {
-  if (!project || !event) return project;
+  if (!project || !event || !isExplicitAgentStatus(event)) return project;
+  const eventKey = agentReportKey(event);
+  if (!eventKey) return project;
   const tasks = [...(project.agent_tasks || [])];
-  const key = (item) => [item.task_id, item.agent_id, item.worktree || item.branch].filter(Boolean).join("\u001f");
-  const eventKey = key(event);
-  const index = tasks.findIndex((item) => key(item) === eventKey);
-  if (index >= 0) tasks[index] = { ...tasks[index], ...event };
-  else tasks.push(event);
+  const index = tasks.findIndex((item) => agentReportKey(item) === eventKey);
+  if (index >= 0 && !isNewerAgentEvent(event, tasks[index])) return project;
+  const normalized = { ...event, kind: "status" };
+  if (index >= 0) tasks[index] = { ...tasks[index], ...normalized };
+  else tasks.push(normalized);
   const counts = countsFromTasks(tasks);
   const priorityCounts = {
     waiting_for_user: counts.waiting_for_user,
@@ -169,12 +267,13 @@ export function mergeAgentSnapshot(project, event) {
     active: counts.active,
     completed: counts.completed,
   };
+  const previousLatest = project.latest_agent_event;
   return {
     ...project,
     agent_tasks: tasks,
     agent_priority_counts: priorityCounts,
     agent_state: highestAgentState(tasks),
-    latest_agent_event: event,
+    latest_agent_event: isNewerAgentEvent(event, previousLatest) ? normalized : previousLatest,
   };
 }
 
@@ -200,12 +299,10 @@ export const deferSortOrder = deferProjectOrder;
 
 /** Branch names alone cannot identify a project (many projects have main). */
 export function projectMatchesAgentEvent(project, event) {
-  if (typeof event.project_id === "string") return event.project_id === project.id;
-  if (typeof event.worktree !== "string") return false;
-  return event.worktree === project.main_path || project.lanes.some((lane) => lane.path === event.worktree);
+  return typeof event?.project_id === "string" && event.project_id === project.id;
 }
 
+/** Match a status report to one exact branch, or one exact detached path. */
 export function laneMatchesAgentEvent(lane, event) {
-  return (typeof event.worktree === "string" && lane.path === event.worktree)
-    || (typeof event.branch === "string" && lane.branch === event.branch);
+  return typeof event?.branch === "string" && event.branch ? lane?.branch === event.branch : false;
 }

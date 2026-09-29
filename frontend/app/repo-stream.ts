@@ -58,9 +58,15 @@ export function useRepoStream(): RepoStreamState {
     });
     es.addEventListener("agent_event", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as AgentEvent | AgentEventEnvelope;
-      const value = "snapshot" in payload
-        ? { ...payload.snapshot, event_id: payload.event_id }
-        : payload;
+      const snapshot = "snapshot" in payload && payload.snapshot ? payload.snapshot : payload;
+      const value = {
+        ...snapshot,
+        // The envelope carries the event identity while the snapshot carries
+        // the authoritative branch status. Keep both when the server sends
+        // either form so an idempotent retry cannot duplicate history.
+        event_id: snapshot.event_id || ("event_id" in payload ? payload.event_id : ""),
+        worktree: snapshot.worktree || ("worktree" in payload ? payload.worktree : null),
+      } as AgentEvent;
       setLatestAgentEvent(value);
       setAgentEvents((previous) => [value, ...previous.filter((item) => item.event_id !== value.event_id)].slice(0, 200));
     });

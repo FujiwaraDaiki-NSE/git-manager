@@ -24,9 +24,57 @@ RunState = Literal["active", "idle", "interrupted", "ended"]
 Phase = Literal["investigating", "implementing", "testing", "reviewing"]
 Attention = Literal["waiting_for_user", "blocked", "review_required", "merge_ready"]
 Outcome = Literal["completed", "stopped"]
+Status = Literal[
+    "investigating",
+    "implementing",
+    "testing",
+    "reviewing",
+    "waiting_for_user",
+    "blocked",
+    "review_required",
+    "merge_ready",
+    "completed",
+    "stopped",
+]
+# Keep a descriptive alias for callers that do not need to know how the value
+# is represented in the existing event columns.
+AgentStatus = Status
 LifecycleAction = Literal[
     "session_start", "subagent_start", "interrupt", "subagent_stop", "session_end"
 ]
+
+STATUS_VALUES = frozenset(
+    {
+        "investigating",
+        "implementing",
+        "testing",
+        "reviewing",
+        "waiting_for_user",
+        "blocked",
+        "review_required",
+        "merge_ready",
+        "completed",
+        "stopped",
+    }
+)
+
+
+def status_fields(status: Status) -> dict[str, str | None]:
+    """Map the compact MCP status onto the pre-existing event columns."""
+    if status in {"investigating", "implementing", "testing", "reviewing"}:
+        return {"run_state": "active", "phase": status, "attention": None, "outcome": None}
+    if status in {"waiting_for_user", "blocked", "review_required", "merge_ready"}:
+        return {"run_state": "idle", "phase": None, "attention": status, "outcome": None}
+    if status == "completed":
+        return {"run_state": "ended", "phase": None, "attention": None, "outcome": "completed"}
+    if status == "stopped":
+        return {"run_state": "ended", "phase": None, "attention": None, "outcome": "stopped"}
+    raise ValueError("unknown status")
+
+
+def task_key(project_id: str, branch: str) -> str:
+    """Return the stable internal identity for one repository and branch."""
+    return f"{project_id}\x1f{branch}"
 
 
 class AgentEventRequest(BaseModel):
@@ -82,7 +130,7 @@ class AgentEventRequest(BaseModel):
         else:
             if self.action is not None:
                 raise ValueError("status events cannot set action")
-            if not semantic <= supplied:
+            if not {"phase", "attention", "outcome", "summary"} <= supplied:
                 raise ValueError("status events must explicitly set phase, attention, outcome, and summary")
         return self
 
@@ -92,7 +140,7 @@ class ReportAgentStatusResponse(BaseModel):
     event_id: str = Field(..., description="Stored event ID")
     sequence: int = Field(..., description="Monotonic append sequence")
     idempotent: bool = Field(..., description="True when this event ID was already stored")
-    snapshot: dict[str, Any] | None = Field(None, description="Current explicit projection for this worktree")
+    snapshot: dict[str, Any] | None = Field(None, description="The accepted event snapshot")
 
 
 _lock = threading.RLock()
@@ -137,10 +185,72 @@ def initialize() -> None:
         db.execute("CREATE INDEX IF NOT EXISTS idx_agent_events_project ON agent_events(project_id, sequence)")
 
 
+def _status_from_row(row: Mapping[str, Any]) -> str | None:
+    """Read one row's explicit status without inheriting a previous event."""
+    if row.get("kind") != "status":
+        return None
+    attention = row.get("attention")
+    if isinstance(attention, str) and attention in {
+        "waiting_for_user",
+        "blocked",
+        "review_required",
+        "merge_ready",
+    }:
+        return attention
+    phase = row.get("phase")
+    if row.get("run_state") == "active" and isinstance(phase, str) and phase in {
+        "investigating",
+        "implementing",
+        "testing",
+        "reviewing",
+    }:
+        return phase
+    outcome = row.get("outcome")
+    if isinstance(outcome, str) and outcome in {"completed", "stopped"}:
+        return outcome
+    if isinstance(phase, str) and phase in {"investigating", "implementing", "testing", "reviewing"}:
+        return phase
+    return None
+
+
 def _row(row: sqlite3.Row) -> dict[str, Any]:
     data = dict(row)
+    data["status"] = _status_from_row(data)
     data.pop("payload", None)
     return data
+
+
+def event_snapshot(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the raw event-shaped snapshot used by REST and SSE.
+
+    In particular, a lifecycle event reports ``status: null`` even when an
+    earlier explicit status exists for the same branch.  State consumers can
+    use :func:`snapshots` when they need the latest explicit branch state.
+    """
+    status = row.get("status") if row.get("kind") == "status" else None
+    if not isinstance(status, str) or status not in STATUS_VALUES:
+        status = _status_from_row(row)
+    if row.get("kind") != "status":
+        status = None
+    return {
+        "event_id": row.get("event_id"),
+        "task_id": row.get("task_id"),
+        "agent_id": row.get("agent_id"),
+        "worktree": row.get("worktree"),
+        "project_id": row.get("project_id"),
+        "branch": row.get("branch"),
+        "occurred_at": row.get("occurred_at"),
+        "observed_at": row.get("observed_at"),
+        "sequence": row.get("sequence"),
+        "kind": row.get("kind"),
+        "run_state": row.get("run_state"),
+        "action": row.get("action"),
+        "phase": row.get("phase") if row.get("kind") == "status" else None,
+        "attention": row.get("attention") if row.get("kind") == "status" else None,
+        "outcome": row.get("outcome") if row.get("kind") == "status" else None,
+        "summary": row.get("summary") if row.get("kind") == "status" else None,
+        "status": status,
+    }
 
 
 def _epoch(value: str) -> float:
@@ -158,7 +268,7 @@ def known_worktree(path: str, state: Mapping[str, Mapping[str, Any]]) -> Mapping
 
 
 def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -> ReportAgentStatusResponse:
-    """Validate association, append once, and return the post-commit projection."""
+    """Validate association, append once, and return the event snapshot."""
     associated = known_worktree(request.worktree, state)
     if associated is None:
         raise ValueError("unknown worktree")
@@ -167,6 +277,7 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
         project_id = request.worktree
     branch = associated.get("branch")
     branch = branch if isinstance(branch, str) and branch else None
+    task_id = request.task_id
     occurred = request.occurred_at.astimezone(timezone.utc).isoformat()
     observed_at = datetime.now(timezone.utc).timestamp()
     payload = request.model_dump(mode="json")
@@ -187,12 +298,7 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
                 event_id=request.event_id,
                 sequence=int(event["sequence"]),
                 idempotent=True,
-                snapshot=projection(
-                    request.worktree,
-                    task_id=request.task_id,
-                    agent_id=request.agent_id,
-                    state=state,
-                ),
+                snapshot=event_snapshot(event),
             )
         cursor = db.execute(
             """INSERT INTO agent_events
@@ -201,7 +307,7 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 request.event_id,
-                request.task_id,
+                task_id,
                 request.agent_id,
                 request.worktree,
                 project_id,
@@ -222,7 +328,7 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
         db.commit()
     event = {
         "event_id": request.event_id,
-        "task_id": request.task_id,
+        "task_id": task_id,
         "agent_id": request.agent_id,
         "worktree": request.worktree,
         "project_id": project_id,
@@ -244,12 +350,7 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
         event_id=request.event_id,
         sequence=sequence,
         idempotent=False,
-        snapshot=projection(
-            request.worktree,
-            task_id=request.task_id,
-            agent_id=request.agent_id,
-            state=state,
-        ),
+        snapshot=event_snapshot(event),
     )
 
 
@@ -308,27 +409,43 @@ def projection(
 
 
 def snapshots(*, project_id: str, state: Mapping[str, Mapping[str, Any]], as_of: datetime | None = None) -> dict[str, dict[str, Any]]:
+    """Return one latest explicit status for each repository/branch pair.
+
+    Lifecycle rows remain available through :func:`project_events`, but they
+    never create or replace a branch snapshot.  The event's worktree is kept
+    as provenance; it is not the identity used for this projection.
+    """
     result: dict[str, dict[str, Any]] = {}
     try:
         historical = events(project_id=project_id, as_of=as_of)
     except (OSError, sqlite3.Error):
         return result
-    keys = {(event["worktree"], event["task_id"], event["agent_id"]) for event in historical}
-    for path, row in state.items():
-        if row.get("common_dir") != project_id and path != project_id:
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    for event in historical:
+        if event.get("kind") != "status":
             continue
-        keys.update((event["worktree"], event["task_id"], event["agent_id"]) for event in historical if event["worktree"] == path)
-    for path, task_id, agent_id in keys:
-        try:
-            item = projection(path, task_id=task_id, agent_id=agent_id, state=state, as_of=as_of)
-        except (OSError, sqlite3.Error):
-            return {}
-        if item is not None:
-            # A separator cannot occur in the two validated identifiers' key
-            # components without becoming ambiguous in API maps, so expose a
-            # stable readable key while retaining the fields in the snapshot.
-            key = f"{task_id}\x1f{agent_id or ''}\x1f{path}"
-            result[key] = item
+        if event.get("status") not in STATUS_VALUES:
+            continue
+        branch = event.get("branch")
+        event_project = event.get("project_id")
+        if not isinstance(branch, str) or not branch or not isinstance(event_project, str):
+            continue
+        key = (event_project, branch)
+        previous = latest.get(key)
+        if previous is None:
+            latest[key] = event
+            continue
+        if (_epoch(event["occurred_at"]), int(event["sequence"])) > (
+            _epoch(previous["occurred_at"]),
+            int(previous["sequence"]),
+        ):
+            latest[key] = event
+    for (event_project, branch), event in latest.items():
+        item = event_snapshot(event)
+        item["task_id"] = task_key(event_project, branch)
+        item["agent_id"] = None
+        key = f"{event_project}\x1f{branch}"
+        result[key] = item
     return result
 
 
@@ -346,5 +463,6 @@ def project_events(project_id: str, *, state: Mapping[str, Mapping[str, Any]], a
             "branch": row["branch"], "lane_id": f"branch:{row['branch']}" if row["branch"] else f"worktree:{row['worktree']}",
             "task_id": row["task_id"], "agent_id": row["agent_id"], "kind": row["kind"], "run_state": row["run_state"],
             "phase": row["phase"], "attention": row["attention"], "outcome": row["outcome"], "summary": row["summary"],
+            "status": row["status"],
         })
     return result
