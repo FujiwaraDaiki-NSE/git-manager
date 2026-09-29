@@ -10,7 +10,7 @@
 </style>
 </head>
 <body><main>
-<header><div class="eyebrow">GITDASH · UI IMPROVEMENT &amp; E2E</div><h1>操作の分かりやすさと、<br>大きな履歴の扱いやすさを改善</h1><p>2026年9月29日。mainの更新を取り込み、UI・機能・不具合・描画負荷・文言を改善。ユーザー指定によりレビューは行わず、実際のGit操作とブラウザE2Eで検証しました。</p><p id="completion-status">改善とE2Eを継続中。終了予定は日本時間18:00です。</p></header>
+<header><div class="eyebrow">GITDASH · UI IMPROVEMENT &amp; E2E</div><h1>操作の分かりやすさと、<br>大きな履歴の扱いやすさを改善</h1><p>2026年9月29日。mainの更新を取り込み、UI・機能・不具合・描画負荷・文言を改善。ユーザー指定によりレビューは行わず、実際のGit操作とブラウザE2Eで検証しました。</p><p id="completion-status">日本時間2026年9月29日18:00まで改善とE2Eを実施。実装・統合・検証を完了しました。</p></header>
 <nav aria-label="ページ内移動"><a href="#changes">変更内容</a><a href="#performance">描画量</a><a href="#e2e">E2E結果</a><a href="#environment">環境・再現方法</a></nav>
 <div class="metrics"><div class="metric"><strong>64件</strong><span>フロントエンドの自動テスト</span></div><div class="metric"><strong>99件</strong><span>バックエンドの自動テスト<br>警告をエラーとして実行</span></div><div class="metric"><strong>約92%削減</strong><span>4,000行差分の初期DOM要素数</span></div></div>
 <section id="changes"><h2>何が変わったか</h2><div class="grid">
@@ -35,14 +35,10 @@
 <tr><th scope="row">画面幅・テーマ</th><td>デスクトップ、390px、320px。ライト／ダーク。長い差分を折り返し、ページ横幅のはみ出しがないことを確認。</td><td class="pass">確認済み</td></tr>
 <tr><th scope="row">再接続</th><td>走査開始後に再読み込み。ライブ更新へ戻り再走査ボタンが利用可能。イベントフィルターは保持。</td><td class="pass">確認済み</td></tr>
 </tbody></table></div><p class="muted">上記シナリオと自動テストで問題がないことを確認しています。すべての入力・環境で不具合が存在しないと保証するものではありません。</p></section>
-<section id="environment"><h2>環境と再現方法</h2><div class="card"><p><strong>作業ブランチ:</strong> <code>codex/ui-polish-20260929</code><br><strong>取り込み済みmain:</strong> <code>d36d9fc</code>（PR #31）とローカルmain <code>67f18fb</code><br><strong>専用E2E画面:</strong> <a href="http://localhost:14412">http://localhost:14412</a></p><p>別作業が通常環境の4412番ポートを更新していたため、検証は専用Composeプロジェクト <code>git-manager-ui-e2e</code> に分離しました。専用データボリュームを使用し、重複fetchを避けるため自動fetchは無効にしています。通常環境の設定や他の作業ブランチは変更していません。</p><p id="fixture-status">E2E用の2リポジトリとローカルbare originを削除し、14412・4412の再走査を実行。GUI検索で検証用プロジェクトが0件になったことを確認しました。</p></div><pre><code># フロントエンド
-cd frontend
-npm ci
-npm test
-npm run build
-
-# バックエンド
-cd backend
-uv run --with pytest python -m pytest -q -W error</code></pre><p>詳細な測定・再現記録は <a href="ui-polish-loop.md">ui-polish-loop.md</a> に記載しています。レビューはユーザー指定により実施していません。</p></section>
+<section id="environment"><h2>環境と再現方法</h2><div class="card"><p><strong>Pull Request:</strong> <a href="https://github.com/FujiwaraDaiki-NSE/git-manager/pull/32">#32（Draft）</a><br><strong>作業ブランチ:</strong> <code>codex/ui-polish-20260929</code><br><strong>取り込み済みmain:</strong> <code>d36d9fc</code>（PR #31）とローカルmain <code>67f18fb</code><br><strong>専用E2E画面:</strong> <a href="http://localhost:14412">http://localhost:14412</a></p><p>別作業が通常環境の4412番ポートを更新していたため、検証は専用Composeプロジェクト <code>git-manager-ui-e2e</code> に分離しました。専用データボリュームを使用し、重複fetchを避けるため自動fetchは無効にしています。通常環境の設定や他の作業ブランチは変更していません。</p><p id="fixture-status">E2E用の2リポジトリとローカルbare originを削除し、14412・4412の再走査を実行。GUI検索で検証用プロジェクトが0件になったことを確認しました。</p></div><pre><code># リポジトリのルートで実行
+npm --prefix frontend ci
+npm --prefix frontend test
+npm --prefix frontend run build
+uv run --directory backend --with pytest python -m pytest -q -W error</code></pre><p>詳細な測定・再現記録は <a href="ui-polish-loop.md">ui-polish-loop.md</a> に記載しています。レビューはユーザー指定により実施していません。</p></section>
 <footer>gitdash · 2026-09-29 · この資料は開発者向けの変更・検証サマリーです。</footer>
 </main></body></html>

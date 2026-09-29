@@ -134,4 +134,11 @@
 
 - After the last main integration and container rebuild, repeated large diff pagination (300 → 600), Japanese rename old/new names, and the 320px detail dialog with Escape focus restoration. No console warnings/errors in this fresh integrated browser session.
 - Loading toolbar now states Git件数を取得中… instead of presenting an unobserved zero. The final frontend tests (64) and container production build passed after this wording fix.
-- At 17:53 JST, removed the two disposable E2E repositories and their local bare origin, then rescanned both isolated 14412 and existing 4412 services. GUI search shows zero matching fixture projects. User repositories and the original checkout were not altered by cleanup.
+- At 17:52 JST, removed the two disposable E2E repositories and their local bare origin, then rescanned both isolated 14412 and existing 4412 services. GUI search shows zero matching fixture projects. User repositories and the original checkout were not altered by cleanup.
+- Real git-manager GUI: home dirty-count link applies the lane filter; returning home retains the query; quick switch supports ArrowDown/Enter; reloading a selected branch URL restores its details. Git details confirm the pushed worktree is clean and its upstream difference is ahead 0 / behind 0. Both service APIs contain no fixture project names after cleanup.
+- Final real-worktree check: staging the two documentation files automatically changed the open Git detail from 未ステージ 2 to ステージ済み 2. Searching summary reduced the list to 1/2 files. The repository checked_at stayed unchanged for over 40 seconds afterward, with upstream ahead/behind 0/0, so no self-triggered refresh loop was observed.
+
+## Completion
+
+- Continued implementation and GUI E2E through 18:00 JST on 2026-09-29. The final fetched origin/main remains d36d9fc. Frontend 64 tests and backend 99 tests passed; production builds and isolated Compose deployment succeeded. No review was performed.
+- Developer summary: docs/ui-polish-summary.html. Delivery branch: codex/ui-polish-20260929; draft PR #32. Test fixtures were removed and both scanners refreshed. The isolated app remains available at http://localhost:14412.
