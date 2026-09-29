@@ -1,6 +1,7 @@
 "use client";
 
 import PatchView from "./patch-view";
+import { fileStatusDescription, fileStatusGroups } from "./file-status.mjs";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -83,23 +84,6 @@ function StatusBlock({ repo }: { repo: Repo }) {
           </span>
         ))}
       </div>
-      {(repo.entries ?? []).slice(0, 40).map((entry) => (
-        <div key={entry.xy + entry.path}>
-          <span
-            className="xy"
-            style={{ color: codeColor(entry.xy) }}
-            title={xyTitle(entry.xy)}
-          >
-            {display(entry.xy)}
-          </span>
-          {entry.path}
-        </div>
-      ))}
-      {(repo.entries?.length ?? 0) > 40 && (
-        <div className="muted-line">
-          … 他 {(repo.entries?.length ?? 0) - 40} 件
-        </div>
-      )}
       {badges.some((badge) => badge.token === "clean") && (
         <div className="muted-line">nothing to commit, working tree clean</div>
       )}
@@ -108,29 +92,27 @@ function StatusBlock({ repo }: { repo: Repo }) {
 }
 
 function StatusPane({ repo }: { repo: Repo }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "staged" | "unstaged" | "untracked" | "conflict">("all");
+  const filters = [
+    { key: "all", label: "すべて" }, { key: "staged", label: "ステージ済み" },
+    { key: "unstaged", label: "未ステージ" }, { key: "untracked", label: "未追跡" }, { key: "conflict", label: "競合" },
+  ] as const;
+  const entries = repo.entries;
+  const normalized = query.trim().toLocaleLowerCase();
+  const visible = entries?.filter((entry) => fileStatusGroups(entry.xy)[filter] && entry.path.toLocaleLowerCase().includes(normalized));
   return (
     <section className="status-pane" aria-labelledby="status-pane-title">
-      <div className="section-head">
-        <h3 id="status-pane-title">変更ファイル</h3>
-        <code className="cmdhint">git status --short</code>
-      </div>
-      <div className="status-files">
-        {(repo.entries ?? []).map((entry) => (
-          <div key={entry.xy + entry.path}>
-            <span
-              className="xy"
-              style={{ color: codeColor(entry.xy) }}
-              title={xyTitle(entry.xy)}
-            >
-              {display(entry.xy)}
-            </span>
-            {entry.path}
-          </div>
-        ))}
-        {(repo.entries?.length ?? 0) === 0 && (
-          <div className="muted-line">変更ファイルはありません</div>
-        )}
-      </div>
+      <div className="section-head"><h3 id="status-pane-title">変更ファイル</h3><code className="cmdhint">git status --short</code></div>
+      {entries === undefined || repo.error || repo.pending ? <div className="inline-error" role="status">変更ファイルの状態は未取得です。{repo.error && <span>{repo.error}。</span>}再走査で最新の状態を取得できます。</div> : <>
+        <div className="status-file-tools"><label><span className="sr-only">変更ファイルを検索</span><input type="search" aria-label="変更ファイルを検索" placeholder="ファイル名・パスで検索" value={query} onChange={(event) => setQuery(event.target.value)} /></label><span role="status">{visible?.length} / {entries.length} ファイル</span></div>
+        <div className="status-file-filters" role="group" aria-label="変更ファイルの状態で絞り込み">{filters.map(({ key, label }) => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}<span>{entries.filter((entry) => fileStatusGroups(entry.xy)[key]).length}</span></button>)}</div>
+        <div className="status-file-list">
+          {visible?.map((entry) => <div className="status-file-row" key={entry.xy + entry.path}><code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code><code className="status-file-path">{entry.path}</code><span className="status-file-description">{fileStatusDescription(entry.xy)}</span></div>)}
+          {visible?.length === 0 && <div className="status-file-empty">{entries.length === 0 ? "未コミットの変更はありません。" : "条件に一致する変更ファイルはありません。"}{(query || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { setQuery(""); setFilter("all"); }}>絞り込みを解除</button>}</div>}
+        </div>
+        <details className="status-file-guide"><summary>ステージと状態記号の見方</summary><p>ステージ済みは次のコミットに含める変更、未ステージは作業ディレクトリだけにある変更です。同じファイルに両方の変更がある場合は、それぞれの絞り込みに表示します。</p><p>記号は左がステージ、右が作業ディレクトリです。M: 変更、A: 追加、D: 削除、R: 名前変更、??: 未追跡。競合はファイルを確認して解消します。</p></details>
+      </>}
     </section>
   );
 }
@@ -342,13 +324,13 @@ function BranchesPane({
             {visibleLocal.map((branch) => (
               <BranchRow key={branch.name} branch={branch} onCopy={onCopy} />
             ))}
-            {!showMerged && mergedCount > 0 && (
+            {mergedCount > 0 && (
               <button
                 className="show-merged"
                 type="button"
-                onClick={() => onShowMerged(true)}
+                onClick={() => onShowMerged(!showMerged)}
               >
-                merged {mergedCount} 件を表示
+                {showMerged ? "統合済みを折りたたむ" : `統合済み ${mergedCount} 件を表示`}
               </button>
             )}
             {visibleLocal.length === 0 && mergedCount === 0 && (
@@ -582,6 +564,18 @@ export default function RepoDetail({
             type="button"
             role="tab"
             aria-selected={activeTab === tab}
+            id={`repo-tab-${tab}`}
+            aria-controls={`repo-panel-${tab}`}
+            tabIndex={activeTab === tab ? 0 : -1}
+            onKeyDown={(event) => {
+              const tabs: DetailTab[] = ["status", "graph", "branches"];
+              const index = tabs.indexOf(tab);
+              const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : null;
+              if (next === null) return;
+              event.preventDefault();
+              onTabChange(tabs[next]);
+              document.getElementById(`repo-tab-${tabs[next]}`)?.focus();
+            }}
             onClick={() => onTabChange(tab)}
           >
             {tab === "status"
@@ -593,7 +587,8 @@ export default function RepoDetail({
         ))}
       </div>
 
-      {activeTab === "status" && <StatusPane repo={repo} />}
+      <div role="tabpanel" id={`repo-panel-${activeTab}`} aria-labelledby={`repo-tab-${activeTab}`} tabIndex={0}>
+      {activeTab === "status" && <StatusPane key={repo.path} repo={repo} />}
 
       {activeTab === "graph" && (
         <section
@@ -686,6 +681,7 @@ export default function RepoDetail({
           onCopy={onCopy}
         />
       )}
+      </div>
     </div>
   );
 }

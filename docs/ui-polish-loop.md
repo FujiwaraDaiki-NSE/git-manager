@@ -39,3 +39,19 @@
 - Same-name projects expose their paths. Two mel-ladder checkouts visually verified at 390px in light theme, no horizontal overflow.
 - Quiet agent summaries remain expandable even with partially unknown data, avoiding six mostly unknown tiles taking the mobile first screen after one completed report.
 - Frontend 58 tests and Docker production build pass.
+
+## Loop 5: change-file navigation and exact Git paths
+
+- Git detail now searches files and filters staged/unstaged/untracked/conflicts. Both sides of MM remain discoverable; raw XY plus Japanese explanations stay visible.
+- Removed the duplicate first-40 file listing above the detailed file list. Missing/error/pending status is not presented as clean.
+- Added arrow/Home/End navigation for inner Git tabs and a working collapse control after expanding merged branches.
+- Real fixture GUI: MM appears in staged and unstaged filters; no-match reset restores all files; Japanese untracked filename is searchable; 320px screenshot inspected; real UU merge conflict appears with exact Japanese filename.
+- Found Git C-quoted Japanese paths during GUI tests. Switched status to NUL-delimited porcelain, preserving whitespace, Unicode, tabs/newlines, quotes and rename destinations. Raw subprocess decoding preserves carriage returns.
+- Frontend 61 tests; backend 75 with warnings as errors.
+
+## Main integration and isolated validation
+
+- Incorporated origin/main 827ed5f, then user-updated local main 67f18fb (including its updated AGENTS.md).
+- Use ~/.local/bin/gitdash-compose with explicit worktree project-directory/file overrides, preserving the two environment files.
+- Another task rebuilt the shared runtime from codex/compact-agent-status during E2E. Subsequent verification uses isolated git-manager-ui-e2e Compose project: frontend 14412, host-local API 18762, separate data volume, automatic fetch disabled. Config is generated at /tmp/gitdash-ui-e2e-compose.json.
+- Normal user runtime is no longer overwritten during iterative testing. Final integration/deployment will use current main and be explicitly reported.

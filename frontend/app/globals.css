@@ -4080,3 +4080,22 @@ html[data-theme="dark"] {
 .project-card-footer a:hover { text-decoration: underline; }
 .project-card-title-wrap .project-card-location { margin-top: 4px; font-size: 10px; opacity: .8; white-space: normal; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .project-card-facts .fact-link { transition: none; } }
+
+.status-file-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
+.status-file-tools label { flex: 1; min-width: 180px; }
+.status-file-tools input { width: 100%; border: 1px solid var(--rule); border-radius: 6px; padding: 9px 11px; color: var(--ink); background: var(--panel); font: 12px var(--sans); }
+.status-file-tools > span { color: var(--muted); font-size: 11px; }
+.status-file-filters { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+.status-file-filters button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); color: var(--muted); padding: 7px 10px; font: 11px var(--sans); cursor: pointer; }
+.status-file-filters button[aria-pressed="true"] { color: var(--accent); background: var(--selected); border-color: var(--accent); }
+.status-file-filters button span { font-variant-numeric: tabular-nums; }
+.status-file-list { border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.status-file-row { display: grid; grid-template-columns: 3ch minmax(0,1fr) auto; align-items: baseline; gap: 10px; padding: 10px 12px; }
+.status-file-row + .status-file-row { border-top: 1px solid var(--rule); }
+.status-file-row:hover { background: var(--hover); }
+.status-file-path { font-size: 12px; overflow-wrap: anywhere; }
+.status-file-description { color: var(--muted); font: 11px/1.6 var(--sans); }
+.status-file-empty { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 18px; color: var(--muted); font: 12px var(--sans); }
+.status-file-guide { margin-top: 14px; color: var(--muted); font: 11px/1.8 var(--sans); }
+.status-file-guide summary { cursor: pointer; }
+@media (max-width: 600px) { .status-file-row { grid-template-columns: 3ch minmax(0,1fr); } .status-file-description { grid-column: 2; } }
