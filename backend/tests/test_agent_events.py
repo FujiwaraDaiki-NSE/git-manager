@@ -251,26 +251,85 @@ def test_sse_is_not_published_when_commit_fails(event_context: tuple[str, dict[s
     assert published == []
 
 
-def test_fastmcp_only_lists_and_calls_report_agent_status(event_context: tuple[str, dict[str, dict[str, object]]]) -> None:
+def mcp_status_payload(worktree: str, **changes: object) -> dict[str, object]:
+    payload = status_payload(worktree)
+    for key in ("event_id", "occurred_at", "kind"):
+        del payload[key]
+    payload.update(changes)
+    return payload
+
+
+def test_fastmcp_compact_status_persists_and_publishes(
+    event_context: tuple[str, dict[str, dict[str, object]]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     worktree, state = event_context
-    mcp_server.set_state_provider(lambda: state)
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    published: list[dict[str, object]] = []
+    monkeypatch.setattr(mcp_server, "_event_publisher", published.append)
     tools = asyncio.run(mcp_server.mcp.list_tools())
     assert [tool.name for tool in tools] == ["report_agent_status"]
-    assert not {"phase", "attention", "outcome", "summary"} - set(tools[0].inputSchema["properties"])
-    result = asyncio.run(mcp_server.mcp.call_tool("report_agent_status", status_payload(worktree, "mcp")))
-    assert isinstance(result, tuple) and isinstance(result[1], dict)
-    assert any(row["event_id"] == "mcp" for row in agent_events.events())
-    lifecycle = {
-        "event_id": "mcp-life", "task_id": "task-life", "worktree": worktree,
-        "occurred_at": "2026-01-02T00:00:00+00:00", "kind": "lifecycle",
-        "run_state": "ended", "action": "session_end",
+    schema = tools[0].inputSchema
+    assert set(schema["properties"]) == {
+        "task_id", "worktree", "run_state", "phase", "attention", "outcome", "summary", "agent_id",
     }
-    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", lifecycle))
+    assert set(schema["required"]) == set(schema["properties"]) - {"agent_id"}
+    assert tools[0].outputSchema is None
+    before = datetime.now(timezone.utc)
+    result = asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(worktree)))
+    assert len(result) == 1 and result[0].text == "ok"
+    rows = agent_events.events()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["kind"] == "status" and row["task_id"] == "task-1"
+    assert row["phase"] == "implementing" and row["summary"] == "working"
+    assert before <= datetime.fromisoformat(row["occurred_at"]) <= datetime.now(timezone.utc)
+    assert len(published) == 1 and published[0]["event_id"] == row["event_id"]
+    assert published[0]["snapshot"]["summary"] == "working"
+
+    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(
+        worktree, run_state="ended", phase=None, attention=None, outcome="completed", summary=None,
+    )))
+    rows = agent_events.events()
+    assert len({item["event_id"] for item in rows}) == 2
+    snapshot = agent_events.projection(worktree, task_id="task-1", state=state)
+    assert snapshot["outcome"] == "completed"
+    assert snapshot["phase"] is None and snapshot["summary"] is None
+
+
+@pytest.mark.parametrize("field", ["phase", "attention", "outcome", "summary"])
+def test_mcp_rejects_missing_status_fields(event_context, monkeypatch, field):
+    worktree, state = event_context
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    payload = mcp_status_payload(worktree)
+    del payload[field]
     with pytest.raises(Exception):
-        asyncio.run(mcp_server.mcp.call_tool("report_agent_status", {
-            "event_id": "mcp-missing", "task_id": "task-missing", "worktree": worktree,
-            "occurred_at": "2026-01-02T00:00:00+00:00", "kind": "status", "run_state": "active",
-        }))
+        asyncio.run(mcp_server.mcp.call_tool("report_agent_status", payload))
+    assert agent_events.events() == []
+
+
+@pytest.mark.parametrize("changes", [
+    {"run_state": "unknown"}, {"phase": "unknown"}, {"attention": "unknown"},
+    {"outcome": "unknown"}, {"worktree": "/unknown/worktree"}, {"task_id": ""},
+])
+def test_mcp_rejects_invalid_status_without_publishing(event_context, monkeypatch, changes):
+    worktree, state = event_context
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    published = []
+    monkeypatch.setattr(mcp_server, "_event_publisher", published.append)
+    with pytest.raises(Exception):
+        asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(worktree, **changes)))
+    assert agent_events.events() == [] and published == []
+
+
+def test_mcp_storage_failure_does_not_publish(event_context, monkeypatch):
+    worktree, state = event_context
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    monkeypatch.setattr(agent_events, "append", lambda *_: (_ for _ in ()).throw(sqlite3.OperationalError("disk full")))
+    published = []
+    monkeypatch.setattr(mcp_server, "_event_publisher", published.append)
+    with pytest.raises(Exception):
+        asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(worktree)))
+    assert published == []
 
 
 def test_mcp_http_is_available_without_authorization(

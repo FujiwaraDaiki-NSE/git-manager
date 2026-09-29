@@ -230,6 +230,33 @@ append-only SQLite に保存されます。共通hooksが送信するのはlifec
 APIにはlocalhostのStreamable HTTP MCP `/mcp` の `report_agent_status` もありますが、
 プロジェクト設定では `enabled = false` のままです。
 
+MCPを利用する場合も、ツールは `report_agent_status` の1つだけです。
+MCPは現在の作業状況（`status`）の報告に絞り、開始・終了などはhooksのREST送信で扱います。
+必須引数は `task_id`、`worktree`、`run_state`、`phase`、`attention`、`outcome`、`summary`。
+`agent_id` は任意です。`task_id` は同じタスクで固定し、hooksの報告と関連付ける場合は
+同じセッションIDとagent IDを使用します。`worktree` はgitdashが認識する絶対パスを指定します。
+`phase`、`attention`、`outcome`、`summary` は毎回明示し、消す値には `null` を指定します。
+`summary` は短い要約にし、ログや差分の全文は送信しません。
+
+```json
+{
+  "task_id": "<session-id>",
+  "worktree": "/home/solution2024/git-manager",
+  "run_state": "idle",
+  "phase": "reviewing",
+  "attention": "review_required",
+  "outcome": null,
+  "summary": "修正とテスト完了。レビュー待ち。"
+}
+```
+
+成功時の返り値は `ok` のみで、状態全体や履歴はエージェントへ返しません。
+GUIには従来どおり保存後の状態を通知します。イベントIDと発生時刻はサーバーが生成するため、
+MCPでの時刻は報告を処理した時刻となり、再呼び出しは新しいイベントとして記録されます。
+過去時刻の指定やイベントIDによる重複排除が必要な送信には、従来のREST APIを使用します。
+従来のMCP呼び出しに含まれていた `event_id`、`occurred_at`、`kind`、`action` は不要です。
+
+
 ## 開発
 
 ```bash
