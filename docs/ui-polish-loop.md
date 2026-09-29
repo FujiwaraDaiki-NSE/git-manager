@@ -116,3 +116,10 @@
 - Create the subscription only when streaming begins and include the initial snapshot inside the cleanup scope. Send current scan/fetch state when each connection starts so a reconnect does not depend on a completion event it may have missed.
 - Added tests for close-after-first-event cleanup, current busy states, live completion delivery, and a subsequent connection seeing completed state. Backend: 81 passed with warnings treated as errors.
 - GUI E2E: a brief network failure kept event filters and prior data; retry recovered. Starting a scan and reloading returned to live updates and an enabled rescan button while retaining the selected test-event filter.
+
+## Changes arriving immediately after refresh
+
+- Reproduced with a real repository: refresh its status, push immediately after `checked_at` changes, and observe stale ahead=6 six seconds after a successful local push. The suppression window discarded that event.
+- Preserve pending events through suppression and refresh when the window ends. Events arriving during an in-flight refresh remain pending. Use `git --no-optional-locks status` so read-only status does not rewrite the index and trigger itself.
+- Added tests for deferred events, events received during refresh, and unchanged index bytes after status collection. Backend: 84 passed with warnings treated as errors.
+- Repeated the immediate-push scenario: ahead=1 → 0 in 2.98 seconds. `checked_at` stayed unchanged during the next five seconds, confirming no self-refresh loop in this scenario. GUI E2E separately showed 未push 1 → 未push 0 while retaining the active filter and focus.

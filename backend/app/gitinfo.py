@@ -501,7 +501,7 @@ def collect(
         "checked_at": time.time(),
     }
 
-    status = _run(repo, ["status", "--porcelain=v2", "--branch", "-z"])
+    status = _run(repo, ["--no-optional-locks", "status", "--porcelain=v2", "--branch", "-z"])
     if status is None:
         result["error"] = "git status を実行できませんでした"
         status_info = {

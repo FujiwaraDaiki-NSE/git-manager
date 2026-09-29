@@ -31,8 +31,8 @@ scanning = {"active": False, "found": 0}
 fetching = {"active": False, "total": 0}
 watcher: Watcher | None = None
 
-# 自分が走らせた git status も .git/index を書き戻すため、inotify が自分自身を
-# 起こし続ける。取得直後の一定時間はイベントを捨てる
+# Git処理と重なるイベントは短時間まとめ、抑制期間の終了後に取得する。
+# 読み取り専用statusではoptional lockを無効にして自己更新を防ぐ。
 SUPPRESS_SEC = 3.0
 _suppress: dict[str, float] = {}
 
@@ -823,19 +823,25 @@ def _load_cached_state() -> dict[str, dict[str, Any]]:
 
 async def _drain_pending() -> None:
     global _pending_task
-    await asyncio.sleep(DEBOUNCE_SEC)
-    targets = [
-        p
-        for p in _pending
-        if time.time() >= max(_suppress.get(p, 0), _suppress.get(_suppress_key(p), 0))
-    ]
-    _pending.clear()
-    _pending_task = None
-    if targets:
-        await _refresh_many(
-            _project_refresh_representatives(targets),
-            refresh_project_metadata=True,
-        )
+    try:
+        await asyncio.sleep(DEBOUNCE_SEC)
+        while _pending:
+            now = time.time()
+            deadlines = {
+                path: max(_suppress.get(path, 0), _suppress.get(_suppress_key(path), 0))
+                for path in _pending
+            }
+            targets = [path for path, deadline in deadlines.items() if deadline <= now]
+            if not targets:
+                await asyncio.sleep(max(0.01, min(deadlines.values()) - now))
+                continue
+            _pending.difference_update(targets)
+            await _refresh_many(
+                _project_refresh_representatives(targets),
+                refresh_project_metadata=True,
+            )
+    finally:
+        _pending_task = None
 
 
 def _project_refresh_representatives(host_paths: list[str]) -> list[str]:
@@ -896,12 +902,6 @@ def _project_refresh_representatives(host_paths: list[str]) -> list[str]:
 def _on_watch_event(container_path: str) -> None:
     """inotify スレッドから呼ばれる。イベントループへ受け渡す。"""
     host_path = paths.to_host(container_path)
-    # 自分の git 実行が起こしたイベントなら捨てる
-    if time.time() < max(
-        _suppress.get(host_path, 0),
-        _suppress.get(_suppress_key(host_path), 0),
-    ):
-        return
     loop = getattr(app.state, "loop", None)
     if loop is None:
         return

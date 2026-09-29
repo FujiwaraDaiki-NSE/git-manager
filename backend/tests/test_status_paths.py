@@ -41,3 +41,22 @@ def test_unmerged_unicode_path_retains_conflict_state(tmp_path):
     raw=gitinfo._run(str(repo),['status','--porcelain=v2','--branch','-z'])
     assert raw is not None
     assert gitinfo._parse_status_v2(raw)['entries'] == [{'xy':'UU','path':name}]
+
+
+def test_collect_status_does_not_rewrite_the_index(tmp_path):
+    import os
+
+    repo = tmp_path / 'readonly'; repo.mkdir()
+    git(repo, 'init', '-q', '-b', 'main')
+    git(repo, 'config', 'user.name', 'Test')
+    git(repo, 'config', 'user.email', 'test@example.invalid')
+    (repo / 'tracked.txt').write_text('unchanged content\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-qm', 'base')
+    index = repo / '.git' / 'index'
+    before = index.read_bytes()
+    stamp = (repo / 'tracked.txt').stat().st_mtime_ns
+    os.utime(repo / 'tracked.txt', ns=(stamp + 10_000_000_000, stamp + 10_000_000_000))
+    result = gitinfo.collect(str(repo), fetch=False)
+    assert result['entries'] == []
+    assert index.read_bytes() == before
