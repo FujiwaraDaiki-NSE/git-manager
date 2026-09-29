@@ -96,3 +96,14 @@ test("deferred ordering retains focused cards and exposes changed order", () => 
   assert.deepEqual(deferProjectOrder(["a", "b", "c"], ["b", "a", "c"], true), { order: ["a", "b", "c"], deferred: true });
   assert.deepEqual(deferProjectOrder(["a", "b"], ["b", "a"], false), { order: ["b", "a"], deferred: false });
 });
+
+test("agent events cannot cross projects through a common branch name", async () => {
+  const { projectMatchesAgentEvent, laneMatchesAgentEvent } = await import("../app/agent-overview.mjs");
+  const project = { id: "project-a", main_path: "/a", lanes: [{ path: "/a/work", branch: "main" }, { path: null, branch: null }] };
+  assert.equal(projectMatchesAgentEvent(project, { project_id: "project-b", worktree: "/b", branch: "main" }), false);
+  assert.equal(projectMatchesAgentEvent(project, { project_id: null, worktree: null, branch: null }), false);
+  assert.equal(projectMatchesAgentEvent(project, { project_id: null, worktree: "/a/work", branch: "feature" }), true);
+  assert.equal(projectMatchesAgentEvent(project, { project_id: "project-b", worktree: "/a", branch: "main" }), false);
+  assert.equal(projectMatchesAgentEvent(project, { project_id: "project-a", worktree: "/a", branch: "main" }), true);
+  assert.equal(laneMatchesAgentEvent({ path: null, branch: null }, { worktree: null, branch: null }), false);
+});

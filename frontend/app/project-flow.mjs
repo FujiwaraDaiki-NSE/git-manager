@@ -42,7 +42,9 @@ export function updateProjectUrl(href, changes) {
  * in visual/keyboard order.  A merge commit follows the first parent when it
  * can reach the requested base, otherwise it checks the remaining parents;
  * no unrelated older ancestors are appended.
- * @param {Array<{hash: string, parents: string[]}>} graphRows
+ * @template {{hash: string, parents: string[]}} T
+ * @param {T[]} graphRows
+ * @returns {T[]}
  * @param {string|null} head
  * @param {string|null} mergeBase
  */
@@ -53,23 +55,30 @@ export function ancestryRows(graphRows, head, mergeBase = null) {
   if (!headRow) return [];
   if (!mergeBase) return [headRow];
 
-  const findPath = (hash, target, visited) => {
-    if (hash === target) return [hash];
-    if (visited.has(hash)) return null;
-    const row = byHash.get(hash);
-    if (!row) return null;
-    const nextVisited = new Set(visited);
-    nextVisited.add(hash);
-    for (const parent of row.parents) {
-      const path = findPath(parent, target, nextVisited);
-      if (path) return [hash, ...path];
+  // Iterative depth-first search keeps the first-parent preference while
+  // visiting a shared ancestor only once. Recursive path-local visited sets
+  // re-explored merge diamonds exponentially and overflowed on long histories.
+  const visited = new Set([head]);
+  const stack = [{ hash: head, nextParent: 0 }];
+  while (stack.length > 0) {
+    const current = stack[stack.length - 1];
+    if (current.hash === mergeBase) {
+      return stack.flatMap((entry) => {
+        const row = byHash.get(entry.hash);
+        return row ? [row] : [];
+      }).reverse();
     }
-    return null;
-  };
-
-  const headToBase = findPath(head, mergeBase, new Set());
-  if (!headToBase) return [headRow];
-  return headToBase.reverse().map((hash) => byHash.get(hash)).filter(Boolean);
+    const row = byHash.get(current.hash);
+    if (!row || current.nextParent >= row.parents.length) {
+      stack.pop();
+      continue;
+    }
+    const parent = row.parents[current.nextParent++];
+    if (visited.has(parent)) continue;
+    visited.add(parent);
+    stack.push({ hash: parent, nextParent: 0 });
+  }
+  return [headRow];
 }
 
 export function flowEventKey(laneId, hash) {

@@ -415,11 +415,12 @@ export default function RepoDetail({
       controller.signal,
     )
       .then((value) => {
+          if (controller.signal.aborted) return;
         setGraph(value);
         setGraphState("ready");
       })
       .catch((reason: unknown) => {
-        if (reason instanceof DOMException && reason.name === "AbortError")
+        if (controller.signal.aborted)
           return;
         setGraphError(
           reason instanceof Error ? reason.message : "unknown error",
@@ -450,11 +451,12 @@ export default function RepoDetail({
       controller.signal,
     )
       .then((value) => {
+          if (controller.signal.aborted) return;
         setBranches(value);
         setBranchesState("ready");
       })
       .catch((reason: unknown) => {
-        if (reason instanceof DOMException && reason.name === "AbortError")
+        if (controller.signal.aborted)
           return;
         setBranchesError(
           reason instanceof Error ? reason.message : "unknown error",
@@ -491,11 +493,12 @@ export default function RepoDetail({
         controller.signal,
       )
         .then((value) => {
+          if (controller.signal.aborted) return;
           setCommit(value);
           setCommitState("ready");
         })
         .catch((reason: unknown) => {
-          if (reason instanceof DOMException && reason.name === "AbortError")
+          if (controller.signal.aborted)
             return;
           setCommitError(
             reason instanceof Error ? reason.message : "unknown error",

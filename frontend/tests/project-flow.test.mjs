@@ -441,3 +441,25 @@ test("tick labels retain day context and handle tiny windows", () => {
   assert.equal(tiny.length,2);
   assert.ok(tiny.every(tick=>Number.isFinite(tick.position)));
 });
+
+test("ancestry search visits shared merge history once before trying another parent", () => {
+  let parentReads = 0;
+  const graph = [{ hash: "base", parents: [] }, { hash: "dead", parents: [] }];
+  let previous = ["dead"];
+  for (let level = 0; level < 22; level += 1) {
+    const parents = previous;
+    previous = [`left-${level}`, `right-${level}`];
+    for (const hash of previous) graph.push({ hash, get parents() { parentReads += 1; return parents; } });
+  }
+  graph.push({ hash: "head", parents: [previous[0], "base"] });
+  assert.deepEqual(ancestryRows(graph, "head", "base").map((row) => row.hash), ["base", "head"]);
+  assert.ok(parentReads < graph.length * 6, `Shared ancestry was repeatedly explored: ${parentReads}`);
+});
+
+test("ancestry search handles deep histories without recursive stack overflow", () => {
+  const rows = Array.from({ length: 20000 }, (_, index) => ({ hash: String(index), parents: index > 0 ? [String(index - 1)] : [] }));
+  const path = ancestryRows(rows, "19999", "0");
+  assert.equal(path.length, 20000);
+  assert.equal(path[0].hash, "0");
+  assert.equal(path.at(-1).hash, "19999");
+});

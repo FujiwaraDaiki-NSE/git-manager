@@ -45,3 +45,25 @@ test("activity ordering keeps unknown timestamps explicit and supports both dire
   assert.ok(compareActivityEvents(recent, unknown, "newest") < 0);
   assert.ok(compareActivityEvents(unknown, recent, "oldest") > 0);
 });
+
+test("lane filters never treat unknown counts as a positive Git state", async () => {
+  const { laneMatchesFilter } = await import("../app/project-search.mjs");
+  const unknown = { dirty: null, conflict: null, upstream_ahead: null, upstream_behind: null, is_worktree: false };
+  for (const filter of ["dirty", "conflict", "ahead", "behind", "worktree"]) assert.equal(laneMatchesFilter(unknown, filter), false);
+  assert.equal(laneMatchesFilter({ ...unknown, dirty: true }, "dirty"), true);
+  assert.equal(laneMatchesFilter({ ...unknown, upstream_ahead: 3 }, "ahead"), true);
+  assert.equal(laneMatchesFilter({ ...unknown, upstream_behind: 2 }, "behind"), true);
+  assert.equal(laneMatchesFilter(unknown, "bogus"), false);
+});
+
+test("work lanes sort attention before clean, and unknown dates after known dates", async () => {
+  const { sortWorkLanes } = await import("../app/project-search.mjs");
+  const clean = { name: "alpha", id: "a", error: null, dirty: false, conflict: false, last_commit: null };
+  const dirty = { ...clean, name: "zeta", id: "z", dirty: true, last_commit: { date: "2026-09-29T00:00:00Z" } };
+  const conflict = { ...clean, name: "beta", id: "b", conflict: true, last_commit: { date: "invalid" } };
+  const lanes = [clean, dirty, conflict];
+  assert.deepEqual(sortWorkLanes(lanes, "attention").map((lane) => lane.id), ["b", "z", "a"]);
+  assert.deepEqual(sortWorkLanes(lanes, "latest").map((lane) => lane.id), ["z", "a", "b"]);
+  assert.deepEqual(sortWorkLanes(lanes, "name").map((lane) => lane.id), ["a", "b", "z"]);
+  assert.deepEqual(lanes.map((lane) => lane.id), ["a", "z", "b"]);
+});
