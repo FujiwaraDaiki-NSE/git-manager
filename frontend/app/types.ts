@@ -276,6 +276,10 @@ export type ProjectBranchConnectionEdge = {
   pr_number: number | null;
   pr_url: string | null;
   label: string;
+  source_commit_hash?: string | null;
+  target_commit_hash?: string | null;
+  source_commit?: ProjectBranchCommit | null;
+  target_commit?: ProjectBranchCommit | null;
 };
 
 export type ProjectBranchConnectionUnresolved = {

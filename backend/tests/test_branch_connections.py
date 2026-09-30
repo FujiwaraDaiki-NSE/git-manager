@@ -128,6 +128,12 @@ def test_merge_pr_edge_resolves_exact_repository_target(tmp_path: Path) -> None:
     assert edge["target_row_id"] == "local:main"
     assert edge["commit_hash"] == merge_hash
     assert edge["evidence"] == "pull_request"
+    assert edge["source_commit_hash"] == feature_head
+    assert edge["target_commit_hash"] == merge_hash
+    assert edge["source_commit"]["hash"] == feature_head
+    assert edge["source_commit"]["date"] == git(repo, "show", "-s", "--format=%cI", feature_head).strip()
+    assert edge["target_commit"]["hash"] == merge_hash
+    assert edge["target_commit"]["date"] == git(repo, "show", "-s", "--format=%cI", merge_hash).strip()
 
 
 def test_pr_without_merge_commit_stays_unresolved(tmp_path: Path) -> None:
@@ -295,3 +301,65 @@ def test_git_merge_base_failure_is_partial(monkeypatch, tmp_path: Path) -> None:
     )
     assert result["status"] == "partial"
     assert any(item["reason"] == "merge_base_unavailable" for item in result["unresolved"])
+
+
+def test_branch_common_base_metadata_is_available_beyond_first_history_page(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    common_base = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "-q", "-c", "feature")
+    for index in range(201):
+        commit(repo, f"feature {index}")
+    git(repo, "switch", "-q", "main")
+    for index in range(201):
+        commit(repo, f"main {index}")
+
+    rows = rows_for(repo, {"repository": "owner/repo"})
+    result = branch_rows.connections(
+        str(repo), rows, default_branch="main", github_data={"repository": "owner/repo"}
+    )
+
+    edge = next(item for item in result["edges"] if item["kind"] == "branch")
+    assert edge["commit_hash"] == common_base
+    assert edge["source_commit_hash"] == common_base
+    assert edge["target_commit_hash"] == common_base
+    assert edge["source_commit"]["hash"] == common_base
+    assert edge["target_commit"]["hash"] == common_base
+    common_base_date = git(repo, "show", "-s", "--format=%cI", common_base).strip()
+    assert edge["source_commit"]["date"] == common_base_date
+    assert edge["target_commit"]["date"] == common_base_date
+
+
+def test_missing_pr_source_object_keeps_hash_and_explicit_null_metadata(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    git(repo, "switch", "-q", "-c", "feature")
+    commit(repo, "feature")
+    git(repo, "switch", "-q", "main")
+    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge feature")
+    merge_hash = git(repo, "rev-parse", "HEAD").strip()
+    missing_source = "f" * 40
+    rows = rows_for(repo, {
+        "repository": "owner/repo",
+        "pulls": [{
+            "number": 46,
+            "url": "https://github.com/owner/repo/pull/46",
+            "merged_at": "2026-09-30T00:00:00Z",
+            "merge": merge_hash,
+            "base": "main",
+            "head": "deleted-feature",
+            "head_sha": missing_source,
+            "head_repo": "owner/repo",
+            "base_repo": "owner/repo",
+        }],
+    })
+
+    result = branch_rows.connections(
+        str(repo), rows, default_branch="main", github_data={"repository": "owner/repo"}
+    )
+
+    edge = next(item for item in result["edges"] if item["kind"] == "merge")
+    assert edge["source_commit_hash"] == missing_source
+    assert edge["source_commit"] is None
+    assert edge["target_commit_hash"] == merge_hash
+    assert edge["target_commit"]["hash"] == merge_hash

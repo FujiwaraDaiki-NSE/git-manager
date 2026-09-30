@@ -3524,12 +3524,27 @@ body {
 .flow-row.is-selected .flow-track { background: color-mix(in srgb, var(--control-blue) 8%, transparent); box-shadow: inset 0 1px var(--control-blue), inset 0 -1px var(--control-blue); }
 .flow-row.is-selected .flow-lane-label { background: var(--control-blue-soft); box-shadow: inset 3px 0 var(--control-blue); padding-left: 8px; }
 .flow-lane-label { height: var(--flow-row-height); padding-top: 5px; padding-bottom: 5px; }
+.flow-lane-label { overflow: visible; }
 .flow-lane-title { height: 28px; }
 .flow-lane-button { min-width: 0; padding: 4px 0; border: 0; background: transparent; color: var(--control-ink); font: 600 13px var(--control-mono); text-align: left; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; cursor: pointer; }
 .flow-lane-button:hover { color: var(--control-blue); text-decoration: underline; }
 .flow-lane-button:focus-visible, .flow-help summary:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
 .flow-lane-meta { margin-top: 0; flex-wrap: nowrap; height: 18px; font-size: 11px; }
 .flow-lane-relation { margin-top: 2px; color: var(--control-muted); font: 10px var(--control-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-lane-locals { margin-top: 4px; color: var(--control-muted); font-size: 10px; position: relative; z-index: 20; }
+.flow-lane-locals summary { cursor: pointer; width: fit-content; }
+.flow-lane-locals[open] > div { position: absolute; top: 100%; left: 0; display: grid; gap: 3px; margin-top: 4px; max-width: 240px; min-width: 180px; padding: 6px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--control-panel); box-shadow: 0 8px 20px color-mix(in srgb, var(--control-ink) 18%, transparent); }
+.flow-lane-locals[open] > div { top: auto; bottom: 100%; margin-top: 0; margin-bottom: 4px; }
+.flow-lane-locals > div > div { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.flow-lane-locals .flow-lane-button { min-height: 20px; padding: 1px 0; font-size: 10px; }
+.flow-lane-locals .subtle-button { min-height: 20px; padding: 2px 5px; font-size: 10px; }
+.flow-lane-actions { display: flex; align-items: center; gap: 5px; min-height: 20px; overflow: visible; }
+.flow-lane-actions .flow-lane-locals { margin-top: 0; }
+.flow-lane-actions .flow-lane-locals summary { font: 10px var(--control-sans); }
+.flow-lane-actions .flow-history-note { margin: 0; font-size: 9px; }
+.flow-history-more { display: inline-block; width: auto; min-height: 20px; margin: 3px 0 0; padding: 2px 6px; border: 1px solid var(--control-border); border-radius: 5px; background: var(--control-panel); color: var(--control-blue); font: 10px var(--control-sans); cursor: pointer; }
+.flow-history-more:disabled { cursor: wait; opacity: .6; }
+.flow-branch-direction { fill: none; stroke: var(--control-green); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .flow-latest-visible { position: absolute; left: 12px; right: 12px; bottom: 4px; display: flex; gap: 12px; align-items: center; pointer-events: none; color: var(--control-muted); font-size: 11px; }
 .flow-latest-visible > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flow-latest-visible time { flex: 0 0 auto; font: 10px var(--control-mono); margin-left: auto; }

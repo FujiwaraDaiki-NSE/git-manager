@@ -674,6 +674,56 @@ def _connection_unresolved(
     }
 
 
+def _connection_commit_hash(value: Any) -> str | None:
+    """Return a commit hash only when the relation supplied an exact SHA.
+
+    Connection endpoints are used as timeline anchors.  Keep those anchors
+    separate from the relation's evidence hash and never turn a branch tip or
+    a merge parent into an endpoint unless the source data identifies it.
+    """
+    return value if isinstance(value, str) and _COMMIT_HASH_RE.fullmatch(value) else None
+
+
+def _pull_source_commit_hash(pull: Mapping[str, Any]) -> str | None:
+    """Return the PR source SHA when GitHub supplied one.
+
+    ``source_hash`` is the normalized field produced by ``_pr_row``. It is
+    deliberately the only input here: the endpoint must stay unknown when
+    that canonical evidence is absent, and is never inferred from the merge
+    commit's parents.
+    """
+    return _connection_commit_hash(pull.get("source_hash"))
+
+
+def _attach_connection_commit_metadata(
+    repo: str,
+    edges: list[dict[str, Any]],
+) -> None:
+    """Attach one exact metadata lookup to every connection endpoint.
+
+    Branch rows intentionally expose only a bounded first history page.  An
+    edge's common ancestor can be older than that page, so endpoint metadata
+    is read independently with ``read_tips``.  A known SHA remains present
+    when its object is missing locally; its metadata is then explicit ``None``.
+    """
+    endpoint_hashes = _history_heads(
+        *(value
+          for edge in edges
+          for value in (edge.get("source_commit_hash"), edge.get("target_commit_hash")))
+    )
+    tip_rows = branch_history.read_tips(repo, endpoint_hashes) if endpoint_hashes else []
+    tips_by_hash = {
+        item["hash"]: item
+        for item in tip_rows or []
+        if isinstance(item, Mapping) and isinstance(item.get("hash"), str)
+    }
+    for edge in edges:
+        source_hash = edge.get("source_commit_hash")
+        target_hash = edge.get("target_commit_hash")
+        edge["source_commit"] = tips_by_hash.get(source_hash) if isinstance(source_hash, str) else None
+        edge["target_commit"] = tips_by_hash.get(target_hash) if isinstance(target_hash, str) else None
+
+
 def _pr_target_candidates(
     rows: list[Mapping[str, Any]],
     pull: Mapping[str, Any],
@@ -861,6 +911,8 @@ def connections(
                 "target_row_id": target_row.get("id"),
                 "evidence": "pull_request",
                 "commit_hash": pull.get("commit_hash") if isinstance(pull.get("commit_hash"), str) else None,
+                "source_commit_hash": _pull_source_commit_hash(pull),
+                "target_commit_hash": _connection_commit_hash(pull.get("commit_hash")),
                 "pr_number": number,
                 "pr_url": pull.get("url") if isinstance(pull.get("url"), str) else None,
                 "label": f"PR #{number}",
@@ -1010,11 +1062,14 @@ def connections(
             "target_row_id": child_id,
             "evidence": "merge_base",
             "commit_hash": merge_base,
+            "source_commit_hash": merge_base,
+            "target_commit_hash": merge_base,
             "pr_number": None,
             "pr_url": None,
             "label": "共通祖先からの分岐推定",
         })
 
+    _attach_connection_commit_metadata(repo, edges)
     status = "partial" if unresolved else "available"
     if not rows:
         status = "available"
