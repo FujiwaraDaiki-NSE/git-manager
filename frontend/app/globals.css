@@ -3852,6 +3852,94 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .rescan-control { max-width: 100%; }
 }
 
+/* Branch rows: remote identity first, local checkouts and reachable history below. */
+.branch-rows-section { background: var(--control-panel); border: 1px solid var(--control-border); border-radius: var(--control-radius); min-width: 0; padding: 20px; }
+.branch-rows-toolbar { align-items: center; border-bottom: 1px solid var(--control-border); display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-top: 18px; padding-bottom: 12px; }
+.branch-rows-toolbar .range-tabs { align-items: center; display: flex; flex-wrap: wrap; gap: 4px; }
+.branch-rows-toolbar .range-tab { border-radius: 999px; font: 12px var(--control-sans); padding-inline: 14px; }
+.branch-rows-count { color: var(--control-muted); font: 11px var(--control-mono); }
+.branch-row-list { display: grid; gap: 12px; margin-top: 16px; }
+.branch-row-card { background: var(--control-panel-soft); border: 1px solid var(--control-border); border-radius: 10px; min-width: 0; overflow: hidden; }
+.branch-row-card.is-selected { border-color: var(--control-blue); box-shadow: inset 3px 0 var(--control-blue); }
+.branch-row-card.is-historical { border-style: dashed; opacity: .9; }
+.branch-row-header { align-items: start; display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: space-between; padding: 16px 16px 10px; }
+.branch-row-title-group { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.branch-row-shape { border: 2px solid var(--control-green); border-radius: 50%; display: inline-block; flex: 0 0 auto; height: 12px; width: 12px; }
+.branch-row-shape.is-remote { border-color: var(--control-blue); }
+.branch-row-shape.is-local { border-color: var(--control-amber); }
+.branch-row-shape.is-historical { border-color: var(--control-muted); border-style: dashed; }
+.branch-row-name { align-items: baseline; background: transparent; border: 0; color: var(--control-ink); cursor: pointer; display: inline-flex; flex-wrap: wrap; gap: 8px; min-height: 44px; padding: 4px 0; text-align: left; }
+.branch-row-name:hover { color: var(--control-blue); text-decoration: underline; }
+.branch-row-name strong, .branch-row-name-text { font: 600 15px/1.45 var(--control-mono); overflow-wrap: anywhere; }
+.branch-row-name span { color: var(--control-muted); font: 10px var(--control-mono); overflow-wrap: anywhere; }
+.branch-row-name:focus-visible, .branch-local-name:focus-visible, .branch-commit-button:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 3px; }
+.branch-row-summary-badges { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; justify-content: end; }
+.branch-source-badge { background: var(--control-blue-soft); border: 1px solid color-mix(in srgb, var(--control-blue) 35%, var(--control-border)); border-radius: 999px; color: var(--control-blue); font: 10px var(--control-mono); padding: 4px 8px; }
+.branch-source-badge.is-local { background: var(--control-amber-soft); border-color: color-mix(in srgb, var(--control-amber) 35%, var(--control-border)); color: var(--control-amber); }
+.branch-source-badge.is-history { background: var(--control-panel); border-color: var(--control-border-strong); color: var(--control-muted); }
+.branch-row-refs { border-top: 1px solid var(--control-border); display: grid; gap: 4px 24px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 16px; }
+.branch-row-refs > div { align-items: baseline; display: flex; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.branch-row-refs code { color: var(--control-blue); font: 10px var(--control-mono); max-width: 100%; overflow-wrap: anywhere; }
+.branch-row-refs span:not(.branch-row-label) { color: var(--control-ink); font: 10px var(--control-mono); }
+.branch-row-label { color: var(--control-muted); font: 10px var(--control-sans); }
+.branch-row-locals, .branch-row-history { border-top: 1px solid var(--control-border); padding: 0 16px; }
+.branch-row-locals summary, .branch-row-history summary { color: var(--control-muted); cursor: pointer; font: 11px var(--control-sans); min-height: 44px; padding: 13px 0; }
+.branch-row-locals summary > span, .branch-row-history summary > span { float: right; font: 10px var(--control-mono); }
+.branch-local-list { border-top: 1px solid var(--control-border); }
+.branch-local-item { align-items: start; border-bottom: 1px solid var(--control-border); display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; padding: 12px 0; }
+.branch-local-item:last-child { border-bottom: 0; }
+.branch-local-main { display: grid; gap: 4px; min-width: 0; }
+.branch-local-name { align-items: center; background: transparent; border: 0; color: var(--control-ink); cursor: pointer; display: flex; gap: 8px; justify-content: start; min-height: 44px; min-width: 0; padding: 3px 0; text-align: left; }
+.branch-local-name strong { font: 600 12px var(--control-mono); overflow-wrap: anywhere; }
+.branch-local-name code { color: var(--control-muted); font: 10px var(--control-mono); }
+.branch-local-path { color: var(--control-muted); font: 10px var(--control-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-local-facts { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+.branch-local-facts .agent-fact { max-width: 100%; }
+.branch-local-diff { color: var(--control-muted); font: 10px var(--control-mono); overflow-wrap: anywhere; }
+.branch-local-actions { align-items: start; display: grid; gap: 3px; justify-items: end; }
+.branch-row-prs { border-top: 1px solid var(--control-border); padding: 10px 16px 4px; }
+.branch-row-prs h4 { color: var(--control-muted); font: 600 10px var(--control-sans); margin: 0 0 5px; }
+.branch-row-pr { align-items: baseline; display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 5px 0; }
+.branch-row-pr a { color: var(--control-blue); font: 11px var(--control-mono); }
+.branch-row-pr span, .branch-row-pr code, .branch-row-pr time { color: var(--control-muted); font: 10px var(--control-mono); overflow-wrap: anywhere; }
+.branch-commit-list { border-top: 1px solid var(--control-border); list-style: none; margin: 0; max-height: 360px; overflow: auto; padding: 0; }
+.branch-commit-list li { border-bottom: 1px solid var(--control-border); }
+.branch-commit-list li:last-child { border-bottom: 0; }
+.branch-commit-button { align-items: center; background: transparent; border: 0; color: var(--control-ink); cursor: pointer; display: flex; gap: 12px; justify-content: space-between; min-height: 52px; padding: 7px 0; text-align: left; width: 100%; }
+.branch-commit-main { align-items: baseline; display: flex; gap: 10px; min-width: 0; }
+.branch-commit-main code { color: var(--control-green); flex: 0 0 auto; font: 10px var(--control-mono); }
+.branch-commit-main strong { font: 11px/1.5 var(--control-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-commit-meta { align-items: end; display: grid; flex: 0 0 auto; gap: 2px; justify-items: end; }
+.branch-commit-meta span, .branch-commit-meta time { color: var(--control-muted); font: 9px var(--control-mono); white-space: nowrap; }
+.branch-row-empty-history { border-top: 1px solid var(--control-border); color: var(--control-muted); font: 10px/1.6 var(--control-mono); margin: 0; padding: 12px 0; }
+.branch-history-more { background: var(--control-blue-soft); border: 1px solid color-mix(in srgb, var(--control-blue) 35%, var(--control-border)); border-radius: 7px; color: var(--control-blue); cursor: pointer; font: 11px var(--control-sans); margin: 10px 0; min-height: 44px; padding: 7px 12px; width: 100%; }
+.branch-history-more:hover { border-color: var(--control-blue); }
+.branch-history-more:disabled { cursor: wait; }
+.branch-row-history-note { color: var(--control-muted); font: 10px/1.6 var(--control-mono); margin: 8px 0; }
+.branch-row-history-note[role="alert"] { color: var(--control-red); }
+.branch-row-notes { border-top: 1px solid var(--control-border); color: var(--control-muted); display: grid; font: 10px/1.6 var(--control-mono); gap: 4px; margin-top: 16px; padding-top: 12px; }
+.branch-row-notes span[role="status"] { color: var(--control-amber); }
+@media (max-width: 900px) {
+  .branch-row-header { display: grid; }
+  .branch-row-summary-badges { justify-content: start; }
+}
+@media (max-width: 700px) {
+  .branch-rows-section { border-left: 0; border-radius: 0; border-right: 0; padding: 14px 0; }
+  .branch-rows-toolbar { align-items: stretch; display: grid; }
+  .branch-rows-toolbar .range-tabs { overflow-x: auto; }
+  .branch-rows-count { padding: 4px 0; }
+  .branch-row-header, .branch-row-refs, .branch-row-locals, .branch-row-history { padding-left: 12px; padding-right: 12px; }
+  .branch-row-refs { grid-template-columns: 1fr; }
+  .branch-local-item { grid-template-columns: 1fr; }
+  .branch-local-actions { justify-items: start; }
+  .branch-local-actions .table-action { width: 100%; }
+  .branch-row-prs { padding-left: 12px; padding-right: 12px; }
+  .branch-commit-button { align-items: start; display: grid; gap: 4px; }
+  .branch-commit-meta { align-items: start; display: flex; gap: 8px; justify-items: start; }
+  .branch-commit-main strong { white-space: normal; }
+  .branch-row-notes { padding-left: 4px; padding-right: 4px; }
+}
+
 /* Explicit display preference overrides the system palette. */
 html[data-theme="light"] {
  color-scheme: light;

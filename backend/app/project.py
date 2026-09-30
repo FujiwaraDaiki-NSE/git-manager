@@ -1,8 +1,8 @@
 """プロジェクト管制画面向けの Git 事実集約。
 
 Gitと明示されたagent情報を集約し、PRはghが取得した観測値だけを受け取る。
-従来の合流詳細はローカルref/reflogの証拠を保持し、flowはコミットの親子関係を
-全て再構成して検証済みPRで名前を補う。独自の開発履歴は保存しない。
+従来の合流詳細はローカルref/reflogの証拠を保持し、branch_rowsは現在の
+リモート/ローカル参照からブランチ単位のログを再構成する。独自の開発履歴は保存しない。
 コミットのpatchは詳細APIに任せる。
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any, Mapping
 
-from app import agent_events, detail, flow, github, gitinfo, graph, paths, scanner
+from app import agent_events, branch_rows, detail, github, gitinfo, graph, paths, scanner
 
 MAX_PROJECT_COMMITS = 200
 README_MAX_CHARS = 280
@@ -987,6 +987,13 @@ def build(
     events.sort(key=lambda event: (_iso_epoch(event.get("occurred_at")) or 0, event.get("sequence", 0)))
     agent_counts = _agent_counts(list(agent_snapshots.values()))
     agent_priority_counts = _agent_priority_categories(list(agent_snapshots.values()))
+    branch_row_data = branch_rows.build(
+        repo,
+        branch_data,
+        lanes,
+        github_data,
+        default_branch,
+    )
     return {
         "id": project_id,
         "name": os.path.basename(project_id.rstrip("/")) or project_id,
@@ -1001,8 +1008,8 @@ def build(
         "graph": graph_data,
         "lanes": lanes,
         "merge_relations": merge_relations,
+        "branch_rows": branch_row_data,
         "github": {key: value for key, value in github_data.items() if key != "pulls"},
-        "flow": flow.build(graph_data["rows"] if graph_data else [], lanes, default_branch, default_hash, github_data, merge_relations),
         "events": events,
         "latest_event": latest_event,
         "agent_events": agent_history,

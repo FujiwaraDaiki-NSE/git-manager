@@ -68,7 +68,7 @@ def _read(name: str) -> dict[str, Any]:
             if not isinstance(page, list):
                 raise ValueError("Invalid PR page")
             for item in page:
-                if not isinstance(item, dict) or not all(isinstance(item.get(key), str) for key in ("merge", "base", "head", "head_sha", "base_repo", "url", "merged_at")) or not isinstance(item.get("number"), int):
+                if not isinstance(item, dict) or not all(isinstance(item.get(key), str) for key in ("merge", "base", "head", "head_sha", "base_repo", "url", "merged_at")) or (item.get("head_repo") is not None and not isinstance(item.get("head_repo"), str)) or not isinstance(item.get("number"), int):
                     raise ValueError("Invalid PR")
                 pulls.append(item)
             pages = pages[end:].lstrip()

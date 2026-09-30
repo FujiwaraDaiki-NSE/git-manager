@@ -41,6 +41,25 @@ def _run(repo: str, args: list[str], timeout: int | None = None) -> str | None:
     return proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else None
 
 
+def _run_with_status(
+    repo: str,
+    args: list[str],
+    timeout: int | None = None,
+) -> tuple[str | None, int | None]:
+    """Run Git while retaining its exit status for explicit no-match facts."""
+    try:
+        proc = subprocess.run(
+            [GIT, "-C", repo, *args],
+            capture_output=True,
+            timeout=timeout or config.GIT_TIMEOUT_SEC,
+            env={**os.environ, **NON_INTERACTIVE_ENV},
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None, None
+    output = proc.stdout.decode("utf-8", errors="replace")
+    return output if proc.returncode == 0 else None, proc.returncode
+
+
 def _run_limited(
     repo: str,
     args: list[str],
