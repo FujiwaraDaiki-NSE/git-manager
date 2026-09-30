@@ -4313,3 +4313,13 @@ html[data-theme="dark"] {
 .flow-connection-branch .flow-merge-direction { stroke: var(--control-green); }
 .flow-pr-status { color: var(--control-muted); font-size: 12px; margin-top: 8px; }
 .flow-connection-default .flow-merge-link { stroke: var(--control-blue); }
+
+/* Keep row guides distinct from evidence-backed commit and relationship paths. */
+.flow-row-guide { stroke: var(--control-border); stroke-width: 1; stroke-dasharray: 3 5; opacity: .6; }
+.flow-row-guide.is-default { stroke: var(--control-blue); opacity: .75; }
+.flow-connection-anchor { fill: var(--control-panel); stroke: var(--control-muted); stroke-width: 1.5; }
+.flow-branch-count { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 11px; color: var(--control-muted); }
+.flow-connection-merge path, .flow-connection-branch path { paint-order: stroke; }
+.legend-line-guide { height: 0; border-top: 1px dashed var(--control-muted); background: transparent; }
+.flow-connection-branch .flow-branch-link { fill: none; opacity: 1; }
+.flow-connection-branch { opacity: .85; }

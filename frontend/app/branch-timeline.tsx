@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, Dispatch, MutableRefObject, SetStateAction } from "react";
+import { selectTimelineRows, routeTimelineConnections } from "./timeline-layout.mjs";
 import { createPortal } from "react-dom";
 import {
   eventLeaderGeometry,
@@ -320,12 +321,23 @@ export default function BranchTimeline({
   const historyRequestKeys = useRef(new Map<string, string>());
   const flowScrollRef = useRef<HTMLDivElement>(null);
   const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const [branchLimit, setBranchLimit] = useState<number | null>(5);
+  useEffect(() => {
+    const saved = window.localStorage.getItem("gitdash.timeline.branchLimit");
+    if (saved === "all") setBranchLimit(null);
+    else if (saved === "5" || saved === "10" || saved === "20") setBranchLimit(Number(saved));
+  }, []);
+  const changeBranchLimit = (limit: number | null) => {
+    setBranchLimit(limit);
+    window.localStorage.setItem("gitdash.timeline.branchLimit", limit === null ? "all" : String(limit));
+  };
   const [navigationRow, setNavigationRow] = useState("");
   const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
   const [renderedLabelWidth, setRenderedLabelWidth] = useState(260);
   const firstLabelRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (timeline < 100) setHistoryOpen(true); }, [timeline]);
-  const rows = useMemo(() => (project.branch_rows ?? []).filter((row) => showMerged || !row.historical), [project.branch_rows, showMerged]);
+  const selection = useMemo(() => selectTimelineRows(project.branch_rows ?? [], project.default_branch, branchLimit, showMerged), [project.branch_rows, project.default_branch, branchLimit, showMerged]);
+  const rows: TimelineRow[] = selection.rows;
   useEffect(() => {
     setHistory((current) => Object.fromEntries(rows.map((row) => {
       const identity = `${project.main_path}:${row.id}:${row.history_heads.join(",")}`;
@@ -381,14 +393,15 @@ export default function BranchTimeline({
     const commits = [...unique.values()].filter((commit) => range === "current" || cutoff === null || (eventDate(commit) ?? -Infinity) >= cutoff);
     return [row.id, commits] as const;
   })), [history, now, range, rows]);
-  const connectionEdges = (project.branch_connections?.edges ?? []) as (ProjectBranchConnectionEdge & { source_commit_hash?: string | null; target_commit_hash?: string | null; source_commit?: ProjectBranchCommit | null; target_commit?: ProjectBranchCommit | null })[];
+  const visibleRowIds = new Set(rows.map(row => row.id));
+  const connectionEdges = (project.branch_connections?.edges ?? []).filter(edge => visibleRowIds.has(edge.source_row_id) && visibleRowIds.has(edge.target_row_id)) as (ProjectBranchConnectionEdge & { source_commit_hash?: string | null; target_commit_hash?: string | null; source_commit?: ProjectBranchCommit | null; target_commit?: ProjectBranchCommit | null })[];
   const rangeCutoff = range === "24h" ? now - 86400000 : range === "7d" ? now - 604800000 : null;
   const allTimes = rows.flatMap((row) => rowCommits.get(row.id) ?? []).map(eventDate).filter((value): value is number => value !== null);
   const relationTimes = range === "current" ? [] : connectionEdges.flatMap((edge) => {
     const date = edge.target_commit?.date ? Date.parse(edge.target_commit.date) : NaN;
     return Number.isFinite(date) && date <= now && (rangeCutoff === null || date >= rangeCutoff) ? [date] : [];
   });
-  const minTime = Math.min(now - 1, ...(allTimes.length || relationTimes.length ? [...allTimes, ...relationTimes] : [now]));
+  const minTime = rangeCutoff ?? Math.min(now - 1, ...(allTimes.length || relationTimes.length ? [...allTimes, ...relationTimes] : [now]));
   const observationTime = minTime + ((now - minTime) * timeline) / 100;
   const positioned = rows.flatMap((row) => (rowCommits.get(row.id) ?? []).flatMap((commit) => {
     const time = eventDate(commit);
@@ -418,6 +431,7 @@ export default function BranchTimeline({
     const byRow = new Map(rows.map((row) => [row.id, row]));
     const byHash = new Map<string, TimelineEvent>();
     events.forEach((event) => byHash.set(`${event.lane.id}:${event.row.hash}`, event));
+    const routes: { kind: "merge" | "branch"; x1: number; x2: number; y1: number; y2: number; outside: boolean; label: string; sourceAnchor: boolean; targetAnchor: boolean }[] = [];
     const links: { kind: "commit" | "merge" | "branch"; path: string; arrow: string | null; outside: boolean; label: string }[] = [];
     rows.forEach((row, rowIndex) => {
       const own = eventsByRow.get(row.id) ?? [];
@@ -425,8 +439,8 @@ export default function BranchTimeline({
       own.forEach((child) => child.row.parents.forEach((parent) => {
         const parentEvent = ownByHash.get(parent);
         if (!parentEvent) return;
-        const x1 = parentEvent.x * trackWidth / 100;
-        const x2 = child.x * trackWidth / 100;
+        const x1 = parentEvent.hitX * trackWidth / 100;
+        const x2 = child.hitX * trackWidth / 100;
         const y = (rowIndex + 0.5) * 88;
         links.push({ kind: "commit", path: `M ${x1} ${y} H ${x2}`, arrow: null, outside: false, label: `${shortHash(parent)} → ${shortHash(child.row.hash)}` });
       }));
@@ -444,27 +458,24 @@ export default function BranchTimeline({
       const sourceDate = Date.parse(edge.source_commit!.date!);
       const targetDate = Date.parse(edge.target_commit!.date!);
       if (!Number.isFinite(sourceDate) || !Number.isFinite(targetDate) || sourceDate > observationTime || targetDate > observationTime) return;
-      if (range === "current" && targetDate < minTime) return;
-      if (rangeCutoff !== null && targetDate < rangeCutoff) return;
-      const sourceX = sourceEvent?.x ?? recentTimePosition(sourceDate, minTime, now);
-      const targetX = targetEvent?.x ?? recentTimePosition(targetDate, minTime, now);
+      if (edge.kind === "merge" && range === "current" && targetDate < minTime) return;
+      if (edge.kind === "merge" && rangeCutoff !== null && targetDate < rangeCutoff) return;
+      const sourceX = sourceEvent?.hitX ?? Math.max(8 / trackWidth * 100, recentTimePosition(sourceDate, minTime, now));
+      const targetX = targetEvent?.hitX ?? Math.max(8 / trackWidth * 100, recentTimePosition(targetDate, minTime, now));
       const sourceIndex = rows.findIndex((row) => row.id === sourceRow.id);
       const targetIndex = rows.findIndex((row) => row.id === targetRow.id);
       const x1 = sourceX * trackWidth / 100;
       const x2 = targetX * trackWidth / 100;
       const y1 = (sourceIndex + 0.5) * 88;
       const y2 = (targetIndex + 0.5) * 88;
-      const channel = (x1 + x2) / 2;
-      const outside = sourceDate < minTime || sourceDate > now || targetDate < minTime || targetDate > now;
+      const outside = sourceDate < minTime || targetDate < minTime;
       const kind = edge.kind === "merge" ? "merge" : "branch";
-      const direction = Math.sign(y2 - y1);
-      const horizontalDirection = Math.sign(x2 - channel);
-      const arrow = Math.abs(x2 - channel) > 1
-        ? `M ${x2 - horizontalDirection * 6} ${y2 - 4} L ${x2} ${y2} L ${x2 - horizontalDirection * 6} ${y2 + 4}`
-        : `M ${x2 - 4} ${y2 - direction * 6} L ${x2} ${y2} L ${x2 + 4} ${y2 - direction * 6}`;
-      links.push({ kind, path: `M ${x1} ${y1} H ${channel} V ${y2} H ${x2}`, arrow, outside, label: edge.label });
+      routes.push({ kind, x1, x2, y1, y2, outside, sourceAnchor: !sourceEvent, targetAnchor: !targetEvent,
+        label: `${edge.label} · ${sourceRow.name} → ${targetRow.name}${outside ? " · 表示期間より前の接続" : ""}` });
     });
-    return links;
+    const points = events.map(event => ({ x: event.hitX * trackWidth / 100, y: (rows.findIndex(row => row.id === event.lane.id) + .5) * 88 }));
+    return { links, routes: routeTimelineConnections(routes, points, trackWidth) };
+
   }, [connectionEdges, events, eventsByRow, minTime, now, observationTime, range, rangeCutoff, rows, trackWidth]);
   const mergedCount = (project.branch_rows ?? []).filter((row) => row.historical).length;
   const observationX = recentTimePosition(observationTime, minTime, now);
@@ -474,6 +485,7 @@ export default function BranchTimeline({
         <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチを選ぶと作業の詳細、点を選ぶとコミットの詳細を開けます。</p></div><span className="flow-direction">過去を圧縮 → 直近を詳しく</span></div>
         <div className="flow-toolbar">
           <div className="range-tabs" role="group" aria-label="表示するコミット"><span className="flow-control-label">表示範囲</span>{ranges.map((item) => <button aria-pressed={range === item.id} className="range-tab" key={item.id} type="button" onClick={() => onRangeChange(item.id)}>{item.label}</button>)}</div>
+          <div className="flow-branch-count" role="group" aria-label="表示するブランチ数"><span>更新順</span>{[5, 10, 20, null].map(limit => <button key={limit ?? "all"} type="button" className="range-tab" aria-pressed={branchLimit === limit} onClick={() => changeBranchLimit(limit)}>{limit === null ? "すべて" : `${limit}件`}</button>)}<span>＋既定ブランチ · {rows.length}/{selection.total}行</span></div>
           <div className="flow-control-actions"><label className="flow-branch-jump"><span>ブランチへ移動</span><select aria-label="グラフのブランチへ移動" value={rows.some((row) => row.id === navigationRow) ? navigationRow : ""} onChange={(event) => { setNavigationRow(event.target.value); document.querySelector(`[data-flow-row="${CSS.escape(event.target.value)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }}><option value="">ブランチを選択</option>{rows.map((row) => <option key={row.id} value={row.id}>{rowLabel(row)}</option>)}</select></label>{mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}<button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: "smooth" })}>右端へ移動 →</button></div>
         </div>
       </div>
@@ -484,7 +496,9 @@ export default function BranchTimeline({
         <div className="flow-rows" style={{ "--flow-row-height": "88px", "--flow-lanes": rows.length, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}>
           <svg aria-hidden="true" className="flow-connections" preserveAspectRatio="none" viewBox={`0 0 ${trackWidth} ${rows.length * 88}`}>
             {ticks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={rows.length * 88} />)}<line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={rows.length * 88} />
-            {routeLinks.map((link, index) => <g className={`flow-merge-route flow-connection-${link.kind}${link.outside ? " is-outside" : ""}`} key={`${link.label}:${index}`}><title>{link.label}</title><path className={`${link.kind === "branch" ? "flow-branch-link" : link.kind === "merge" ? "flow-merge-link" : "flow-lane-line"}${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />{link.arrow && <path className={link.kind === "branch" ? "flow-branch-direction" : "flow-merge-direction"} d={link.arrow} />}</g>)}
+            {rows.map((row, index) => <line key={`guide:${row.id}`} className={`flow-row-guide${row.name === project.default_branch ? " is-default" : ""}`} x1="0" x2={trackWidth} y1={(index + .5) * 88} y2={(index + .5) * 88}><title>{row.name} · ブランチ行のガイド（コミットの親子関係ではありません）</title></line>)}
+            {[...routeLinks.links, ...routeLinks.routes].map((link, index) => <g className={`flow-merge-route flow-connection-${link.kind}${link.outside ? " is-outside" : ""}`} key={`${link.label}:${index}`}><title>{link.label}</title><path className={`${link.kind === "branch" ? "flow-branch-link" : link.kind === "merge" ? "flow-merge-link" : "flow-lane-line"}${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />{link.arrow && <path className={link.kind === "branch" ? "flow-branch-direction" : "flow-merge-direction"} d={link.arrow} />}</g>)}
+            {routeLinks.routes.map((route: {label: string; x1: number; x2: number; y1: number; y2: number; sourceAnchor: boolean; targetAnchor: boolean}, index: number) => <g key={`anchor:${index}`} className="flow-connection-anchor"><title>{route.label} · 接続根拠のコミット位置</title>{route.sourceAnchor && <circle cx={route.x1} cy={route.y1} r="4" />}{route.targetAnchor && <circle cx={route.x2} cy={route.y2} r="4" />}</g>)}
           </svg>
           {rows.map((row, index) => {
             const laneEvents = eventsByRow.get(row.id) ?? [];
@@ -500,9 +514,10 @@ export default function BranchTimeline({
           <div className="flow-current-label" style={{ left: `${renderedLabelWidth + observationX * trackWidth / 100}px` }} aria-hidden="true">{timeline === 100 ? "最新の観測" : "選択日時"}</div>
         </div>
       </div>}
-      <div className="flow-legend" aria-label="フロー凡例"><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
+      {selection.total > rows.length && <p className="flow-pr-status">更新が新しいブランチを表示中。線は表示中の行同士を結びます。「すべて」で他のブランチも確認できます。</p>}
+      <div className="flow-legend" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
       {((project.branch_connections?.unresolved.length ?? 0) > 0 || connectionEdges.some((edge) => !hasEdgeEvidence(edge))) && <details className="flow-help"><summary>未解決のブランチ関係 ({(project.branch_connections?.unresolved.length ?? 0) + connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).length})</summary>{project.branch_connections?.unresolved.map((item) => <p key={item.id} role="status">{item.source} → {item.target} · {item.reason}</p>)}{connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).map((edge) => <p key={`missing:${edge.id}`} role="status">{edge.label} · 接続元または接続先コミットのハッシュ・日時の証拠が未取得のため、線を描画できません。</p>)}</details>}
-      <details className="flow-help"><summary>グラフの見方・キーボード操作</summary><p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進み、直近ほど広く表示します。左右キーで同じ行のコミット、上下キーで別の行へ移動し、Enterで詳細を開きます。</p><p>線は実際のコミットの親子関係です。紫の線はPRマージ、緑の破線は共通祖先からの分岐推定です。破線は接続元が表示範囲外の関係を含みます。</p></details>
+      <details className="flow-help"><summary>グラフの見方・キーボード操作</summary><p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進み、直近ほど広く表示します。左右キーで同じ行のコミット、上下キーで別の行へ移動し、Enterで詳細を開きます。</p><p>薄い横線はブランチ行のガイドです。コミット間の線は実際の親子関係を表します。紫の線はPRマージ、緑の破線は共通祖先からの分岐推定です。左端の白抜きの接続点は表示期間より前の分岐・合流を含みます。点の間隔は重なりを避けて調整し、細い補助線で本来の時刻位置を示します。</p></details>
       <div className="branch-row-notes" role="status">
         {project.branch_rows === null && <span>ブランチ行の取得に失敗しました。再走査してから再試行してください。</span>}
         {project.branch_connections?.status === "unavailable" && <span>ブランチ関係情報を取得できませんでした。</span>}
