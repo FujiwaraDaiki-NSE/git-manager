@@ -101,17 +101,17 @@ Composeは、起動プロセスに設定されている `GH_TOKEN` と `GITHUB_T
 アプリによる別名への置き換えや保存済み認証の自動取得は行わない。どちらも未設定の場合は、
 PR情報を取得できない状態を表示し、Gitから得たブランチ・コミット・作業状態は表示する。
 
-ホストの起動用シェルにトークンをexportしている場合は、通常のコマンドで起動できる:
+現在のホストの `gitdash-compose` は、起動のたびに `gh auth token --hostname github.com` でホストの認証情報を取得し、`GH_TOKEN` としてexportしてからComposeを実行する。トークン自体はスクリプトに保存しない。通常のコマンドで起動できる:
 
 ```bash
 /home/solution2024/.local/bin/gitdash-compose up -d --build
 ```
 
-ホストで `gh auth login` 済みなら、必要に応じて同じシェルで明示的に設定できる:
+別ホストで `gh auth login` 済みなら、同じシェルで明示的に設定して起動する:
 
 ```bash
 export GH_TOKEN="$(gh auth token --hostname github.com)"
-/home/solution2024/.local/bin/gitdash-compose up -d --build
+docker compose up -d --build
 ```
 
 環境変数は別のシェルへは引き継がれない。再作成するプロセスにも設定が必要。
