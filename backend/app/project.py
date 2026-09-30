@@ -994,6 +994,12 @@ def build(
         github_data,
         default_branch,
     )
+    branch_connections = branch_rows.connections(
+        repo,
+        branch_row_data,
+        default_branch=default_branch,
+        github_data=github_data,
+    )
     return {
         "id": project_id,
         "name": os.path.basename(project_id.rstrip("/")) or project_id,
@@ -1009,6 +1015,7 @@ def build(
         "lanes": lanes,
         "merge_relations": merge_relations,
         "branch_rows": branch_row_data,
+        "branch_connections": branch_connections,
         "github": {key: value for key, value in github_data.items() if key != "pulls"},
         "events": events,
         "latest_event": latest_event,

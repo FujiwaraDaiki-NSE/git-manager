@@ -7,7 +7,8 @@ import GitGuide from "./git-guide";
 import Link from "next/link";
 import { homeReturnHref } from "./home-overview.mjs";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import CopyButton from "./copy-button";
 import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
@@ -16,6 +17,7 @@ import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentReportKey, agentStateLabel, agentTaskState, isExplicitAgentStatus, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
 import { parseProjectUrl, shouldFoldMergedLane, uniqueLocalForCommit, updateProjectUrl } from "./project-flow.mjs";
 import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
+import { branchConnectionEvidenceLabel, buildBranchConnectionPaths, selectBranchConnections } from "./branch-connections.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -26,6 +28,8 @@ import type {
   ProjectResponse,
   Repo,
   AgentTask,
+  ProjectBranchConnectionEdge,
+  ProjectBranchConnections,
 } from "./types";
 
 type ControlTab = "flow" | "lanes" | "activity" | "info";
@@ -376,6 +380,219 @@ function isDefaultBranchRow(row: ProjectBranchRow, defaultBranch: string | null)
   return row.remote_ref === `origin/${defaultBranch}`;
 }
 
+function branchConnectionAnchorId(marker: string, rowId: string) {
+  const safeDomToken = (value: string) => Array.from(value).map((character) => character.codePointAt(0)!.toString(16)).join("-");
+  return `branch-connection-anchor-${safeDomToken(marker)}-${safeDomToken(rowId)}`;
+}
+
+function connectionStatusLabel(status: ProjectBranchConnections["status"] | null) {
+  if (status === "available") return "関係情報あり";
+  if (status === "partial") return "一部の関係を取得済み";
+  if (status === "unavailable") return "関係情報を取得できません";
+  return "関係情報なし";
+}
+
+function branchConnectionReason(reason: string) {
+  const labels: Record<string, string> = {
+    target_branch_not_found: "対象ブランチが現在のスナップショットにありません。",
+    target_branch_ambiguous: "対象ブランチを一意に特定できませんでした。",
+    source_and_target_are_same_row: "送信元と対象が同じブランチ行です。",
+    default_branch_not_found: "既定ブランチを特定できませんでした。",
+    default_branch_ambiguous: "既定ブランチ候補が複数あります。",
+    base_tip_unavailable: "共通祖先を確認する先端コミットがありません。",
+    shared_tip: "送信元と対象が同じ先端コミットを共有しています。",
+    merge_base_unavailable: "共通祖先を取得できませんでした。",
+    no_common_ancestor: "共通祖先が見つかりませんでした。",
+    multiple_merge_bases: "共通祖先候補が複数あり、関係を確定できませんでした。",
+    ancestor_only: "対象が送信元の履歴に含まれるため、独立した分岐として示せません。",
+    multiple_pr_targets: "PRの対象ブランチが複数あり、対象行を一意に特定できませんでした。",
+    merge_commit_not_reachable: "PRのマージコミットが現在の履歴範囲から到達できません。",
+    merge_commit_not_ancestor_or_unavailable: "PRのマージコミットを現在の履歴から確認できません。",
+    no_common_base: "共通祖先が見つかりませんでした。",
+    multiple_bases: "共通祖先候補が複数あり、関係を確定できませんでした。",
+  };
+  return labels[reason] ?? "関係の対象行または証拠を確認できませんでした。";
+}
+
+type ConnectionAnchorMap = Map<string, HTMLElement | null>;
+
+function BranchConnectionOverlay({
+  listRef,
+  anchorRefs,
+  edges,
+  selectedEdgeId,
+  onSelectEdge,
+  markerId,
+}: {
+  listRef: RefObject<HTMLDivElement>;
+  anchorRefs: ConnectionAnchorMap;
+  edges: ProjectBranchConnectionEdge[];
+  selectedEdgeId: string | null;
+  onSelectEdge: (edge: ProjectBranchConnectionEdge) => void;
+  markerId: string;
+}) {
+  const [geometry, setGeometry] = useState<{ width: number; height: number; paths: ReturnType<typeof buildBranchConnectionPaths> }>({ width: 56, height: 0, paths: [] });
+  const markerUrlId = `branch-connection-arrow-${Array.from(markerId).map((character) => character.codePointAt(0)!.toString(16)).join("-")}`;
+
+  // Measure after the parent list ref and sibling card refs have mounted.
+  // The list is recreated when a zero-result filter is cleared.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return undefined;
+    const measure = () => {
+      const bounds = list.getBoundingClientRect();
+      const anchors = new Map([...anchorRefs.entries()].flatMap(([id, node]) => {
+        if (!node) return [];
+        const anchor = node.getBoundingClientRect();
+        const card = node.closest<HTMLElement>(".branch-row-card");
+        const cardBounds = card?.getBoundingClientRect();
+        if (!cardBounds || !Number.isFinite(cardBounds.left) || !Number.isFinite(anchor.top) || !Number.isFinite(anchor.height)) return [];
+        return [[id, {
+          id,
+          x: cardBounds.left - bounds.left,
+          y: anchor.top - bounds.top + anchor.height / 2,
+        }]];
+      }));
+      const measuredWidth = Math.max(12, ...[...anchors.values()].map((anchor) => anchor.x ?? 56));
+      setGeometry({
+        width: measuredWidth,
+        height: Math.max(0, list.scrollHeight),
+        paths: buildBranchConnectionPaths(edges, anchors),
+      });
+    };
+    measure();
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    resizeObserver?.observe(list);
+    anchorRefs.forEach((node) => { if (node) resizeObserver?.observe(node); });
+    window.addEventListener("resize", measure);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [anchorRefs, edges, listRef]);
+
+  if (geometry.paths.length === 0 || geometry.height === 0) return null;
+  return (
+    <svg className="branch-connection-overlay" aria-label="ブランチ関係の方向" height={geometry.height} style={{ width: `${geometry.width}px` }} viewBox={`0 0 ${geometry.width} ${geometry.height}`} width={geometry.width}>
+      <defs>
+        <marker id={`${markerUrlId}-merge`} markerHeight="6" markerWidth="6" orient="auto-start-reverse" refX="5" refY="3" viewBox="0 0 6 6">
+          <path d="M 0 0 L 6 3 L 0 6 z" fill="var(--control-green)" />
+        </marker>
+        <marker id={`${markerUrlId}-branch`} markerHeight="6" markerWidth="6" orient="auto-start-reverse" refX="5" refY="3" viewBox="0 0 6 6">
+          <path d="M 0 0 L 6 3 L 0 6 z" fill="var(--control-amber)" />
+        </marker>
+      </defs>
+      {geometry.paths.map((path) => {
+        const selected = selectedEdgeId === path.id;
+        return (
+          <path
+            aria-label={`${path.label}。${branchConnectionEvidenceLabel(path)}`}
+            className={`branch-connection-path branch-connection-${path.kind}${selected ? " is-selected" : ""}`}
+            d={path.d}
+            fill="none"
+            key={path.id}
+            markerEnd={`url(#${markerUrlId}-${path.kind})`}
+            onClick={() => onSelectEdge(path)}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectEdge(path); } }}
+            role="button"
+            tabIndex={0}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+function BranchConnectionPanel({
+  connections,
+  rows,
+  allRows,
+  focusRowId,
+  selectedEdgeId,
+  selection,
+  unresolved,
+  markerId,
+  onFocus,
+  onSelectEdge,
+  onClear,
+  onReveal,
+}: {
+  connections: ProjectBranchConnections | null;
+  rows: ProjectBranchRow[];
+  allRows: ProjectBranchRow[];
+  focusRowId: string | null;
+  selectedEdgeId: string | null;
+  selection: ReturnType<typeof selectBranchConnections>;
+  unresolved: ProjectBranchConnections["unresolved"];
+  markerId: string;
+  onFocus: (rowId: string) => void;
+  onSelectEdge: (edge: ProjectBranchConnectionEdge) => void;
+  onClear: () => void;
+  onReveal: (rowId: string) => void;
+}) {
+  const rowById = new Map(allRows.map((row) => [row.id, row]));
+  const visibleIds = new Set(rows.map((row) => row.id));
+  const focusRows = allRows.filter((row) => connections?.edges.some((edge) => edge.source_row_id === row.id || edge.target_row_id === row.id) || connections?.unresolved.some((relation) => relation.source_row_id === row.id || relation.target_row_id === row.id));
+  const selectedEdge = connections?.edges.find((edge) => edge.id === selectedEdgeId) ?? null;
+  const selectedLabel = selectedEdge
+    ? `${rowById.get(selectedEdge.source_row_id)?.name ?? selectedEdge.source_row_id} → ${rowById.get(selectedEdge.target_row_id)?.name ?? selectedEdge.target_row_id}`
+    : null;
+  return (
+    <div className="branch-connections-panel" aria-labelledby={`${markerId}-connections-title`}>
+      <div className="branch-connections-heading">
+        <div>
+          <h4 id={`${markerId}-connections-title`}>ブランチ関係</h4>
+          <p>矢印は選択したブランチに関係する行だけを表示します。実際のPRマージと、共通祖先からの分岐推定を区別しています。</p>
+        </div>
+        <span className={`branch-connections-status is-${connections?.status ?? "unavailable"}`} role="status">{connectionStatusLabel(connections?.status ?? null)}</span>
+      </div>
+      {connections?.status === "unavailable" || !connections ? (
+        <p className="branch-connections-empty" role="status">ブランチ間の関係情報を取得できませんでした。</p>
+      ) : connections.edges.length === 0 && connections.unresolved.length === 0 ? (
+        <p className="branch-connections-empty" role="status">表示できるブランチ関係はありません。</p>
+      ) : (
+        <>
+          <div className="branch-connections-controls">
+            <label>フォーカス<select aria-label="関係を表示するブランチ" value={focusRowId ?? ""} onChange={(event) => event.target.value && onFocus(event.target.value)}>
+              <option value="">選択なし</option>
+              {focusRows.map((row) => <option key={row.id} value={row.id}>{row.name}{row.historical ? "（履歴）" : ""}</option>)}
+            </select></label>
+            <span role="status">{focusRowId ? `${selection.visible.length} 本表示 · ${selection.offscreen.length} 本が現在の絞り込み外` : "フォーカスなし · 矢印 0 本"}</span>
+            {focusRowId && <button className="subtle-button" type="button" onClick={onClear}>フォーカスを解除</button>}
+          </div>
+          {selectedEdge && <div className="branch-connection-evidence" role="status">
+            <strong>{selectedLabel}</strong>
+            <span>{selectedEdge.kind === "branch" ? branchConnectionEvidenceLabel(selectedEdge) : `${branchConnectionEvidenceLabel(selectedEdge)} · ${selectedEdge.label}`}</span>
+            {selectedEdge.commit_hash && <code>{shortHash(selectedEdge.commit_hash)}</code>}
+            {selectedEdge.pr_url && <a href={selectedEdge.pr_url} target="_blank" rel="noreferrer">PR #{selectedEdge.pr_number ?? "?"} を開く</a>}
+          </div>}
+          {focusRowId && selection.focused.length > 0 && <ul className="branch-connections-list" aria-label="選択したブランチの関係一覧">
+            {selection.focused.map((edge) => {
+              const source = rowById.get(edge.source_row_id);
+              const target = rowById.get(edge.target_row_id);
+              const sourceVisible = visibleIds.has(edge.source_row_id);
+              const targetVisible = visibleIds.has(edge.target_row_id);
+              const revealId = !sourceVisible ? edge.source_row_id : !targetVisible ? edge.target_row_id : null;
+              return <li className={selectedEdgeId === edge.id ? "is-selected" : ""} key={edge.id}>
+                <div className="branch-connection-select">
+                  <button className="branch-connection-select-trigger" type="button" aria-label={`${edge.label}を選択`} aria-pressed={selectedEdgeId === edge.id} onClick={() => onSelectEdge(edge)}><span className={`branch-connection-kind is-${edge.kind}`} aria-hidden="true" /></button>
+                  <span><a href={`#${branchConnectionAnchorId(markerId, edge.source_row_id)}`} onClick={(event) => { event.preventDefault(); onFocus(edge.source_row_id); }}>{source?.name ?? edge.source_row_id}</a> <span aria-hidden="true">→</span> <a href={`#${branchConnectionAnchorId(markerId, edge.target_row_id)}`} onClick={(event) => { event.preventDefault(); onFocus(edge.target_row_id); }}>{target?.name ?? edge.target_row_id}</a></span>
+                  <small>{branchConnectionEvidenceLabel(edge)}</small>
+                </div>
+                {revealId && <button className="subtle-button branch-connection-reveal" type="button" onClick={() => onReveal(revealId)}>{sourceVisible || targetVisible ? "相手の行を表示" : "関係する行を表示"}</button>}
+              </li>;
+            })}
+          </ul>}
+          {unresolved.length > 0 && <details className="branch-connections-unresolved">
+            <summary>未解決の関係 <span>{unresolved.length}件</span></summary>
+            <ul>{unresolved.map((relation) => <li key={relation.id}><span>{relation.source} → {relation.target}</span><small>{branchConnectionReason(relation.reason)}</small>{relation.pr_url && <a href={relation.pr_url} target="_blank" rel="noreferrer">PR #{relation.pr_number ?? "?"}</a>}</li>)}</ul>
+          </details>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function BranchRows({
   project,
   range,
@@ -392,6 +609,7 @@ function BranchRows({
   onSelect,
   showMerged,
   onShowMergedChange,
+  onClearFilters,
 }: {
   project: ProjectResponse;
   range: TimeRange;
@@ -408,6 +626,7 @@ function BranchRows({
   onSelect: (event: ProjectEvent, branchRowId?: string) => void;
   showMerged: boolean;
   onShowMergedChange: (value: boolean) => void;
+  onClearFilters: (showHistory: boolean) => void;
 }) {
   const normalizedQuery = normalizedSearchQuery(searchQuery);
   const rows = useMemo(() => {
@@ -427,6 +646,44 @@ function BranchRows({
   const visibleRows = allRows.filter((row) => showMerged || !row.historical);
   const historicalCount = allRows.filter((row) => row.historical).length;
   const remoteCount = rows.filter((row) => row.remote_ref !== null).length;
+  const connections = project.branch_connections;
+  const connectionEdges = connections?.edges ?? [];
+  const connectionMarker = useId();
+  const connectionListRef = useRef<HTMLDivElement>(null);
+  const connectionAnchorRefs = useRef<ConnectionAnchorMap>(new Map());
+  const [focusRowId, setFocusRowId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const defaultFocusCandidate = useMemo(() => {
+    const unresolvedConnections = connections?.unresolved ?? [];
+    const focusedRows = (candidateRows: ProjectBranchRow[]) => candidateRows.find((row) => connectionEdges.some((edge) => edge.source_row_id === row.id || edge.target_row_id === row.id) || unresolvedConnections.some((relation) => relation.source_row_id === row.id || relation.target_row_id === row.id))?.id ?? null;
+    return focusedRows(rows.filter((row) => isDefaultBranchRow(row, project.default_branch))) ?? focusedRows(rows) ?? focusedRows(allRows);
+  }, [allRows, connectionEdges, connections?.unresolved, project.default_branch, rows]);
+  useEffect(() => {
+    setFocusRowId((current) => current && allRows.some((row) => row.id === current) ? current : defaultFocusCandidate);
+    setSelectedEdgeId((current) => current && connectionEdges.some((edge) => edge.id === current) ? current : null);
+  }, [allRows, connectionEdges, defaultFocusCandidate]);
+  const visibleRowIds = useMemo(() => new Set(rows.map((row) => row.id)), [rows]);
+  const selection = useMemo(() => selectBranchConnections(connectionEdges, focusRowId, visibleRowIds), [connectionEdges, focusRowId, visibleRowIds]);
+  const unresolved = useMemo(() => {
+    if (!focusRowId) return connections?.unresolved ?? [];
+    return (connections?.unresolved ?? []).filter((relation) => relation.source_row_id === focusRowId || relation.target_row_id === focusRowId);
+  }, [connections?.unresolved, focusRowId]);
+  const setAnchorRef = useCallback((rowId: string, node: HTMLElement | null) => {
+    if (node) connectionAnchorRefs.current.set(rowId, node);
+    else connectionAnchorRefs.current.delete(rowId);
+  }, []);
+  const focusConnectionRow = useCallback((rowId: string) => {
+    setFocusRowId(rowId);
+    setSelectedEdgeId(null);
+    window.requestAnimationFrame(() => document.getElementById(branchConnectionAnchorId(connectionMarker, rowId))?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }, [connectionMarker]);
+  const revealConnectionRow = useCallback((rowId: string) => {
+    const target = allRows.find((row) => row.id === rowId);
+    if (!target) return;
+    onClearFilters(target.historical || showMerged);
+    setFocusRowId(rowId);
+    window.setTimeout(() => document.getElementById(branchConnectionAnchorId(connectionMarker, rowId))?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  }, [allRows, connectionMarker, onClearFilters, showMerged]);
 
   return (
     <section className="branch-rows-section" aria-labelledby="branch-rows-title">
@@ -450,11 +707,13 @@ function BranchRows({
         <label><span>並び順</span><select aria-label="ブランチの並び順" value={order} onChange={(event) => onOrder(event.target.value as LaneOrder)}><option value="name">名前</option><option value="attention">要確認順</option><option value="latest">最新コミット順</option></select></label>
       </div>
       <div className="lane-filters" role="group" aria-label="ブランチの状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{visibleRows.filter((row) => branchRowMatchesFilter(row, item.id)).length}</span></button>)}</div>
+      <BranchConnectionPanel connections={connections} rows={rows} allRows={allRows} focusRowId={focusRowId} selectedEdgeId={selectedEdgeId} selection={selection} unresolved={unresolved} markerId={connectionMarker} onFocus={focusConnectionRow} onSelectEdge={(edge) => { setSelectedEdgeId(edge.id); setFocusRowId(edge.source_row_id); }} onClear={() => { setFocusRowId(null); setSelectedEdgeId(null); }} onReveal={revealConnectionRow} />
       {rows.length === 0 ? (
         <div className="empty-flow">{normalizedQuery ? "検索に一致するブランチはありません。" : "この条件に一致するブランチはありません。"}{(normalizedQuery || filter !== "all" || !showMerged) && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); if (!showMerged && historicalCount) onShowMergedChange(true); }}>絞り込みを解除</button>}</div>
       ) : (
-        <div className="branch-row-list">
-          {rows.map((row) => <BranchRowCard key={row.id} project={project} row={row} range={range} selectedLane={selectedLane} onSelectLane={onSelectLane} onOpenGit={onOpenGit} onSelect={onSelect} />)}
+        <div className="branch-row-list" ref={connectionListRef}>
+          <BranchConnectionOverlay listRef={connectionListRef} anchorRefs={connectionAnchorRefs.current} edges={selection.visible} selectedEdgeId={selectedEdgeId} onSelectEdge={(edge) => { setSelectedEdgeId(edge.id); setFocusRowId(edge.source_row_id); }} markerId={connectionMarker} />
+          {rows.map((row) => <BranchRowCard key={row.id} project={project} row={row} range={range} selectedLane={selectedLane} onSelectLane={onSelectLane} onOpenGit={onOpenGit} onSelect={onSelect} connectionState={focusRowId ? (selection.relatedRowIds.has(row.id) ? "related" : "unrelated") : "none"} connectionAnchorId={branchConnectionAnchorId(connectionMarker, row.id)} onAnchorRef={(node) => setAnchorRef(row.id, node)} />)}
         </div>
       )}
       <div className="branch-row-notes">
@@ -476,6 +735,9 @@ function BranchRowCard({
   onSelectLane,
   onOpenGit,
   onSelect,
+  connectionState,
+  connectionAnchorId,
+  onAnchorRef,
 }: {
   project: ProjectResponse;
   row: ProjectBranchRow;
@@ -484,6 +746,9 @@ function BranchRowCard({
   onSelectLane: (lane: ProjectLane) => void;
   onOpenGit: (lane: ProjectLane) => void;
   onSelect: (event: ProjectEvent, branchRowId?: string) => void;
+  connectionState: "related" | "unrelated" | "none";
+  connectionAnchorId: string;
+  onAnchorRef: (node: HTMLElement | null) => void;
 }) {
   const [historyOpen, setHistoryOpen] = useState(range !== "current");
   const [localsOpen, setLocalsOpen] = useState(false);
@@ -557,8 +822,9 @@ function BranchRowCard({
     if (selected) setLocalsOpen(true);
   }, [selected]);
   return (
-    <article className={`branch-row-card${row.historical ? " is-historical" : ""}${selected ? " is-selected" : ""}`}>
+    <article className={`branch-row-card${row.historical ? " is-historical" : ""}${selected ? " is-selected" : ""}${connectionState === "related" ? " is-connection-related" : connectionState === "unrelated" ? " is-connection-unrelated" : ""}`}>
       <header className="branch-row-header">
+        <span aria-hidden="true" className="branch-row-connection-anchor" id={connectionAnchorId} ref={onAnchorRef} />
         <div className="branch-row-title-group">
           <span className={`branch-row-shape${row.historical ? " is-historical" : row.remote_ref ? " is-remote" : " is-local"}`} aria-hidden="true" />
           {firstLocal ? <button className="branch-row-name" type="button" aria-pressed={selected} onClick={() => onSelectLane(firstLocal)}><strong>{row.name}</strong><span>{firstLocal.branch === row.name ? "" : firstLocal.branch ?? "ローカル名未取得"}</span></button> : <strong className="branch-row-name-text">{row.name}</strong>}
@@ -1120,6 +1386,14 @@ export default function ProjectControl() {
   const projectUrlCopyRequestRef = useRef(0);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setShowMerged = useCallback((value: boolean) => updateUrl({ merged: value ? true : null }), [updateUrl]);
+  const clearBranchFilters = useCallback((showHistory: boolean) => {
+    updateUrl({ laneQuery: null, laneFilter: null, ...(showHistory ? { merged: true } : {}) }, "replace");
+    if (window.location.hash) {
+      const url = new URL(window.location.href);
+      url.hash = "";
+      window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+    }
+  }, [updateUrl]);
 
   useEffect(() => () => {
     if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
@@ -1342,7 +1616,7 @@ export default function ProjectControl() {
       </nav>
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
-          {urlState.tab === "flow" && <BranchRows filter={laneFilter} onFilter={setLaneFilter} onOpenGit={openGit} onOrder={setLaneOrder} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSearch={setLaneQuery} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} order={laneOrder} project={project} range={urlState.range} searchQuery={laneQuery} selectedLane={selectedLane} showMerged={urlState.merged} />}
+          {urlState.tab === "flow" && <BranchRows filter={laneFilter} onClearFilters={clearBranchFilters} onFilter={setLaneFilter} onOpenGit={openGit} onOrder={setLaneOrder} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSearch={setLaneQuery} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} order={laneOrder} project={project} range={urlState.range} searchQuery={laneQuery} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} />}

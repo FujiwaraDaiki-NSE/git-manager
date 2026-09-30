@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ブランチ間の分岐・マージ表示</title>
+<style>body{font-family:system-ui,sans-serif;line-height:1.8;max-width:960px;margin:40px auto;padding:0 20px;color:#213047}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccd5df;padding:12px;text-align:left}code{overflow-wrap:anywhere}h1,h2{line-height:1.3}</style>
+<h1>ブランチ間の分岐・マージ表示</h1>
+<p>PR #34でブランチ行に置き換えた際に欠落した、ブランチ間のつながりを復元する。コミットごとのGitグラフに戻すのではなく、リモートを基準にまとめたブランチ行同士を矢印で結ぶ。PR #35の検索・差分確認・Gitガイドも含む。</p>
+<table><tr><th>関係</th><th>向きと表示</th><th>根拠・限界</th></tr>
+<tr><td>マージ</td><td>PR元 → 取り込み先、実線</td><td>GitHubのマージ済みPR。リポジトリとブランチの識別、取得済みGitオブジェクトの到達性を確認する。</td></tr>
+<tr><td>分岐の推定</td><td>比較の基準 → 対象ブランチ、点線</td><td>Gitの共通祖先。作成当時のブランチ名や作成イベントの証明ではない。候補を一つに決められない場合は確定しない。</td></tr></table>
+<h2>表示と操作</h2><p>注目するブランチの関係を確認し、根拠と接続先へ移動できる。行の展開・並び替え・画面幅の変更に合わせて矢印の接続位置を更新する。検索や完了履歴の折り畳みで相手が隠れていても、関係を表示し、相手を表示する操作を提供する。取得不能・同名候補の曖昧さを、関係がない状態と区別する。</p>
+<h2>保持する機能</h2><p>upstreamによるリモート・ローカル集約、コミット履歴のページング、選択URL、worktreeのGit詳細、検索・並び替え・エクスポートを維持する。独自のブランチ作成・マージ履歴の永続化は追加しない。</p>
+<h2>確認方針</h2><p>Git実リポジトリの分岐・マージ・欠落・曖昧な候補をテストし、Frontendの矢印方向と非表示相手の扱いを確認する。design_dbのPR #168についてdrawing-zonesからintegrationへ向かう矢印をAPIとGUIで確認する。</p>
+<h2>検証結果</h2><ul><li>Backend 126件、Frontend 61件のテスト成功。本番ビルド成功。</li><li>design_dbのAPIでPRマージ52本、分岐推定22本、未解決4件を取得。PR #168はdrawing-zonesからintegrationへ接続。</li><li>GUIで実線の矢印先端を目視。行展開に伴う接続位置更新と、並び替えで上下が逆になった場合の向きを確認。</li><li>390px幅で横はみ出しなし。実測座標で矢印が行端へ接続することを確認。</li><li>検索で両端を非表示にした後、復帰操作で検索条件と矢印の再描画が戻ることを確認。main → integrationの点線、PR #168の実線を確認。</li><li>最終レビューのP1指摘なし。</li></ul></html>

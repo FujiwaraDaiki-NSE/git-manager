@@ -266,6 +266,36 @@ export type ProjectBranchRow = {
   pull_requests: ProjectBranchPullRequest[];
 };
 
+export type ProjectBranchConnectionEdge = {
+  id: string;
+  kind: "merge" | "branch";
+  source_row_id: string;
+  target_row_id: string;
+  evidence: "pull_request" | "merge_base";
+  commit_hash: string | null;
+  pr_number: number | null;
+  pr_url: string | null;
+  label: string;
+};
+
+export type ProjectBranchConnectionUnresolved = {
+  id: string;
+  kind: "merge" | "branch";
+  source_row_id: string | null;
+  target_row_id: string | null;
+  source: string;
+  target: string;
+  reason: string;
+  pr_number: number | null;
+  pr_url: string | null;
+};
+
+export type ProjectBranchConnections = {
+  edges: ProjectBranchConnectionEdge[];
+  unresolved: ProjectBranchConnectionUnresolved[];
+  status: "available" | "partial" | "unavailable";
+};
+
 export type ProjectWorktree = {
   path: string;
   branch: string | null;
@@ -337,6 +367,7 @@ export type ProjectSummary = {
 export type ProjectResponse = {
   github: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
   branch_rows: ProjectBranchRow[] | null;
+  branch_connections: ProjectBranchConnections | null;
   id: string;
   name: string;
   description: string | null;

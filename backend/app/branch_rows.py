@@ -556,3 +556,472 @@ def build(
         )
     )
     return rows
+
+
+def _connection_rows(rows: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """Return current named rows eligible for a branch connection.
+
+    Historical PR rows and detached worktree rows describe useful row data,
+    but they do not describe a current branch tip from which a new relation
+    can be inferred.
+    """
+    result: list[Mapping[str, Any]] = []
+    for row in rows:
+        if row.get("historical") is True:
+            continue
+        if not isinstance(row.get("id"), str) or not isinstance(row.get("name"), str) or not row.get("name"):
+            continue
+        if row.get("remote_ref") is None:
+            locals_ = row.get("locals")
+            if not isinstance(locals_, list):
+                continue
+            if not any(isinstance(lane, Mapping) and isinstance(lane.get("branch"), str) and lane.get("branch") for lane in locals_):
+                continue
+        result.append(row)
+    return result
+
+
+def _connection_repository(row: Mapping[str, Any], project_repository: str | None) -> str | None:
+    value = row.get("remote_repository")
+    if isinstance(value, str) and value:
+        return value.lower()
+    # A named local-only branch still belongs to the scanned repository. When
+    # gh identified that repository, this is the exact identity available for
+    # matching it to a remote default row or PR target.
+    if (
+        project_repository
+        and row.get("historical") is not True
+        and row.get("remote_ref") is None
+        and row.get("remote_name") is None
+        and row.get("remote_branch") is None
+    ):
+        return project_repository
+    return None
+
+
+def _connection_local_only(row: Mapping[str, Any]) -> bool:
+    return (
+        row.get("historical") is not True
+        and row.get("remote_ref") is None
+        and row.get("remote_name") is None
+        and row.get("remote_branch") is None
+    )
+
+
+def _same_connection_repository(
+    first: Mapping[str, Any],
+    second: Mapping[str, Any],
+    project_repository: str | None,
+) -> bool:
+    first_repository = _connection_repository(first, project_repository)
+    second_repository = _connection_repository(second, project_repository)
+    if first_repository is not None or second_repository is not None:
+        return first_repository is not None and first_repository == second_repository
+    # Unknown remote identities must not be treated as the same repository by
+    # branch name. Two local-only rows are both facts about this checkout and
+    # can use the checkout's unique default branch when no remote identity is
+    # available.
+    return _connection_local_only(first) and _connection_local_only(second)
+
+
+def _connection_tip(row: Mapping[str, Any]) -> str | None:
+    remote_hash = row.get("remote_hash")
+    if isinstance(remote_hash, str) and _COMMIT_HASH_RE.fullmatch(remote_hash):
+        return remote_hash
+    locals_ = row.get("locals")
+    if not isinstance(locals_, list):
+        return None
+    heads = {
+        lane.get("head")
+        for lane in locals_
+        if isinstance(lane, Mapping)
+        and isinstance(lane.get("head"), str)
+        and _COMMIT_HASH_RE.fullmatch(lane["head"])
+    }
+    # A local-only row can be used only when its local head is exact. Never
+    # select the first of several worktree heads as an inference input.
+    return next(iter(heads)) if len(heads) == 1 else None
+
+
+def _connection_target_label(row: Mapping[str, Any]) -> str:
+    repository = row.get("remote_repository")
+    if isinstance(repository, str) and repository:
+        return f"{repository}:{row.get('name')}"
+    return str(row.get("name") or "")
+
+
+def _connection_unresolved(
+    *,
+    identifier: str,
+    kind: str,
+    source_row_id: str | None,
+    target_row_id: str | None,
+    source: str,
+    target: str,
+    reason: str,
+    pull: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": identifier,
+        "kind": kind,
+        "source_row_id": source_row_id,
+        "target_row_id": target_row_id,
+        "source": source,
+        "target": target,
+        "reason": reason,
+        "pr_number": pull.get("number") if isinstance(pull, Mapping) and isinstance(pull.get("number"), int) else None,
+        "pr_url": pull.get("url") if isinstance(pull, Mapping) and isinstance(pull.get("url"), str) else None,
+    }
+
+
+def _pr_target_candidates(
+    rows: list[Mapping[str, Any]],
+    pull: Mapping[str, Any],
+    project_repository: str | None,
+) -> list[Mapping[str, Any]]:
+    target_repository = pull.get("target_repository")
+    target_branch = pull.get("target_branch")
+    if not isinstance(target_repository, str) or not isinstance(target_branch, str):
+        return []
+    target_repository = target_repository.lower()
+    return [
+        row
+        for row in rows
+        if row.get("name") == target_branch
+        and _connection_repository(row, project_repository) == target_repository
+    ]
+
+
+def _ancestor_status(repo: str, ancestor: str, descendant: str) -> bool | None:
+    _output, status = gitinfo._run_with_status(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
+    if status == 0:
+        return True
+    if status == 1:
+        return False
+    return None
+
+
+def _object_available(repo: str, commit_hash: str) -> bool | None:
+    _output, status = gitinfo._run_with_status(repo, ["cat-file", "-e", f"{commit_hash}^{{commit}}"])
+    if status == 0:
+        return True
+    if status == 1:
+        return False
+    return None
+
+
+def _merge_bases(repo: str, first: str, second: str) -> tuple[list[str] | None, bool]:
+    """Return all merge bases and whether the Git query itself succeeded."""
+    output, status = gitinfo._run_with_status(repo, ["merge-base", "--all", first, second])
+    if status == 1:
+        # Git's status 1 means the histories have no common ancestor, which is
+        # a valid observation rather than an execution failure.
+        return [], True
+    if status != 0 or output is None:
+        return None, False
+    values = [line.strip() for line in output.splitlines() if line.strip()]
+    if not values or not all(_COMMIT_HASH_RE.fullmatch(value) for value in values):
+        return None, False
+    return list(dict.fromkeys(values)), True
+
+
+def _default_candidates(
+    rows: list[Mapping[str, Any]],
+    child: Mapping[str, Any],
+    default_branch: str | None,
+    project_repository: str | None,
+) -> list[Mapping[str, Any]]:
+    if not isinstance(default_branch, str) or not default_branch:
+        return []
+    return [
+        row
+        for row in rows
+        if row.get("name") == default_branch
+        and row.get("id") != child.get("id")
+        and _same_connection_repository(child, row, project_repository)
+    ]
+
+
+def connections(
+    repo: str,
+    rows: list[Mapping[str, Any]] | None,
+    *,
+    default_branch: str | None = None,
+    github_data: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build current branch-row connection facts from Git and merged PRs.
+
+    Merge edges are explicit PR evidence. Branch edges are estimates from a
+    unique Git merge base, and point from the selected base row to the current
+    diverged row. This function performs one merge-base query per eligible
+    current row; it does not compare every row pair.
+    """
+    if rows is None:
+        return {"edges": [], "unresolved": [], "status": "unavailable"}
+    current_rows = _connection_rows(rows)
+    github_data = github_data or {}
+    project_repository = _origin_repository(github_data)
+    edges: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    edge_ids: set[str] = set()
+    unresolved_ids: set[str] = set()
+
+    def add_unresolved(item: dict[str, Any]) -> None:
+        if item["id"] not in unresolved_ids:
+            unresolved_ids.add(item["id"])
+            unresolved.append(item)
+
+    def add_edge(item: dict[str, Any]) -> None:
+        if item["id"] not in edge_ids:
+            edge_ids.add(item["id"])
+            edges.append(item)
+
+    # Every PR already attached to a row is a source identity. Resolve its
+    # target by exact repository and branch, with merge ancestry only used to
+    # disambiguate duplicate refs carrying the same repository/branch name.
+    for source_row in rows:
+        pulls = source_row.get("pull_requests")
+        if not isinstance(pulls, list):
+            continue
+        for pull in pulls:
+            if not isinstance(pull, Mapping):
+                continue
+            number = pull.get("number")
+            if not isinstance(number, int):
+                continue
+            identifier = f"merge:pr:{number}"
+            candidates = _pr_target_candidates(current_rows, pull, project_repository)
+            merge_hash = pull.get("commit_hash")
+            target_row: Mapping[str, Any] | None = None
+            reason: str | None = None
+            if not candidates:
+                reason = "target_branch_not_found"
+            elif not isinstance(merge_hash, str) or not _COMMIT_HASH_RE.fullmatch(merge_hash):
+                reason = "merge_commit_unavailable"
+            else:
+                object_available = _object_available(repo, merge_hash)
+                if object_available is not True:
+                    reason = (
+                        "merge_commit_unavailable"
+                        if object_available is False
+                        else "merge_commit_ancestry_unavailable"
+                    )
+                else:
+                    ancestry: list[Mapping[str, Any]] = []
+                    ancestry_uncertain = False
+                    for candidate in candidates:
+                        tip = _connection_tip(candidate)
+                        if tip is None:
+                            ancestry_uncertain = True
+                            continue
+                        status = _ancestor_status(repo, merge_hash, tip)
+                        if status is True:
+                            ancestry.append(candidate)
+                        elif status is None:
+                            ancestry_uncertain = True
+                    if len(ancestry) == 1 and not ancestry_uncertain:
+                        target_row = ancestry[0]
+                    elif ancestry_uncertain:
+                        reason = "merge_commit_ancestry_unavailable"
+                    elif len(ancestry) > 1:
+                        reason = "target_branch_ambiguous"
+                    else:
+                        reason = "merge_commit_not_ancestor"
+            if target_row is None:
+                target_repository = str(pull.get("target_repository") or "")
+                target_branch = str(pull.get("target_branch") or "")
+                target_candidate = candidates[0] if len(candidates) == 1 else None
+                add_unresolved(_connection_unresolved(
+                    identifier=identifier,
+                    kind="merge",
+                    source_row_id=source_row.get("id") if isinstance(source_row.get("id"), str) else None,
+                    target_row_id=target_candidate.get("id") if isinstance(target_candidate, Mapping) and isinstance(target_candidate.get("id"), str) else None,
+                    source=_connection_target_label(source_row),
+                    target=f"{target_repository}:{target_branch}",
+                    reason=reason or "target_branch_unresolved",
+                    pull=pull,
+                ))
+                continue
+            if target_row.get("id") == source_row.get("id"):
+                add_unresolved(_connection_unresolved(
+                    identifier=identifier,
+                    kind="merge",
+                    source_row_id=source_row.get("id") if isinstance(source_row.get("id"), str) else None,
+                    target_row_id=target_row.get("id") if isinstance(target_row.get("id"), str) else None,
+                    source=_connection_target_label(source_row),
+                    target=_connection_target_label(target_row),
+                    reason="source_and_target_are_same_row",
+                    pull=pull,
+                ))
+                continue
+            add_edge({
+                "id": identifier,
+                "kind": "merge",
+                "source_row_id": source_row.get("id"),
+                "target_row_id": target_row.get("id"),
+                "evidence": "pull_request",
+                "commit_hash": pull.get("commit_hash") if isinstance(pull.get("commit_hash"), str) else None,
+                "pr_number": number,
+                "pr_url": pull.get("url") if isinstance(pull.get("url"), str) else None,
+                "label": f"PR #{number}",
+            })
+
+    # A row with a confirmed PR target uses that target as its estimate base.
+    # Rows without a confirmed PR target use the unique same-repository default
+    # row. The estimate is retained only when both current tips are genuinely
+    # divergent and Git reports exactly one merge base.
+    for child in current_rows:
+        child_id = child.get("id")
+        if not isinstance(child_id, str):
+            continue
+        child_tip = _connection_tip(child)
+        if child_tip is None:
+            continue
+        pulls = child.get("pull_requests")
+        candidate_pulls = [
+            pull
+            for pull in pulls
+            if isinstance(pull, Mapping)
+            and isinstance(pull.get("target_branch"), str)
+            and isinstance(pull.get("target_repository"), str)
+        ] if isinstance(pulls, list) else []
+        target_keys = {
+            (str(pull["target_repository"]).lower(), str(pull["target_branch"]))
+            for pull in candidate_pulls
+        }
+        if len(target_keys) > 1:
+            add_unresolved(_connection_unresolved(
+                identifier=f"branch:{child_id}:multiple-pr-targets",
+                kind="branch",
+                source_row_id=None,
+                target_row_id=child_id,
+                source="multiple PR targets",
+                target=_connection_target_label(child),
+                reason="multiple_pr_targets",
+            ))
+            continue
+        confirmed_pull = candidate_pulls[0] if candidate_pulls else None
+        if confirmed_pull is not None:
+            candidates = _pr_target_candidates(current_rows, confirmed_pull, project_repository)
+            target_label = f"{confirmed_pull.get('target_repository')}:{confirmed_pull.get('target_branch')}"
+            if len(candidates) == 1:
+                base_row = candidates[0]
+            else:
+                base_row = None
+                reason = "target_branch_not_found" if not candidates else "target_branch_ambiguous"
+                add_unresolved(_connection_unresolved(
+                    identifier=f"branch:{child_id}:pr:{confirmed_pull.get('number')}",
+                    kind="branch",
+                    source_row_id=None,
+                    target_row_id=child_id,
+                    source=target_label,
+                    target=_connection_target_label(child),
+                    reason=reason,
+                    pull=confirmed_pull,
+                ))
+        else:
+            if child.get("name") == default_branch:
+                continue
+            candidates = _default_candidates(current_rows, child, default_branch, project_repository)
+            if len(candidates) != 1:
+                if default_branch is not None:
+                    reason = "default_branch_not_found" if not candidates else "default_branch_ambiguous"
+                    add_unresolved(_connection_unresolved(
+                        identifier=f"branch:{child_id}:default",
+                        kind="branch",
+                        source_row_id=None,
+                        target_row_id=child_id,
+                        source=default_branch,
+                        target=_connection_target_label(child),
+                        reason=reason,
+                    ))
+                continue
+            base_row = candidates[0]
+        base_id = base_row.get("id") if base_row is not None else None
+        base_tip = _connection_tip(base_row) if base_row is not None else None
+        if not isinstance(base_id, str) or base_tip is None:
+            if base_row is not None:
+                add_unresolved(_connection_unresolved(
+                    identifier=f"branch:{child_id}:tip",
+                    kind="branch",
+                    source_row_id=base_id,
+                    target_row_id=child_id,
+                    source=_connection_target_label(base_row),
+                    target=_connection_target_label(child),
+                    reason="base_tip_unavailable",
+                ))
+            continue
+        if child_tip == base_tip:
+            add_unresolved(_connection_unresolved(
+                identifier=f"branch:{child_id}:shared-tip",
+                kind="branch",
+                source_row_id=base_id,
+                target_row_id=child_id,
+                source=_connection_target_label(base_row),
+                target=_connection_target_label(child),
+                reason="shared_tip",
+            ))
+            continue
+        bases, git_ok = _merge_bases(repo, base_tip, child_tip)
+        if not git_ok:
+            add_unresolved(_connection_unresolved(
+                identifier=f"branch:{child_id}:merge-base",
+                kind="branch",
+                source_row_id=base_id,
+                target_row_id=child_id,
+                source=_connection_target_label(base_row),
+                target=_connection_target_label(child),
+                reason="merge_base_unavailable",
+            ))
+            continue
+        if not bases:
+            add_unresolved(_connection_unresolved(
+                identifier=f"branch:{child_id}:no-common-base",
+                kind="branch",
+                source_row_id=base_id,
+                target_row_id=child_id,
+                source=_connection_target_label(base_row),
+                target=_connection_target_label(child),
+                reason="no_common_merge_base",
+            ))
+            continue
+        if len(bases) != 1:
+            add_unresolved(_connection_unresolved(
+                identifier=f"branch:{child_id}:multiple-bases",
+                kind="branch",
+                source_row_id=base_id,
+                target_row_id=child_id,
+                source=_connection_target_label(base_row),
+                target=_connection_target_label(child),
+                reason="multiple_merge_bases",
+            ))
+            continue
+        merge_base = bases[0]
+        # A child whose tip is already an ancestor of the base does not show
+        # an active branch. A base tip that is the merge base is the common
+        # new-branch case: the child advanced after it split, so retain the
+        # estimate while keeping its merge-base evidence explicit.
+        if merge_base == child_tip:
+            continue
+        add_edge({
+            "id": f"branch:{base_id}->{child_id}",
+            "kind": "branch",
+            "source_row_id": base_id,
+            "target_row_id": child_id,
+            "evidence": "merge_base",
+            "commit_hash": merge_base,
+            "pr_number": None,
+            "pr_url": None,
+            "label": "共通祖先からの分岐推定",
+        })
+
+    status = "partial" if unresolved else "available"
+    if not rows:
+        status = "available"
+    if not current_rows and rows:
+        status = "unavailable"
+    if not isinstance(default_branch, str) and not edges and not any(
+        isinstance(row.get("pull_requests"), list) and row.get("pull_requests") for row in rows
+    ):
+        status = "unavailable"
+    return {"edges": edges, "unresolved": unresolved, "status": status}
