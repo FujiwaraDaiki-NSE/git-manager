@@ -183,8 +183,6 @@ export type ProjectMergeRelation = {
 
 export type ProjectLane = {
   historical?: boolean;
-  flow_hashes?: string[];
-  alias_lane_id?: string | null;
   unborn?: boolean;
   id: string;
   name: string;
@@ -212,6 +210,60 @@ export type ProjectLane = {
   merge_sources: ProjectMergeRelation[];
   merge_targets: ProjectMergeRelation[];
   next_phase: string | null;
+};
+
+export type ProjectBranchPullRequest = {
+  number: number;
+  url: string;
+  source: string;
+  target: string;
+  source_repository: string | null;
+  source_branch: string;
+  source_hash: string | null;
+  target_repository: string;
+  target_branch: string;
+  commit_hash: string | null;
+  head_hash: string | null;
+  merged_at: string | null;
+};
+
+export type ProjectBranchCommit = {
+  hash: string;
+  short: string;
+  subject: string;
+  author: string;
+  date: string | null;
+  parents: string[];
+};
+
+/**
+ * A display row represents one remote branch, or one local-only branch. Local
+ * checkouts are nested in the row that their upstream points to. The commit
+ * list is intentionally a reachability view: a commit may occur in more than
+ * one row when branches share history.
+ */
+export type ProjectBranchRow = {
+  id: string;
+  name: string;
+  remote_ref: string | null;
+  remote_hash: string | null;
+  remote_name: string | null;
+  remote_branch: string | null;
+  remote_repository: string | null;
+  tracking_ref: string | null;
+  locals: ProjectLane[];
+  commit_hashes: string[];
+  commits: ProjectBranchCommit[];
+  tip_commits: ProjectBranchCommit[];
+  tip_metadata_available: boolean;
+  history_heads: string[];
+  history_cursor: number | null;
+  commit_metadata_available: boolean;
+  history_truncated: boolean;
+  history_available: boolean;
+  historical: boolean;
+  status: "synchronized" | "local_ahead" | "remote_ahead" | "diverged" | "remote_only" | "remote_unavailable" | "tracking_unavailable" | "tracking_inconsistent" | "mixed" | "local_only" | "upstream_deleted" | "detached" | "historical_deleted" | string;
+  pull_requests: ProjectBranchPullRequest[];
 };
 
 export type ProjectWorktree = {
@@ -284,7 +336,7 @@ export type ProjectSummary = {
 
 export type ProjectResponse = {
   github: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
-  flow: { lanes: ProjectLane[]; connections: ProjectMergeRelation[]; integrations: { number: number; url: string; source: string; target: string; commit_hash: string }[] };
+  branch_rows: ProjectBranchRow[] | null;
   id: string;
   name: string;
   description: string | null;

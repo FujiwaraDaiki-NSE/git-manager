@@ -25,6 +25,23 @@ def test_paginated_metadata_and_no_credentials_in_payload(monkeypatch):
     assert "secret" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("credential_name", ["GH_TOKEN", "GITHUB_TOKEN"])
+def test_gh_credentials_are_forwarded_to_subprocess_without_entering_payload(monkeypatch, credential_name):
+    token = f"test-{credential_name.lower()}-value"
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv(credential_name, token)
+
+    def run(_args, **kwargs):
+        assert kwargs["env"][credential_name] == token
+        return SimpleNamespace(returncode=1, stdout="", stderr=f"auth failed: {token}")
+
+    monkeypatch.setattr(github.subprocess, "run", run)
+    result = github._read("o/r")
+    assert result["status"] == "unavailable"
+    assert token not in json.dumps(result)
+
+
 @pytest.mark.parametrize("failure", ["auth", "timeout", "missing", "malformed", "partial"])
 def test_failures_never_report_no_prs_as_success(monkeypatch, failure):
     def run(*args, **kwargs):

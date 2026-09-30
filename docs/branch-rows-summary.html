@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ブランチ単位の表示とホスト認証</title>
+<style>body{font:16px/1.8 system-ui,sans-serif;color:#203044;background:#f5f7fa;margin:0;padding:32px}main{max-width:960px;margin:auto;background:white;padding:36px;border-radius:16px}h1{font-size:28px}h2{font-size:20px;margin-top:32px}table{border-collapse:collapse;width:100%}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}code{background:#edf1f6;padding:2px 5px;overflow-wrap:anywhere}p{max-width:80ch}</style>
+<main><h1>ブランチ単位の表示とホスト認証</h1>
+<p>現在のブランチを起点に履歴を確認する表示へ変更する。履歴全体を一つずつ過去のブランチへ割り当てる方式をやめ、Gitの参照と追跡先、GitHubのPRから表示を構成する。開発イベントの独自保存は行わない。</p>
+<h2>表示する事実と取得元</h2><table><tr><th>表示</th><th>取得元・判断</th></tr><tr><td>リモートの行</td><td>設定されたfetch refspecと取得済みリモート追跡参照。最終取得時点の状態。</td></tr><tr><td>同じ行のローカル</td><td>Git upstreamの参照が一致するもの。同名だけではまとめない。</td></tr><tr><td>コミット</td><td>各参照から親を再帰的にたどる。同一コミットの複数行への表示を許容。</td></tr><tr><td>完了済みの履歴</td><td>マージ済みPRで名前が確認できるもの。forkの同名ブランチを区別。</td></tr><tr><td>作業状態</td><td>ローカルブランチ・worktreeの状態と既存agent情報。</td></tr></table>
+<h2>取り込みと分岐</h2><p>PRが示す取り込み元から取り込み先への関係を表示する。共通祖先から当時のブランチ名や作成元を断定しない。名前が確認できないコミット経路は、架空のブランチ行にしない。Gitのコミットや既存の詳細画面を削除する変更ではない。</p>
+<h2>GitHub認証</h2><p>Composeはホスト起動プロセスの <code>GH_TOKEN</code> と <code>GITHUB_TOKEN</code> をそのままbackendへ引き継ぐ。優先順位はghが決める。トークンをブラウザ・ログ・リポジトリへ出さず、保存済みgh認証の自動取得もしない。環境変数がない場合、PR取得不可とGitから確認できる状態を区別する。</p>
+<p>通常の起動・再作成にも同じ環境変数が必要。ホストの環境変数を更新した場合は、コンテナの再作成で反映する。</p>
+<h2>検証</h2><p id="verification">バックエンド118件、フロントエンド41件のテストが通過。Next.js本番ビルドとComposeへの反映が成功し、backendはhealthy。レビューの未解決P1はなし。design_dbの実データで、同一リモートを追跡するintegration/presentation-modeの2ローカルを集約し、behind 3 / 22を表示。ブラウザで履歴を20件から220件へ追加し、重複なし・追加API成功を確認。リモート先端の選択では無関係なworktreeを割り当てず、presentation-modeの先端では正しい作業場所を選択。再読み込み後の選択復元、390px幅で横はみ出しなし、ブラウザエラーなしを確認。</p>
+<p>GitHub認証環境変数は、この検証を実行した起動プロセスでは未設定。稼働画面のPR取得不可表示を確認済み。ホストghで取得した実PRデータを使うバックエンド検証では、PR #168の取り込み先と名前付きの完了履歴を確認した。Composeの環境変数引き継ぎは未設定・GH_TOKENのみ・GITHUB_TOKENのみ・両方設定の4通りで確認した。</p></main></html>

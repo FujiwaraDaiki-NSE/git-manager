@@ -6,22 +6,21 @@ import Link from "next/link";
 import { homeReturnHref } from "./home-overview.mjs";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import CopyButton from "./copy-button";
 import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { agentReportKey, agentSnapshotAt, agentStateLabel, agentTaskState, isExplicitAgentStatus, laneAgentSnapshotAt, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
-import { topologyConnections, topologyRelationTimes, eventLeaderGeometry, flowEventKey, flowKeyboardAction, flowPopoverPlacement, layoutFlowEvents, recentTimePosition, recentTimeAt, graphTimeTicks, mergeRelationInWindow, mobileEventAction, parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { agentReportKey, agentStateLabel, agentTaskState, isExplicitAgentStatus, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
+import { parseProjectUrl, shouldFoldMergedLane, uniqueLocalForCommit, updateProjectUrl } from "./project-flow.mjs";
 import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
-  GraphRow,
+  ProjectBranchCommit,
   ProjectEvent,
   ProjectLane,
-  ProjectMergeRelation,
+  ProjectBranchRow,
   ProjectResponse,
   Repo,
   AgentTask,
@@ -38,7 +37,7 @@ type CopyStatus = "idle" | "success" | "error";
 type ProjectUrlChanges = Record<string, string | number | boolean | null | undefined>;
 
 const tabs: { id: ControlTab; label: string; short: string }[] = [
-  { id: "flow", label: "グラフ", short: "FLOW" },
+  { id: "flow", label: "ブランチ", short: "BRANCHES" },
   { id: "lanes", label: "作業一覧", short: "LANES" },
   { id: "activity", label: "アクティビティ", short: "ACTIVITY" },
   { id: "info", label: "プロジェクト情報", short: "INFO" },
@@ -90,13 +89,6 @@ function exactDate(iso: string | null | undefined) {
 
 function shortHash(hash: string | null | undefined) {
   return hash ? hash.slice(0, 8) : "未取得";
-}
-
-function flowLanes(project: ProjectResponse): ProjectLane[] {
-  const current = new Map(project.lanes.map((lane) => [lane.id, lane]));
-  return project.flow.lanes.map((lane) => ({ ...lane, ...current.get(lane.id),
-    merge_sources: lane.merge_sources, merge_targets: lane.merge_targets,
-  }));
 }
 
 function laneLabel(lane: ProjectLane) {
@@ -202,6 +194,7 @@ function projectFromSearch(search: string) {
     merged: parsed.merged,
     event: parsed.event,
     lane: parsed.lane,
+    branchRow: parsed.branchRow,
     at: parsed.at,
     laneQuery: parsed.laneQuery,
     laneFilter: parsed.laneFilter as LaneFilter,
@@ -241,601 +234,370 @@ function useProjectUrl() {
   return { state, update };
 }
 
-type FlowEvent = {
-  row: GraphRow;
-  lane: ProjectLane;
-  x: number;
-  hitX: number;
-  timestampX: number;
-  pointOffset: number;
-  id: string;
-};
-
-function eventDate(row: GraphRow) {
-  const value = new Date(row.date).getTime();
-  return Number.isNaN(value) ? null : value;
+function projectBranchRows(project: ProjectResponse): ProjectBranchRow[] {
+  const current = new Map(project.lanes.map((lane) => [lane.id, lane]));
+  const rows = project.branch_rows ?? [];
+  return rows.map((row) => ({
+    ...row,
+    // Branch-row Git identity and counts come from the same fresh snapshot as
+    // the row's remote tip. The SSE stream only refreshes agent state, so
+    // overlay that explicit field instead of replacing upstream/head facts
+    // with the separately cached lane projection.
+    locals: row.locals.map((lane) => {
+      const live = current.get(lane.id);
+      return live ? { ...lane, agent: live.agent } : lane;
+    }),
+  }));
 }
 
-function eventsByLaneCount(events: { lane: ProjectLane }[], laneId: string) {
-  return events.reduce((count, event) => count + (event.lane.id === laneId ? 1 : 0), 0);
-}
-
-function flowPopoverId(eventId: string) {
-  return `flow-popover-${encodeURIComponent(eventId)}`;
-}
-
-function FlowEventPopover({
-  buttonRef,
-  event,
-  onPreviewEnter,
-  onPreviewLeave,
-  onSelect,
-  popoverBelow,
-}: {
-  buttonRef: React.MutableRefObject<HTMLButtonElement | null>;
-  event: FlowEvent;
-  onPreviewEnter: () => void;
-  onPreviewLeave: () => void;
-  onSelect: () => void;
-  popoverBelow: boolean;
-}) {
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [placement, setPlacement] = useState<ReturnType<typeof flowPopoverPlacement> | null>(null);
-  const updatePlacement = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const button = buttonRef.current;
-    const popover = popoverRef.current;
-    if (!button || !popover) return;
-    const anchor = button.getBoundingClientRect();
-    const next = flowPopoverPlacement({
-      anchorLeft: anchor.left,
-      anchorRight: anchor.right,
-      anchorTop: anchor.top,
-      anchorBottom: anchor.bottom,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      preferredWidth: popover.offsetWidth,
-      preferredHeight: popover.offsetHeight,
-      margin: 8,
-      gap: 12,
-      preferBelow: popoverBelow,
-    });
-    setPlacement((current) => current
-      && current.left === next.left
-      && current.top === next.top
-      && current.width === next.width
-      && current.height === next.height
-      && current.side === next.side
-      ? current
-      : next);
-  }, [buttonRef, popoverBelow]);
-  useLayoutEffect(() => {
-    updatePlacement();
-    window.addEventListener("resize", updatePlacement);
-    window.addEventListener("scroll", updatePlacement, true);
-    return () => {
-      window.removeEventListener("resize", updatePlacement);
-      window.removeEventListener("scroll", updatePlacement, true);
-    };
-  }, [buttonRef, updatePlacement]);
-  if (typeof document === "undefined") return null;
-  const side = placement?.side ?? (popoverBelow ? "below" : "above");
-  const width = placement?.width ?? 290;
-  return createPortal(
-    <div
-      className={`flow-event-popover${side === "below" ? " flow-event-popover-below" : ""}`}
-      id={flowPopoverId(event.id)}
-      onFocus={onPreviewEnter}
-      onBlur={(focusEvent) => {
-        const next = focusEvent.relatedTarget;
-        if (!(next instanceof Node) || !focusEvent.currentTarget.contains(next)) onPreviewLeave();
-      }}
-      onMouseEnter={onPreviewEnter}
-      onMouseLeave={onPreviewLeave}
-      ref={popoverRef}
-      role="tooltip"
-      style={{
-        "--flow-popover-width": `${width}px`,
-        left: `${placement?.left ?? 0}px`,
-        maxHeight: placement ? `${placement.height}px` : undefined,
-        top: `${placement?.top ?? 0}px`,
-        visibility: placement ? "visible" : "hidden",
-        width: `${width}px`,
-      } as React.CSSProperties}
-    >
-      <span className="flow-popover-type">Git · コミット</span>
-      <strong>{event.row.subject || "(no subject)"}</strong>
-      <span>{shortHash(event.row.hash)} · {event.row.author}</span>
-      <time dateTime={event.row.date}>{relativeTime(event.row.date)} · {exactDate(event.row.date)}</time>
-      <span>
-        変更 {event.row.stats ? `${event.row.stats.files} ファイル · +${event.row.stats.additions ?? "?"} / -${event.row.stats.deletions ?? "?"}` : "未取得"}
-      </span>
-      <span>
-        {event.row.stats?.paths.length ? `変更ファイル ${event.row.stats.paths.join(" · ")}` : event.row.stats?.files === 0 ? "変更ファイルなし" : "変更ファイル 未取得"}
-      </span>
-      <span>
-        branch {event.lane.branch ?? "未取得"} · {event.row.is_head ? "HEAD" : "HEAD ではない"}
-      </span>
-      <span>
-        refs {event.row.refs.length ? event.row.refs.map((ref) => `${ref.kind}:${ref.name}`).join(", ") : "未取得"}
-      </span>
-      <span>
-        {upstreamLabel(event.lane)}
-      </span>
-      {event.row.is_merge && <span>親 {event.row.parents.length ? event.row.parents.map(shortHash).join(", ") : "未取得"}</span>}
-      <button type="button" onClick={onSelect}>詳細を開く</button>
-    </div>,
-    document.body,
-  );
-}
-
-function FlowEventButton({
-  event,
-  selected,
-  preview,
-  popoverBelow,
-  onNavigate,
-  onRegister,
-  onPreview,
-  onSelect,
-  trackWidth,
-}: {
-  event: FlowEvent;
-  selected: boolean;
-  preview: boolean;
-  popoverBelow: boolean;
-  onNavigate: (event: FlowEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => void;
-  onRegister: (id: string, node: HTMLButtonElement | null) => void;
-  onPreview: React.Dispatch<React.SetStateAction<string | null>>;
-  onSelect: (event: FlowEvent) => void;
-  trackWidth: number;
-}) {
-  const touchPreviewRef = useRef(false);
-  const touchPointerRef = useRef(false);
-  const touchPreviewOpenRef = useRef(false);
-  const previewCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const xClass = event.hitX < 24 ? "flow-event-left" : event.hitX > 76 ? "flow-event-right" : "";
-  const leader = eventLeaderGeometry(event.timestampX, event.hitX, trackWidth);
-  const hasLeader = leader.width > 0.5;
-  useEffect(() => () => {
-    if (previewCloseTimerRef.current) clearTimeout(previewCloseTimerRef.current);
-  }, []);
-  const keepPreview = () => {
-    if (previewCloseTimerRef.current) clearTimeout(previewCloseTimerRef.current);
-    previewCloseTimerRef.current = null;
-    onPreview(event.id);
+function commitEventForBranch(
+  project: ProjectResponse,
+  hash: string,
+  branch: string | null,
+  lane: ProjectLane | null,
+  metadata: ProjectBranchCommit | null = null,
+): ProjectEvent {
+  const existing = project.events.find((event) => event.type === "commit" && event.commit_hash === hash);
+  return {
+    ...(existing ?? {}),
+    id: `branch-row:${hash}`,
+    occurred_at: metadata?.date ?? existing?.occurred_at ?? null,
+    observed_at: existing?.observed_at ?? project.observed_at,
+    type: "commit",
+    source: "git",
+    project_id: project.id,
+    worktree: lane?.path ?? null,
+    branch: branch ?? null,
+    lane_id: lane?.id ?? null,
+    lane_names: branch ? [branch] : lane?.branch ? [lane.branch] : [],
+    commit_hash: hash,
+    subject: metadata?.subject ?? existing?.subject ?? null,
+    author: metadata?.author ?? existing?.author ?? null,
+    parents: metadata?.parents ?? existing?.parents ?? [],
+    stats: existing?.stats ?? null,
   };
-  const schedulePreviewClose = () => {
-    if (touchPreviewOpenRef.current) return;
-    if (previewCloseTimerRef.current) clearTimeout(previewCloseTimerRef.current);
-    previewCloseTimerRef.current = setTimeout(() => {
-      previewCloseTimerRef.current = null;
-      onPreview((current) => current === event.id ? null : current);
-    }, 160);
-  };
-  const select = () => {
-    if (previewCloseTimerRef.current) clearTimeout(previewCloseTimerRef.current);
-    previewCloseTimerRef.current = null;
-    touchPreviewOpenRef.current = false;
-    onPreview(null);
-    onSelect(event);
-  };
-  return (
-    <div
-      className={`flow-event-hit ${xClass}`}
-      data-flow-event-key={event.id}
-      style={{ left: `${event.hitX}%`, "--flow-point-offset": `${event.pointOffset}px` } as React.CSSProperties}
-      onMouseEnter={keepPreview}
-      onMouseLeave={schedulePreviewClose}
-    >
-      {hasLeader && <span className="flow-event-leader" aria-hidden="true" style={{ left: `calc(50% + ${leader.left}px)`, width: `${leader.width}px` }} />}
-      <button
-        aria-label={`${laneLabel(event.lane)} ${shortHash(event.row.hash)} ${event.row.subject}`}
-        aria-pressed={selected}
-        aria-describedby={preview ? flowPopoverId(event.id) : undefined}
-        className={`flow-event-button${selected ? " is-selected" : ""}`}
-        data-flow-event-key={event.id}
-        ref={(node) => {
-          buttonRef.current = node;
-          onRegister(event.id, node);
-        }}
-        onPointerDown={(pointerEvent) => {
-          if (pointerEvent.pointerType !== "touch") return;
-          touchPointerRef.current = true;
-          touchPreviewRef.current = preview;
-          touchPreviewOpenRef.current = preview;
-        }}
-        onClick={() => {
-          // On a narrow viewport the first tap exposes the same lightweight
-          // summary as hover/focus; the popover's explicit action opens the
-          // full commit detail drawer.
-          const wasTouch = touchPointerRef.current;
-          const wasPreview = touchPreviewRef.current;
-          touchPointerRef.current = false;
-          touchPreviewRef.current = false;
-          const action = mobileEventAction({
-            isMobile: typeof window !== "undefined" && window.matchMedia("(max-width: 1199px)").matches,
-            isTouch: wasTouch,
-            previewAtPointerDown: wasPreview,
-          });
-          if (action === "preview") {
-            touchPreviewOpenRef.current = true;
-            onPreview(event.id);
-            return;
-          }
-          select();
-        }}
-        onKeyDown={(keyboardEvent) => {
-          const action = flowKeyboardAction(keyboardEvent.key);
-          if (action === "move") {
-            keyboardEvent.preventDefault();
-            onNavigate(event, keyboardEvent.key as "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown");
-            return;
-          }
-          if (action === "select") {
-            keyboardEvent.preventDefault();
-            select();
-          }
-        }}
-        onFocus={keepPreview}
-        onBlur={(focusEvent) => {
-          if (touchPreviewOpenRef.current) return;
-          const next = focusEvent.relatedTarget;
-          const popover = typeof document === "undefined" ? null : document.getElementById(flowPopoverId(event.id));
-          if (!(next instanceof Node) || (!focusEvent.currentTarget.parentElement?.contains(next) && !popover?.contains(next))) schedulePreviewClose();
-        }}
-        type="button"
-      >
-        <span
-          className={`flow-event-point${event.row.is_merge ? " is-merge" : ""}${event.row.is_head ? " is-head" : ""}`}
-          aria-hidden="true"
-        />
-      </button>
-      {preview && <FlowEventPopover buttonRef={buttonRef} event={event} onPreviewEnter={keepPreview} onPreviewLeave={schedulePreviewClose} onSelect={select} popoverBelow={popoverBelow} />}
-    </div>
-  );
 }
 
-function FlowMap({
+function branchRowCommitInfo(project: ProjectResponse, row: ProjectBranchRow, hash: string, metadataOverride: ProjectBranchCommit | null = null) {
+  // A row can contain several locals tracking one remote, and a remote tip
+  // can be ahead of all of them. Only an exact, unique local HEAD proves the
+  // worktree context for this commit; shared history remains lane-less.
+  const lane = uniqueLocalForCommit(row.locals, hash);
+  const metadata = metadataOverride
+    ?? row.tip_commits.find((item) => item.hash === hash)
+    ?? row.commits.find((item) => item.hash === hash)
+    ?? null;
+  const event = commitEventForBranch(project, hash, row.name, lane, metadata);
+  return {
+    hash,
+    event,
+    isMerge: (metadata?.parents.length ?? event.parents?.length ?? 0) > 1,
+    date: metadata?.date ?? event.occurred_at ?? null,
+    subject: metadata?.subject ?? event.subject ?? "コミット件名未取得",
+    author: metadata?.author ?? event.author ?? "作成者未取得",
+  };
+}
+
+function branchRowMatchesFilter(row: ProjectBranchRow, filter: LaneFilter) {
+  if (filter === "all") return true;
+  if (filter === "dirty") return row.locals.some((lane) => lane.dirty === true);
+  if (filter === "conflict") return row.locals.some((lane) => lane.conflict === true);
+  if (filter === "ahead") return row.locals.some((lane) => typeof lane.upstream_ahead === "number" && lane.upstream_ahead > 0);
+  if (filter === "behind") return row.locals.some((lane) => typeof lane.upstream_behind === "number" && lane.upstream_behind > 0);
+  if (filter === "worktree") return row.locals.some((lane) => lane.is_worktree === true);
+  return false;
+}
+
+function branchRowMatchesSearch(row: ProjectBranchRow, query: string) {
+  if (!query) return true;
+  return [
+    row.name,
+    row.remote_ref,
+    ...row.locals.flatMap((lane) => [lane.name, lane.branch, lane.path]),
+    ...row.pull_requests.flatMap((pullRequest) => [pullRequest.source, pullRequest.target, String(pullRequest.number)]),
+  ].some((value) => (value ?? "").toLocaleLowerCase().includes(query));
+}
+
+function branchRowLatestTime(project: ProjectResponse, row: ProjectBranchRow) {
+  const hashes = Array.from(new Set([
+    ...row.commit_hashes,
+    ...row.tip_commits.map((commit) => commit.hash),
+  ]));
+  const dates = hashes
+    .map((hash) => branchRowCommitInfo(project, row, hash).date)
+    .map((date) => date ? Date.parse(date) : NaN)
+    .filter((date) => Number.isFinite(date));
+  for (const lane of row.locals) {
+    const date = lane.last_commit?.date ? Date.parse(lane.last_commit.date) : NaN;
+    if (Number.isFinite(date)) dates.push(date);
+  }
+  return dates.length ? Math.max(...dates) : -Infinity;
+}
+
+function branchRowPriority(row: ProjectBranchRow) {
+  if (row.locals.some((lane) => lane.conflict === true)) return 0;
+  if (row.locals.some((lane) => lane.dirty === true)) return 1;
+  if (row.locals.some((lane) => lane.agent?.attention || lane.agent?.status === "review_required" || lane.agent?.status === "waiting_for_user")) return 2;
+  if (row.locals.some((lane) => typeof lane.upstream_behind === "number" && lane.upstream_behind > 0)) return 3;
+  if (row.locals.some((lane) => typeof lane.upstream_ahead === "number" && lane.upstream_ahead > 0)) return 4;
+  return row.historical ? 6 : 5;
+}
+
+function branchRowStatusLabel(row: ProjectBranchRow) {
+  switch (row.status) {
+    case "synchronized": return "同期済み";
+    case "local_ahead": return "ローカル先行（未push）";
+    case "remote_ahead": return "リモート先行（未pull）";
+    case "diverged": return "分岐";
+    case "remote_only": return "リモートのみ";
+    case "remote_unavailable": return "リモート参照未取得";
+    case "tracking_unavailable": return "追跡状態未取得";
+    case "tracking_inconsistent": return "追跡状態不整合";
+    case "mixed": return "ローカル混在";
+    case "local_only": return "ローカルのみ";
+    case "upstream_deleted": return "追跡先削除済み";
+    case "detached": return "detached HEAD";
+    case "historical_deleted": return "削除済み・PR履歴";
+    default: return row.historical ? "完了履歴" : "状態未取得";
+  }
+}
+
+function branchRowStatusClass(row: ProjectBranchRow) {
+  if (row.status === "diverged" || row.status === "upstream_deleted") return "lane-state-danger";
+  if (row.status === "local_ahead" || row.status === "remote_ahead" || row.status === "remote_unavailable" || row.status === "tracking_unavailable" || row.status === "tracking_inconsistent" || row.status === "mixed") return "lane-state-warn";
+  if (row.status === "synchronized") return "lane-state-ok";
+  return "lane-state-muted";
+}
+
+function isDefaultBranchRow(row: ProjectBranchRow, defaultBranch: string | null) {
+  if (!defaultBranch || row.historical) return false;
+  return row.remote_ref === `origin/${defaultBranch}`;
+}
+
+function BranchRows({
   project,
   range,
-  timeline,
-  selectedKey,
-  onTimelineChange,
-  onSelect,
+  onRangeChange,
+  searchQuery,
+  onSearch,
+  filter,
+  onFilter,
+  order,
+  onOrder,
   selectedLane,
   onSelectLane,
-  onRangeChange,
+  onOpenGit,
+  onSelect,
   showMerged,
   onShowMergedChange,
 }: {
   project: ProjectResponse;
   range: TimeRange;
-  timeline: number;
-  selectedKey: string | null;
-  onTimelineChange: (value: number) => void;
-  onSelect: (event: FlowEvent) => void;
+  onRangeChange: (range: TimeRange) => void;
+  searchQuery: string;
+  onSearch: (query: string) => void;
+  filter: LaneFilter;
+  onFilter: (filter: LaneFilter) => void;
+  order: LaneOrder;
+  onOrder: (order: LaneOrder) => void;
   selectedLane: string | null;
   onSelectLane: (lane: ProjectLane) => void;
-  onRangeChange: (range: TimeRange) => void;
+  onOpenGit: (lane: ProjectLane) => void;
+  onSelect: (event: ProjectEvent, branchRowId?: string) => void;
   showMerged: boolean;
   onShowMergedChange: (value: boolean) => void;
 }) {
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(timeline < 100);
-  useEffect(() => {
-    if (timeline < 100) setHistoryOpen(true);
-  }, [timeline]);
-  const flowScrollRef = useRef<HTMLDivElement>(null);
-  const firstLaneLabelRef = useRef<HTMLDivElement>(null);
-  const laneButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const [navigationLane, setNavigationLane] = useState("");
-  const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
-  const [renderedLabelWidth, setRenderedLabelWidth] = useState(220);
-  const graphRows = project.graph?.rows ?? [];
-  const graphHashes = useMemo(() => new Set(graphRows.map((row) => row.hash)), [graphRows]);
-  const relationLaneIds = useMemo(() => new Set(project.merge_relations.flatMap((relation) => (
-    [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
-  ))), [project.merge_relations]);
-  const lanes = useMemo(() => {
-    const source = project.lanes.filter((lane) => showMerged || relationLaneIds.has(lane.id) || lane.branch === project.default_branch || !isFoldedMerged(lane));
-    const defaultBranch = project.default_branch;
-    return [...source].sort((a, b) => {
-      if (a.branch === defaultBranch && b.branch !== defaultBranch) return -1;
-      if (b.branch === defaultBranch && a.branch !== defaultBranch) return 1;
-      if (isFoldedMerged(a) !== isFoldedMerged(b)) return isFoldedMerged(a) ? 1 : -1;
-      if ((a.conflict === true) !== (b.conflict === true)) return a.conflict === true ? -1 : 1;
-      if ((a.dirty === true) !== (b.dirty === true)) return a.dirty === true ? -1 : 1;
-      const aDate = a.last_commit?.date ?? "";
-      const bDate = b.last_commit?.date ?? "";
-      return bDate.localeCompare(aDate);
+  const normalizedQuery = normalizedSearchQuery(searchQuery);
+  const rows = useMemo(() => {
+    const source = projectBranchRows(project);
+    const visible = source.filter((row) => (showMerged || !row.historical) && branchRowMatchesSearch(row, normalizedQuery));
+    const filtered = visible.filter((row) => branchRowMatchesFilter(row, filter));
+    return [...filtered].sort((a, b) => {
+      if (isDefaultBranchRow(a, project.default_branch) && !isDefaultBranchRow(b, project.default_branch)) return -1;
+      if (isDefaultBranchRow(b, project.default_branch) && !isDefaultBranchRow(a, project.default_branch)) return 1;
+      if (order === "attention" && branchRowPriority(a) !== branchRowPriority(b)) return branchRowPriority(a) - branchRowPriority(b);
+      if (order === "latest" && branchRowLatestTime(project, a) !== branchRowLatestTime(project, b)) return branchRowLatestTime(project, b) - branchRowLatestTime(project, a);
+      if (a.historical !== b.historical) return a.historical ? 1 : -1;
+      return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
     });
-  }, [project.default_branch, project.lanes, relationLaneIds, showMerged]);
-
-  const laneRows = useMemo(
-    () => {
-      const rows = new Map(graphRows.map((row) => [row.hash, row]));
-      return new Map(lanes.map((lane) => [lane.id, (lane.flow_hashes ?? []).flatMap((hash) => { const row = rows.get(hash); return row ? [row] : []; })]));
-    },
-    [graphRows, lanes],
-  );
-  const visibleEventHashes = useMemo(
-    () => new Set(project.events.filter((event) => event.type === "commit" && event.commit_hash).map((event) => event.commit_hash as string)),
-    [project.events],
-  );
-  const allEvents = useMemo(() => {
-    const events: { row: GraphRow; lane: ProjectLane }[] = [];
-    for (const lane of lanes) {
-      for (const row of laneRows.get(lane.id) ?? []) {
-        // The API supplies graph rows needed to draw the merge-base route, but
-        // only events inside the requested range receive hover stats/points.
-        if (visibleEventHashes.has(row.hash)) events.push({ row, lane });
-      }
-    }
-    return events;
-  }, [laneRows, lanes, visibleEventHashes]);
-  useEffect(() => {
-    const scroll = flowScrollRef.current;
-    const label = firstLaneLabelRef.current;
-    if (!scroll || !label) return;
-    const updateWidth = () => {
-      const labelWidth = Math.round(label.getBoundingClientRect().width);
-      setRenderedLabelWidth((current) => current === labelWidth ? current : labelWidth);
-      const scrollStyle = getComputedStyle(scroll);
-      const horizontalPadding = parseFloat(scrollStyle.paddingLeft) + parseFloat(scrollStyle.paddingRight);
-      const next = Math.max(0, Math.round(scroll.clientWidth - horizontalPadding - labelWidth));
-      setAvailableTrackWidth((current) => current === next ? current : next);
-    };
-    updateWidth();
-    window.addEventListener("resize", updateWidth);
-    if (typeof ResizeObserver === "undefined") {
-      return () => {
-        window.removeEventListener("resize", updateWidth);
-      };
-    }
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(scroll);
-    observer.observe(label);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", updateWidth);
-    };
-  }, [lanes.length]);
-  const allTimes = allEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
-  const now = project.observed_at * 1000;
-  const rangeCutoff = range === "24h" ? now - 86_400_000 : range === "7d" ? now - 604_800_000 : null;
-  const rangeEvents = allEvents.filter(({ row, lane }) => {
-    if (range === "current") {
-      return row.hash === lane.head;
-    }
-    const value = eventDate(row);
-    return value !== null && (rangeCutoff === null || value >= rangeCutoff);
-  });
-  const rangeTimes = rangeEvents.map(({ row }) => eventDate(row)).filter((value): value is number => value !== null);
-  const relationTimes = topologyRelationTimes(project.merge_relations, range, now);
-  const displayedTimes = [...rangeTimes, ...relationTimes];
-  const minTime = Math.min(now - 1, ...(displayedTimes.length ? displayedTimes : allTimes.length ? allTimes : [now]));
-  const maxTime = now;
-  const observationTime = minTime + ((now - minTime) * timeline) / 100;
-  const observationX = recentTimePosition(observationTime, minTime, maxTime);
-  const observationLabel = exactDate(new Date(observationTime).toISOString());
-  const axisLabel = (time: number) => new Date(time).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  // Agent history is resolved against the same observation point as the Git
-  // flow. A historical slider value must never show the current task state.
-  const observedAgentEvents = useMemo(
-    () => agentSnapshotAt(project.agent_events, observationTime),
-    [observationTime, project.agent_events],
-  );
-  const positionedEvents = rangeEvents
-    .filter(({ row }) => {
-      const value = eventDate(row);
-      return value !== null && value <= observationTime;
-    })
-    .map(({ row, lane }) => ({
-      row,
-      lane,
-      x: recentTimePosition(eventDate(row)!, minTime, maxTime),
-      hitX: 0,
-      pointOffset: 0,
-      id: flowEventKey(lane.id, row.hash),
-    }));
-  const minimumTrackWidth = Math.max(440, ...lanes.map((lane) => (eventsByLaneCount(positionedEvents, lane.id) || 1) * 44));
-  // A track grows to the available viewport width when it fits, and becomes
-  // horizontally scrollable when 44px hit areas need more room.  The same
-  // resolved width is passed to the per-lane layout and rendered as the
-  // explicit track width, keeping point/offset/popover geometry aligned.
-  const trackWidth = Math.max(minimumTrackWidth, availableTrackWidth);
-  const timeTicks = graphTimeTicks(minTime, maxTime, trackWidth);
-  const events = lanes.flatMap((lane) => layoutFlowEvents(
-    positionedEvents.filter((event) => event.lane.id === lane.id),
-    trackWidth,
-  ));
-  const eventsByLane = new Map<string, FlowEvent[]>();
-  for (const event of events) eventsByLane.set(event.lane.id, [...(eventsByLane.get(event.lane.id) ?? []), event]);
-  const visibleMergeKeys = new Set(project.merge_relations
-    .filter((relation) => relation.kind === "merge" && mergeRelationInWindow(relation, minTime, maxTime, observationTime))
-    .map((relation) => `${relation.commit_hash}:${relation.source_parent}`));
-  const registerEventButton = useCallback((id: string, node: HTMLButtonElement | null) => {
-    if (node) eventButtonRefs.current.set(id, node);
-    else eventButtonRefs.current.delete(id);
-  }, []);
-  const navigateEvent = useCallback((current: FlowEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => {
-    const laneIndex = lanes.findIndex((lane) => lane.id === current.lane.id);
-    if (laneIndex < 0) return;
-    // eventsByLane is produced from the ancestry/display path. Preserve that
-    // order for equal timestamps and keyboard traversal (parent → child).
-    const laneEvents = [...(eventsByLane.get(current.lane.id) ?? [])];
-    let target: FlowEvent | undefined;
-    if (key === "ArrowLeft" || key === "ArrowRight") {
-      const currentIndex = laneEvents.findIndex((item) => item.row.hash === current.row.hash);
-      const nextIndex = currentIndex + (key === "ArrowLeft" ? -1 : 1);
-      target = laneEvents[nextIndex];
-    } else {
-      const nextLane = lanes[laneIndex + (key === "ArrowUp" ? -1 : 1)];
-      const candidates = nextLane ? [...(eventsByLane.get(nextLane.id) ?? [])] : [];
-      target = candidates.sort((a, b) => Math.abs(a.x - current.x) - Math.abs(b.x - current.x))[0];
-    }
-    if (target) {
-      const button = eventButtonRefs.current.get(target.id);
-      if (!button) return;
-      button.focus();
-    }
-  }, [eventsByLane, lanes]);
-  const rowHeight = 88;
-  const routedMergeLinks: (ProjectMergeRelation & { path: string; arrow: string | null; outside: boolean; clockSkew: boolean })[] = topologyConnections(project.merge_relations, lanes, graphRows, minTime, maxTime, observationTime, trackWidth, rowHeight);
-  const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
+  }, [filter, normalizedQuery, order, project, showMerged]);
+  const allRows = useMemo(() => projectBranchRows(project), [project]);
+  const visibleRows = allRows.filter((row) => showMerged || !row.historical);
+  const historicalCount = allRows.filter((row) => row.historical).length;
+  const remoteCount = rows.filter((row) => row.remote_ref !== null).length;
 
   return (
-    <section className="flow-section" aria-labelledby="flow-map-title">
-      <div className="flow-controls">
-        <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチを選ぶと作業の詳細、点を選ぶとコミットの詳細を開けます。</p></div><span className="flow-direction">過去を圧縮 → 直近を詳しく</span></div>
-        <div className="flow-toolbar">
-          <div className="range-tabs" role="group" aria-label="表示するコミット">
-            <span className="flow-control-label">表示範囲</span>
-            {ranges.map((item) => <button aria-pressed={range === item.id} className="range-tab" key={item.id} type="button" onClick={() => onRangeChange(item.id)}>{item.label}</button>)}
-          </div>
-          <div className="flow-control-actions">
-            <label className="flow-branch-jump"><span>ブランチへ移動</span><select aria-label="グラフのブランチへ移動" value={lanes.some((lane) => lane.id === navigationLane) ? navigationLane : ""} onChange={(event) => {
-              const id = event.target.value;
-              setNavigationLane(id);
-              const button = laneButtonRefs.current.get(id);
-              if (!button) return;
-              button.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
-              button.focus({ preventScroll: true });
-            }}><option value="">ブランチを選択</option>{lanes.map((lane) => <option key={lane.id} value={lane.id}>{laneLabel(lane)}</option>)}</select></label>
-            {mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}
-            <button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })}>右端へ移動 →</button>
-          </div>
+    <section className="branch-rows-section" aria-labelledby="branch-rows-title">
+      <div className="section-heading-row">
+        <div>
+          <h3 id="branch-rows-title">ブランチ</h3>
+          <p className="section-copy">リモートブランチを基準に、追跡しているローカルブランチと作業場所を同じ行へまとめています。履歴はそのブランチから到達できるコミットです。</p>
         </div>
+        {historicalCount > 0 && <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了履歴を折り畳む" : `完了履歴を表示 (${historicalCount})`}</button>}
       </div>
-      {project.graph?.truncated && lanes.some((lane) => lane.head && !graphHashes.has(lane.head)) && <div className="graph-incomplete-note" role="status"><span>先端コミットが取得範囲外のブランチがあります。</span><button className="subtle-button" type="button" onClick={() => onRangeChange("all")}>全期間で確認</button></div>}
-      <details className="flow-history" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
-        <summary>履歴をたどる <span>{timeline === 100 ? "最新の観測" : "過去を表示中"} · {observationLabel}</span></summary>
-        <div className="flow-observation">
-          <label className="timeline-control">
-            <span>表示時点</span>
-            <input aria-label="過去の観測時点" aria-valuetext={observationLabel} max="100" min="0" onChange={(event) => onTimelineChange(100 * (recentTimeAt(Number(event.target.value), minTime, maxTime) - minTime) / (maxTime - minTime))} step="1" type="range" value={observationX} />
-            <output>{timeline === 100 ? "最新の観測" : "選択日時"} · {observationLabel}</output>
-          </label>
-          <button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button>
+      <div className="branch-rows-toolbar">
+        <div className="range-tabs" role="group" aria-label="表示するコミット">
+          <span className="flow-control-label">表示範囲</span>
+          {ranges.map((item) => <button aria-pressed={range === item.id} className="range-tab" key={item.id} type="button" onClick={() => onRangeChange(item.id)}>{item.label}</button>)}
         </div>
-      </details>
-      {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・ブランチ作業履歴を表示中。ブランチ名とGit作業状態、作業詳細は現在の情報です。</p>}
-      {lanes.length === 0 ? (
-        <div className="empty-flow">表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。</div>
+        <div className="branch-rows-count" role="status">{rows.length} / {visibleRows.length} 行 · リモート {remoteCount}</div>
+      </div>
+      <div className="project-search-toolbar" role="search" aria-label="ブランチを検索">
+        <label><span>検索</span><input aria-label="ブランチを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="ブランチ・作業パス・PR" /></label>
+        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>クリア</button>
+        <label><span>並び順</span><select aria-label="ブランチの並び順" value={order} onChange={(event) => onOrder(event.target.value as LaneOrder)}><option value="name">名前</option><option value="attention">要確認順</option><option value="latest">最新コミット順</option></select></label>
+      </div>
+      <div className="lane-filters" role="group" aria-label="ブランチの状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{visibleRows.filter((row) => branchRowMatchesFilter(row, item.id)).length}</span></button>)}</div>
+      {rows.length === 0 ? (
+        <div className="empty-flow">{normalizedQuery ? "検索に一致するブランチはありません。" : "この条件に一致するブランチはありません。"}{(normalizedQuery || filter !== "all" || !showMerged) && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); if (!showMerged && historicalCount) onShowMergedChange(true); }}>絞り込みを解除</button>}</div>
       ) : (
-        <div
-          className="flow-scroll"
-          role="region"
-          aria-label="Gitフローマップ（横スクロール可能）"
-          ref={flowScrollRef}
-          style={{ "--flow-popover-space": previewId ? "360px" : "0px" } as React.CSSProperties}
-          tabIndex={0}
-        >
-          <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
-            <span>ブランチ / 現在の作業状態</span>
-            <div className="flow-axis-track">
-              {timeTicks.map((tick) => <span className={`flow-time-tick${tick.edge ? ` is-${tick.edge}` : ""}`} key={tick.time} style={{ left: `${tick.position}%` }} title={exactDate(new Date(tick.time).toISOString())}><span className="flow-tick-date">{tick.dateLabel}</span><span>{tick.timeLabel}</span></span>)}
-            </div>
-          </div>
-          <div className="flow-rows" style={{ "--flow-row-height": `${rowHeight}px`, "--flow-lanes": lanes.length, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as React.CSSProperties}>
-          <svg
-            aria-hidden="true"
-            className="flow-connections"
-            preserveAspectRatio="none"
-            viewBox={`0 0 ${trackWidth} ${lanes.length * rowHeight}`}
-          >
-            {timeTicks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={lanes.length * rowHeight} />)}
-            <line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={lanes.length * rowHeight} />
-            {routedMergeLinks.map((link) => {
-              const related = selectedLane === link.source_lane_id || selectedLane === link.target_lane_id;
-              return (
-                <g data-connection-kind={link.kind} data-source-lane={link.source_lane_id} data-target-lane={link.target_lane_id} className={`flow-merge-route flow-connection-${link.kind}${link.kind === "commit" && link.target_branch === project.default_branch ? " flow-connection-default" : ""}${selectedLane ? related ? " is-emphasized" : " is-muted" : ""}`} key={`${link.commit_hash}:${link.source_parent}`}>
-                  <title>{`${link.kind === "branch" ? "履歴上の分岐" : link.kind === "merge" ? "合流" : "コミット"}: ${link.source_branch} → ${link.target_branch} · ${shortHash(link.commit_hash)}${link.pr_number ? ` · PR #${link.pr_number}` : ""}${link.clockSkew ? " · 親子の記録日時が逆転しています" : ""}`}</title>
-                  <path className={`flow-merge-link${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />
-                  {link.arrow && <path className="flow-merge-direction" d={link.arrow} />}
-                </g>
-              );
-            })}
-          </svg>
-          {lanes.map((lane, index) => {
-            const laneEvents = eventsByLane.get(lane.id) ?? [];
-            const visibleRelations = [
-              ...lane.merge_sources.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => `→ ${relation.target_branch ?? "不明"}`),
-              ...lane.merge_targets.filter((relation) => visibleMergeKeys.has(`${relation.commit_hash}:${relation.source_parent}`)).map((relation) => `${relation.source_branch ?? "不明"} →`),
-            ].join(" / ");
-            const snapshot = laneAgentSnapshotAt(lane, observedAgentEvents, observationTime)[0]
-              ?? (timeline === 100 ? currentLaneAgent(lane) : null);
-            return (
-              <div className={`flow-row${lane.branch === project.default_branch ? " is-default" : ""}${selectedLane === lane.id ? " is-selected" : ""}`} key={lane.id}>
-                <div className="flow-lane-label" ref={index === 0 ? firstLaneLabelRef : undefined}>
-                  <div className="flow-lane-title">
-                    <span className="lane-shape" aria-hidden="true" />
-                    <button ref={(node) => { if (node) laneButtonRefs.current.set(lane.id, node); else laneButtonRefs.current.delete(lane.id); }} className="flow-lane-button" aria-pressed={selectedLane === lane.id} title={laneLabel(lane)} type="button" onClick={() => onSelectLane(lane)}>{laneLabel(lane)}</button>
-                  </div>
-                  <div className="flow-lane-meta">
-                    <span className={`lane-state ${laneStateClass(lane, project.default_branch)}`}>{laneState(lane, project.default_branch)}</span>
-                    <span title={snapshot?.summary ?? undefined}>{snapshot ? agentStateLabel(agentTaskState(snapshot)) : lane.historical ? "現在の作業ブランチではありません" : "作業状況の報告なし"}</span>
-                  </div>
-                  <div className="flow-lane-relation" title={visibleRelations}>
-                    {lane.unborn ? "コミットを作成すると履歴が表示されます" : visibleRelations ? visibleRelations : lane.alias_lane_id ? `先端は ${laneLabel(project.lanes.find((item) => item.id === lane.alias_lane_id)!)} と共有` : "コミットの親子関係を表示"}
-                  </div>
-                </div>
-                <div className="flow-track">
-                  {laneEvents.length === 0 && <span className="flow-track-empty">{lane.unborn ? "まだコミットがありません" : !project.graph ? "履歴未取得" : lane.head && !graphHashes.has(lane.head) ? "先端コミットは取得範囲外" : timeline < 100 ? "選択日時までの表示対象コミットなし" : "この表示範囲にコミットなし"}</span>}
-                  {laneEvents.map((event) => {
-                    return (
-                      <FlowEventButton
-                        event={event}
-                        key={event.id}
-                        onPreview={setPreviewId}
-                        onRegister={registerEventButton}
-                        onNavigate={navigateEvent}
-                        onSelect={onSelect}
-                        popoverBelow={index < 2}
-                        preview={previewId === event.id}
-                        selected={selectedKey === event.id}
-                        trackWidth={trackWidth}
-                      />
-                    );
-                  })}
-                  {laneEvents.length > 0 && <div className="flow-latest-visible">
-                    <span className="flow-latest-caption">最新</span><span title={laneEvents[laneEvents.length - 1].row.subject}>{laneEvents[laneEvents.length - 1].row.subject}</span>
-                    <time dateTime={laneEvents[laneEvents.length - 1].row.date}>{axisLabel(eventDate(laneEvents[laneEvents.length - 1].row)!)}</time>
-                  </div>}
-                </div>
-              </div>
-            );
-          })}
-          <div className="flow-current-label" style={{ left: `${renderedLabelWidth + (observationX * trackWidth) / 100}px` }} aria-hidden="true">
-            {timeline === 100 ? "最新の観測" : "選択日時"}
-          </div>
-          </div>
+        <div className="branch-row-list">
+          {rows.map((row) => <BranchRowCard key={row.id} project={project} row={row} range={range} selectedLane={selectedLane} onSelectLane={onSelectLane} onOpenGit={onOpenGit} onSelect={onSelect} />)}
         </div>
       )}
-      <div className="flow-legend" aria-label="フロー凡例">
-        <span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span>
-        <span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span>
-        <span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span>
-        <span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span>
-        <span><i className="legend-line legend-line-base" aria-hidden="true" /> 既定ブランチ</span>
-        <span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span><span>緑の矢印: 履歴上の分岐</span>
-        <span className="flow-time-direction">時間 →（直近ほど広く）</span>
+      <div className="branch-row-notes">
+        {project.branch_rows === null && <span role="status">ブランチ行の取得に失敗しました。再走査してから再試行してください。</span>}
+        <span>Git最終成功fetch: {project.fetched_at === null ? "未取得" : exactDate(new Date(project.fetched_at * 1000).toISOString())}</span>
+        <span>ローカルの追跡先・ahead/behindは最後に取得したGit状態です。リモート追跡参照はfetch時点のスナップショットです。</span>
+        {project.github.status === "available" && <span>PR情報: GitHubから取得済み · {exactDate(project.github.checked_at === null ? null : new Date(project.github.checked_at * 1000).toISOString())}</span>}
+        {project.github.status === "unavailable" && <span role="status">PR情報は取得できませんでした。{project.github.reason ?? "GitHubの認証または接続を確認してください。"}</span>}
       </div>
-      {!project.graph && <div className="inline-note">コミットグラフは未取得です。</div>}
-      {project.github.status === "unavailable" && <div className="inline-note" role="status">{project.github.reason}。Gitの親子関係は表示しています。</div>}
-      {project.github.status === "available" && <div className="flow-pr-status">PR情報: GitHubから取得済み · {exactDate(project.github.checked_at === null ? null : new Date(project.github.checked_at * 1000).toISOString())}</div>}
-      {project.flow.integrations.length > 0 && <details className="flow-help"><summary>通常のマージ線で表せないPR ({project.flow.integrations.length})</summary><p>取り込み先のコミットに複数の親がないため、Gitの合流線を作成しません。Squash・Rebaseなどの取り込みはPRで確認できます。</p>{project.flow.integrations.map((pr) => <p key={pr.number}><a href={pr.url} target="_blank" rel="noreferrer">PR #{pr.number}</a> {pr.source} → {pr.target} · {shortHash(pr.commit_hash)}</p>)}</details>}
-      <details className="flow-help">
-        <summary>グラフの見方・キーボード操作</summary>
-        <p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進みます。直近を広く、過去を圧縮した時間軸です。同じ横幅が同じ時間間隔を表すとは限りません。</p>
-        <p>点にフォーカスすると概要を表示。左右キーで前後のコミット、上下キーで別ブランチへ移動し、Enterで詳細を開きます。タッチ操作では点をタップして概要を開けます。</p>
-        <p>線はGitのコミットの親子関係です。緑の矢印は履歴上の分岐、紫の矢印は合流で、先端は変更を受け取るコミットを示します。ブランチ作成の正確な日時を示すものではありません。行の名前には現在のブランチと、コミットが一致したPR情報を使います。当時の所属を保証するものではなく、名前不明の経路も残します。破線は接続元が表示範囲外です。親子の記録日時が逆転した場合も、矢印は親から子へ向けます。ブランチ作業状況は明示された報告を表示します。</p>
-      </details>
-      {project.graph?.truncated && <div className="inline-note">直近 200 件から表示しています。それ以前の履歴は「全期間」で確認できます。</div>}
     </section>
+  );
+}
+
+function BranchRowCard({
+  project,
+  row,
+  range,
+  selectedLane,
+  onSelectLane,
+  onOpenGit,
+  onSelect,
+}: {
+  project: ProjectResponse;
+  row: ProjectBranchRow;
+  range: TimeRange;
+  selectedLane: string | null;
+  onSelectLane: (lane: ProjectLane) => void;
+  onOpenGit: (lane: ProjectLane) => void;
+  onSelect: (event: ProjectEvent, branchRowId?: string) => void;
+}) {
+  const [historyOpen, setHistoryOpen] = useState(range !== "current");
+  const [localsOpen, setLocalsOpen] = useState(false);
+  const [extraCommits, setExtraCommits] = useState<ProjectBranchCommit[]>([]);
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [historyOffset, setHistoryOffset] = useState(row.history_cursor);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const historyKey = `${project.main_path}|${row.id}|${range}|${row.history_heads.join(",")}|${row.history_cursor ?? ""}|${row.commit_hashes.length}|${row.tip_commits.map((commit) => commit.hash).join(",")}`;
+  const historyRequestKey = useRef(historyKey);
+  useEffect(() => {
+    historyRequestKey.current = historyKey;
+    setExtraCommits([]);
+    setVisibleCount(20);
+    setHistoryOffset(row.history_cursor);
+    setHistoryLoading(false);
+    setHistoryError(null);
+  }, [historyKey, row.history_cursor]);
+  const metadataByHash = new Map([...row.tip_commits, ...row.commits, ...extraCommits].map((commit) => [commit.hash, commit]));
+  // The current view is a tip view: every unique remote/local HEAD is
+  // supplied separately so an older tip cannot disappear behind the first
+  // bounded history page. Wider ranges use the ordered history page.
+  const allHistoryHashes = range === "current"
+    ? Array.from(new Set(row.tip_commits.map((commit) => commit.hash)))
+    : Array.from(new Set([...row.commit_hashes, ...extraCommits.map((commit) => commit.hash)]));
+  const commitInfos = allHistoryHashes.map((hash) => branchRowCommitInfo(project, row, hash, metadataByHash.get(hash) ?? null));
+  const now = project.observed_at * 1000;
+  const cutoff = range === "24h" ? now - 86_400_000 : range === "7d" ? now - 604_800_000 : null;
+  const commits = commitInfos.filter((commit) => {
+    if (range === "current") return true;
+    if (cutoff === null) return true;
+    const date = commit.date ? Date.parse(commit.date) : NaN;
+    return Number.isFinite(date) && date >= cutoff;
+  });
+  const shownCommits = commits.slice(0, visibleCount);
+  const canShowBuffered = shownCommits.length < commits.length;
+  const canLoadMore = range !== "current" && !canShowBuffered && historyOffset !== null;
+  const loadMoreHistory = async () => {
+    if (historyLoading || range === "current") return;
+    if (canShowBuffered) {
+      setVisibleCount((count) => count + 20);
+      return;
+    }
+    if (historyOffset === null || row.history_heads.length === 0) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    const requestKey = historyKey;
+    const params = new URLSearchParams({ path: project.main_path, offset: String(historyOffset) });
+    row.history_heads.forEach((head) => params.append("heads", head));
+    try {
+      const response = await fetch(`/api/repo/branch-history?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const page = await response.json() as { commits: ProjectBranchCommit[]; next_offset: number | null };
+      if (historyRequestKey.current !== requestKey) return;
+      setExtraCommits((current) => {
+        const known = new Set(current.map((commit) => commit.hash));
+        return [...current, ...page.commits.filter((commit) => !known.has(commit.hash))];
+      });
+      setHistoryOffset(page.next_offset);
+      setVisibleCount((count) => count + 20);
+    } catch {
+      if (historyRequestKey.current === requestKey) setHistoryError("追加の履歴を取得できませんでした。");
+    } finally {
+      if (historyRequestKey.current === requestKey) setHistoryLoading(false);
+    }
+  };
+  const firstLocal = row.locals[0] ?? null;
+  const selected = row.locals.some((lane) => lane.id === selectedLane);
+  const primaryAgent = row.locals.find((lane) => lane.agent)?.agent ?? null;
+  useEffect(() => {
+    if (selected) setLocalsOpen(true);
+  }, [selected]);
+  return (
+    <article className={`branch-row-card${row.historical ? " is-historical" : ""}${selected ? " is-selected" : ""}`}>
+      <header className="branch-row-header">
+        <div className="branch-row-title-group">
+          <span className={`branch-row-shape${row.historical ? " is-historical" : row.remote_ref ? " is-remote" : " is-local"}`} aria-hidden="true" />
+          {firstLocal ? <button className="branch-row-name" type="button" aria-pressed={selected} onClick={() => onSelectLane(firstLocal)}><strong>{row.name}</strong><span>{firstLocal.branch === row.name ? "" : firstLocal.branch ?? "ローカル名未取得"}</span></button> : <strong className="branch-row-name-text">{row.name}</strong>}
+          {isDefaultBranchRow(row, project.default_branch) && <span className="baseline-tag">既定</span>}
+          {row.historical && <span className="lane-state lane-state-muted">完了履歴</span>}
+        </div>
+        <div className="branch-row-summary-badges">
+          <span className={`lane-state ${branchRowStatusClass(row)}`}>{branchRowStatusLabel(row)}</span>
+          {row.historical ? <span className="branch-source-badge is-history">history</span> : row.remote_ref ? <span className="branch-source-badge">remote</span> : <span className="branch-source-badge is-local">local only</span>}
+          {primaryAgent && <span className={`agent-state agent-state-${agentTaskState(primaryAgent)}`}>{agentStateLabel(agentTaskState(primaryAgent))}</span>}
+          {row.locals.some((lane) => lane.conflict === true) && <span className="lane-state lane-state-danger">競合</span>}
+          {row.locals.some((lane) => lane.dirty === true) && <span className="lane-state lane-state-warn">変更あり</span>}
+        </div>
+      </header>
+      <div className="branch-row-refs">
+        <div><span className="branch-row-label">リモート</span><code>{row.remote_ref ?? "なし"}</code>{row.remote_hash && <code title={row.remote_hash}>{shortHash(row.remote_hash)}</code>}</div>
+        <div><span className="branch-row-label">ローカル</span><span>{row.locals.length ? `${row.locals.length} 件` : "なし"}</span>{row.tracking_ref && <code>{row.tracking_ref}</code>}</div>
+      </div>
+      {row.locals.length > 0 && <details className="branch-row-locals" open={localsOpen} onToggle={(event) => setLocalsOpen(event.currentTarget.open)}>
+        <summary>ローカルブランチと作業場所 <span>{row.locals.length}件</span></summary>
+        <div className="branch-local-list">
+          {row.locals.map((lane) => <div className="branch-local-item" key={lane.id}>
+            <div className="branch-local-main">
+              <button className="branch-local-name" type="button" aria-pressed={selectedLane === lane.id} onClick={() => onSelectLane(lane)}><strong>{lane.branch ?? lane.name}</strong><code>{shortHash(lane.head)}</code></button>
+              <span className="branch-local-path" title={lane.path ?? undefined}>{lane.path ?? "作業ディレクトリなし"}</span>
+              <div className="branch-local-facts"><LaneSummary defaultBranch={project.default_branch} lane={lane} /><span className="branch-local-diff">{upstreamLabel(lane)}</span></div>
+            </div>
+            <div className="branch-local-actions"><button className="table-action" type="button" disabled={!lane.path} title={!lane.path ? "このブランチには作業ディレクトリがありません" : undefined} onClick={() => onOpenGit(lane)}>Git詳細</button>{!lane.path && <small className="no-checkout">作業ディレクトリなし</small>}</div>
+          </div>)}
+        </div>
+      </details>}
+      {row.pull_requests.length > 0 && <div className="branch-row-prs"><h4>マージ済みPR</h4>{row.pull_requests.map((pullRequest) => <div className="branch-row-pr" key={`${pullRequest.number}:${pullRequest.commit_hash ?? ""}`}><a href={pullRequest.url} target="_blank" rel="noreferrer">PR #{pullRequest.number}</a><span>{pullRequest.source} → {pullRequest.target}</span>{pullRequest.commit_hash && <code>{shortHash(pullRequest.commit_hash)}</code>}{pullRequest.merged_at && <time dateTime={pullRequest.merged_at}>{exactDate(pullRequest.merged_at)}</time>}</div>)}</div>}
+      <details className="branch-row-history" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
+        <summary>到達可能なコミット <span>{commits.length}{commits.length !== commitInfos.length ? ` / ${commitInfos.length}` : ""}件</span></summary>
+        {shownCommits.length > 0 ? <ol className="branch-commit-list">{shownCommits.map((commit) => <li key={commit.hash}><button className="branch-commit-button" type="button" onClick={() => onSelect(commit.event, row.id)}><span className="branch-commit-main"><code>{shortHash(commit.hash)}</code><strong title={commit.subject}>{commit.subject}</strong></span><span className="branch-commit-meta"><span>{commit.isMerge ? "merge" : "commit"}</span><time dateTime={commit.date ?? undefined}>{exactDate(commit.date)}</time></span></button></li>)}</ol> : <p className="branch-row-empty-history">{row.locals.some((lane) => lane.unborn) && row.history_heads.length === 0 ? "まだコミットがありません。" : range === "current" && !row.tip_metadata_available ? "先端コミットを取得できませんでした。Gitオブジェクトを確認してください。" : row.history_available ? "この範囲のコミットはありません。" : "履歴を取得できませんでした。Gitの取得範囲を確認してください。"}</p>}
+        {(canShowBuffered || canLoadMore) && <button className="branch-history-more" type="button" onClick={() => void loadMoreHistory()} disabled={historyLoading}>{historyLoading ? "履歴を取得中…" : `さらに表示（残り${Math.max(0, commits.length - shownCommits.length)}件${canLoadMore ? "以上" : ""}）`}</button>}
+        {historyError && <p className="branch-row-history-note" role="alert">{historyError} <button className="subtle-button" type="button" onClick={() => void loadMoreHistory()}>再試行</button></p>}
+        {!(range === "current" ? row.tip_metadata_available : row.commit_metadata_available) && <p className="branch-row-history-note" role="status">コミットの日時・件名を取得できないものがあります。ハッシュと現在取得できた情報を表示しています。</p>}
+        {range !== "current" && row.history_truncated && historyOffset !== null && <p className="branch-row-history-note" role="status">履歴は取得上限まで表示しています。さらに表示すると追加の履歴を取得できます。</p>}
+      </details>
+    </article>
   );
 }
 
@@ -1124,11 +886,11 @@ function CommitDetail({
   onOpenGit,
 }: {
   project: ProjectResponse;
-  event: FlowEvent | ProjectEvent;
+  event: ProjectEvent;
   lane: ProjectLane | null;
   onOpenGit: (lane: ProjectLane) => void;
 }) {
-  const hash = "row" in event ? event.row.hash : event.commit_hash;
+  const hash = event.commit_hash;
   const path = project.main_path;
   const [state, setState] = useState<LoadState>("loading");
   const [detail, setDetail] = useState<CommitDetail | null>(null);
@@ -1152,8 +914,8 @@ function CommitDetail({
   return (
     <div className="selection-content">
       <div className="selection-kicker">Git コミット</div>
-      <h3>{detail?.subject ?? ("row" in event ? event.row.subject : event.subject) ?? "コミット詳細"}</h3>
-      <div className="selection-commit-meta"><code>{hash ?? "未取得"}</code>{hash && <CopyButton value={hash} label="コミットIDをコピー" />}<span>{"row" in event ? event.row.author : event.author ?? "author 未取得"}</span><time dateTime={"row" in event ? event.row.date ?? undefined : event.occurred_at ?? undefined}>{exactDate("row" in event ? event.row.date : event.occurred_at)}</time></div>
+      <h3>{detail?.subject ?? event.subject ?? "コミット詳細"}</h3>
+      <div className="selection-commit-meta"><code>{hash ?? "未取得"}</code>{hash && <CopyButton value={hash} label="コミットIDをコピー" />}<span>{event.author ?? "author 未取得"}</span><time dateTime={event.occurred_at ?? undefined}>{exactDate(event.occurred_at)}</time></div>
       {state === "loading" && <div className="selection-loading" role="status">完全なコミット詳細を取得中…</div>}
       {state === "error" && <div className="selection-error" role="alert">コミット詳細を取得できませんでした。<button className="subtle-button" type="button" onClick={() => setRetryToken((value) => value + 1)}>再試行</button></div>}
       {state === "ready" && detail && <>
@@ -1247,7 +1009,7 @@ function SelectionPane({
   project: ProjectResponse;
   selectedHash: string | null;
   selectedLane: string | null;
-  selectedEvent: FlowEvent | ProjectEvent | null;
+  selectedEvent: ProjectEvent | null;
   onClose: () => void;
   onOpenGit: (lane: ProjectLane) => void;
 }) {
@@ -1268,7 +1030,7 @@ function SelectionPane({
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
-  const lane = flowLanes(project).find((item) => item.id === selectedLane) ?? (selectedEvent && "lane" in selectedEvent ? selectedEvent.lane : null);
+  const lane = project.lanes.find((item) => item.id === selectedLane) ?? null;
   return (
     <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal={modal ? true : undefined} role={modal ? "dialog" : "complementary"} tabIndex={-1}>
       <div className="selection-head"><span className="selection-title">選択した項目の詳細</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
@@ -1335,7 +1097,11 @@ export default function ProjectControl() {
   const [projectError, setProjectError] = useState<string | null>(null);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const resourceKey = `${urlState.path}|${urlState.range}`;
+  // Branch rows filter and page their row-level histories locally. Keep their
+  // initial project snapshot at the compact current range; Activity still
+  // requests the selected range because it consumes the global event history.
+  const projectFetchRange = urlState.tab === "flow" ? "current" : urlState.range;
+  const resourceKey = `${urlState.path}|${projectFetchRange}`;
   const invalidUrlKey = urlState.invalidParams.join(",");
   const retryProject = () => setReloadToken((value) => value + 1);
   const { laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder } = urlState;
@@ -1360,7 +1126,7 @@ export default function ProjectControl() {
 
   useEffect(() => {
     setProjectUrlCopyState("idle");
-  }, [urlState.at, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder]);
+  }, [urlState.at, urlState.branchRow, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder]);
 
   const projectSnapshotKey = useMemo(() => {
     if (!urlState.path) return "";
@@ -1386,13 +1152,13 @@ export default function ProjectControl() {
     setProjectError(null);
     const projectPath = urlState.path;
     const timer = window.setTimeout(() => {
-    void fetch(`/api/project?path=${encodeURIComponent(projectPath)}&range=${encodeURIComponent(urlState.range)}`, { cache: "no-store", signal: controller.signal })
+    void fetch(`/api/project?path=${encodeURIComponent(projectPath)}&range=${encodeURIComponent(projectFetchRange)}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => { if (!response.ok) throw new Error(response.status === 404 ? "指定されたプロジェクトが見つかりません。一覧から選び直してください。" : `サーバーから情報を取得できませんでした（HTTP ${response.status}）。`); return (await response.json()) as ProjectResponse; })
       .then((value) => { if (controller.signal.aborted) return; setProject(value); setLoadedKey(resourceKey); setProjectState("ready"); })
       .catch((reason: unknown) => { if (controller.signal.aborted) return; setProjectState("error"); setProjectError(reason instanceof TypeError ? "サーバーとの通信を確認してから再試行してください。" : reason instanceof Error ? reason.message : "情報の取得に失敗しました。"); });
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [invalidUrlKey, projectSnapshotKey, resourceKey, reloadToken, urlState.path, urlState.range]);
+  }, [invalidUrlKey, projectFetchRange, projectSnapshotKey, resourceKey, reloadToken, urlState.path]);
 
   useEffect(() => {
     if (!project || !latestAgentEvent) return;
@@ -1454,22 +1220,33 @@ export default function ProjectControl() {
   const selectedHash = urlState.event;
   const selectedLane = urlState.lane;
   useEffect(() => {
-    if (!selectedHash && !selectedLane) return;
+    if (!selectedHash && !selectedLane && !urlState.branchRow) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || gitPath || document.querySelector("dialog[open]")) return;
       event.preventDefault();
-      updateUrl({ event: null, lane: null });
+      updateUrl({ event: null, lane: null, branchRow: null });
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedHash, selectedLane, updateUrl, gitPath]);
+  }, [selectedHash, selectedLane, updateUrl, gitPath, urlState.branchRow]);
   const selectedEvent = useMemo(() => {
     if (!project || !selectedHash) return null;
-    const lane = flowLanes(project).find((item) => item.id === selectedLane);
-    const row = project.graph?.rows.find((item) => item.hash === selectedHash);
-    if (row && lane) return { row, lane, x: 0, hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(lane.id, row.hash) } as FlowEvent;
-    return project.events.find((event) => event.commit_hash === selectedHash) ?? null;
-  }, [project, selectedHash, selectedLane]);
+    const event = project.events.find((item) => item.commit_hash === selectedHash);
+    const branch = urlState.branchRow
+      ? project.branch_rows?.find((item) => item.id === urlState.branchRow) ?? null
+      : selectedLane
+        ? project.branch_rows?.find((item) => item.locals.some((lane) => lane.id === selectedLane)) ?? null
+        : project.branch_rows?.find((item) => item.commit_hashes.includes(selectedHash)) ?? null;
+    // A row is authoritative for the local context. Never reuse an unrelated
+    // lane merely because its branch name or commit hash happens to match.
+    const lane = branch
+      ? branch.locals.find((item) => item.id === selectedLane) ?? null
+      : project.lanes.find((item) => item.id === selectedLane) ?? null;
+    const metadata = branch?.tip_commits.find((item) => item.hash === selectedHash)
+      ?? branch?.commits.find((item) => item.hash === selectedHash)
+      ?? null;
+    return event || branch ? commitEventForBranch(project, selectedHash, branch?.name ?? lane?.branch ?? null, lane, metadata) : null;
+  }, [project, selectedHash, selectedLane, urlState.branchRow]);
   const copy = useCallback((value: string) => {
     const request = copyRequestRef.current + 1;
     copyRequestRef.current = request;
@@ -1504,11 +1281,14 @@ export default function ProjectControl() {
   }, []);
   const legacyRepo = gitPath ? repos.get(gitPath) ?? null : null;
 
-  const selectEvent = useCallback((event: FlowEvent | ProjectEvent) => {
-    const hash = "row" in event ? event.row.hash : event.commit_hash;
+  const selectEvent = useCallback((event: ProjectEvent, branchRowId?: string) => {
+    const hash = event.commit_hash;
     if (!hash) return;
-    const lane = "lane" in event ? event.lane : project?.lanes.find((item) => item.branch === event.branch || item.id === event.lane_id);
-    updateUrl({ event: hash, lane: lane?.id ?? null });
+    // A branch row sets lane_id explicitly. Branch names are not identity:
+    // remote-only rows and local branches may share a name, and multiple
+    // locals may intentionally track one remote row.
+    const lane = event.lane_id ? project?.lanes.find((item) => item.id === event.lane_id) : null;
+    updateUrl({ event: hash, lane: lane?.id ?? null, branchRow: branchRowId ?? null });
   }, [project?.lanes, updateUrl]);
   const selectLane = useCallback((lane: ProjectLane) => updateUrl({ lane: lane.id, event: null }), [updateUrl]);
   const openGit = useCallback((lane: ProjectLane) => {
@@ -1520,9 +1300,7 @@ export default function ProjectControl() {
     setCopyError(null);
     setGitPath(null);
   }, []);
-  const closeSelection = useCallback(() => updateUrl({ event: null, lane: null }), [updateUrl]);
-  const selectedKey = selectedHash && selectedLane ? flowEventKey(selectedLane, selectedHash) : null;
-
+  const closeSelection = useCallback(() => updateUrl({ event: null, lane: null, branchRow: null }), [updateUrl]);
   if (urlState.invalidParams.length) {
     return <main className="control-shell" id="main-content" tabIndex={-1}>
       <Link className="back-link" href={homeHref}>← プロジェクト一覧</Link>
@@ -1563,7 +1341,7 @@ export default function ProjectControl() {
       </nav>
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
-          {urlState.tab === "flow" && <FlowMap selectedLane={selectedLane} onSelectLane={selectLane} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value })} project={{ ...project, lanes: flowLanes(project), merge_relations: project.flow.connections }} range={urlState.range} selectedKey={selectedKey} showMerged={urlState.merged} timeline={urlState.at} />}
+          {urlState.tab === "flow" && <BranchRows filter={laneFilter} onFilter={setLaneFilter} onOpenGit={openGit} onOrder={setLaneOrder} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSearch={setLaneQuery} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} order={laneOrder} project={project} range={urlState.range} searchQuery={laneQuery} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} />}

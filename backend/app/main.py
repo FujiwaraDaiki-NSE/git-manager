@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -12,11 +13,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app import agent_events, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
+from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
 
@@ -123,6 +124,11 @@ def _build_graph_sync(
 def _get_commit_sync(host_path: str, repo: str, commit_hash: str) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return detail.get_commit(repo, commit_hash)
+
+
+def _get_branch_history_sync(host_path: str, repo: str, heads: list[str], offset: int) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return branch_history.read_page(repo, heads, offset)
 
 
 def _get_branches_sync(host_path: str, repo: str) -> dict[str, Any] | None:
@@ -1127,6 +1133,23 @@ async def get_repo_graph(
     )
     if result is None:
         raise HTTPException(status_code=502, detail="git log を実行できませんでした")
+    return result
+
+
+@app.get("/api/repo/branch-history")
+async def get_repo_branch_history(
+    path: str,
+    heads: list[str] = Query(..., min_length=1, max_length=128),
+    offset: int = Query(..., ge=0),
+) -> dict[str, Any]:
+    repo = _known_repo(path)
+    if not all(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head) for head in heads):
+        raise HTTPException(status_code=422, detail="履歴の先端は完全なコミットハッシュで指定してください")
+    result = await asyncio.get_running_loop().run_in_executor(
+        pool, _get_branch_history_sync, path, repo, heads, offset,
+    )
+    if result is None:
+        raise HTTPException(status_code=502, detail="ブランチの履歴を取得できませんでした")
     return result
 
 
