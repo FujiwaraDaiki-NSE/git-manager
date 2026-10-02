@@ -1,0 +1,425 @@
+/* Standalone worktree inventory. Import this file from the app's root CSS entry. */
+.worktree-explorer {
+  --worktree-panel: var(--panel);
+  --worktree-panel-soft: var(--hover);
+  --worktree-border: var(--rule);
+  --worktree-border-strong: var(--accent);
+  --worktree-ink: var(--ink);
+  --worktree-muted: var(--muted);
+  --worktree-blue: var(--accent);
+  --worktree-blue-soft: var(--selected);
+  --worktree-green: var(--c-index);
+  --worktree-green-soft: color-mix(in srgb, var(--c-index) 15%, var(--panel));
+  --worktree-amber: var(--c-behind);
+  --worktree-amber-soft: color-mix(in srgb, var(--c-behind) 15%, var(--panel));
+  --worktree-red: var(--c-conflict);
+  --worktree-red-soft: color-mix(in srgb, var(--c-conflict) 15%, var(--panel));
+  --worktree-purple: var(--c-tag);
+  color: var(--worktree-ink);
+  min-width: 0;
+}
+
+.worktree-explorer-heading {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--worktree-border);
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  padding-bottom: 16px;
+}
+
+.worktree-explorer-kicker {
+  color: var(--worktree-muted);
+  font: 700 10px var(--mono);
+  letter-spacing: .12em;
+  margin: 0 0 5px;
+  text-transform: uppercase;
+}
+
+.worktree-explorer-heading h2 {
+  font: 600 clamp(18px, 2.1vw, 24px)/1.25 var(--sans);
+  letter-spacing: -.02em;
+  margin: 0;
+}
+
+.worktree-explorer-project-path {
+  color: var(--worktree-muted);
+  display: block;
+  font: 10px/1.5 var(--mono);
+  margin-top: 7px;
+  max-width: 72ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-explorer-heading-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.worktree-explorer-result-count {
+  color: var(--worktree-muted);
+  font: 10px var(--mono);
+  white-space: nowrap;
+}
+
+.worktree-explorer-export,
+.worktree-explorer-action,
+.worktree-explorer-empty button {
+  background: var(--worktree-panel);
+  border: 1px solid var(--worktree-border);
+  border-radius: 7px;
+  color: var(--worktree-blue);
+  cursor: pointer;
+  font: 11px var(--sans);
+  min-height: 36px;
+  padding: 7px 11px;
+}
+
+.worktree-explorer-export {
+  background: var(--worktree-blue);
+  border-color: var(--worktree-blue);
+  color: var(--worktree-panel);
+}
+
+.worktree-explorer-export:hover,
+.worktree-explorer-action:hover,
+.worktree-explorer-empty button:hover {
+  border-color: var(--worktree-blue);
+}
+
+.worktree-explorer-export:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+.worktree-explorer-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(6, minmax(90px, 1fr));
+  margin: 16px 0;
+}
+
+.worktree-explorer-metric {
+  background: var(--worktree-panel);
+  border: 1px solid var(--worktree-border);
+  border-radius: 9px;
+  color: var(--worktree-ink);
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 11px 12px;
+  text-align: left;
+}
+
+button.worktree-explorer-metric {
+  cursor: pointer;
+  font: inherit;
+}
+
+.worktree-explorer-metric:hover,
+.worktree-explorer-metric[aria-pressed="true"] {
+  border-color: var(--worktree-blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--worktree-blue) 13%, transparent);
+}
+
+.worktree-explorer-metric-label {
+  color: var(--worktree-muted);
+  font: 10px var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-explorer-metric strong {
+  font: 700 22px/1.1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.worktree-explorer-metric.is-main strong,
+.worktree-explorer-metric.is-total strong { color: var(--worktree-blue); }
+.worktree-explorer-metric.is-dirty strong { color: var(--worktree-amber); }
+.worktree-explorer-metric.is-conflict strong { color: var(--worktree-red); }
+.worktree-explorer-metric.is-prunable strong { color: var(--worktree-amber); }
+.worktree-explorer-metric.is-unknown strong { color: var(--worktree-muted); }
+
+.worktree-explorer-toolbar {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  margin: 20px 0 10px;
+}
+
+.worktree-explorer-search {
+  flex: 1 1 280px;
+  min-width: 180px;
+}
+
+.worktree-explorer-search input,
+.worktree-explorer-order select {
+  background: var(--worktree-panel);
+  border: 1px solid var(--worktree-border);
+  border-radius: 7px;
+  color: var(--worktree-ink);
+  font: 12px var(--sans);
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.worktree-explorer-search input {
+  width: 100%;
+}
+
+.worktree-explorer-order {
+  align-items: center;
+  color: var(--worktree-muted);
+  display: inline-flex;
+  font: 10px var(--mono);
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.worktree-explorer-order select {
+  min-width: 112px;
+}
+
+.worktree-explorer-filters {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.worktree-explorer-filter-group {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.worktree-explorer-filter-title {
+  color: var(--worktree-muted);
+  flex: 0 0 94px;
+  font: 700 10px var(--mono);
+  letter-spacing: .02em;
+}
+
+.worktree-explorer-filter-group button {
+  background: var(--worktree-panel);
+  border: 1px solid var(--worktree-border);
+  border-radius: 999px;
+  color: var(--worktree-muted);
+  cursor: pointer;
+  font: 10px var(--sans);
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+.worktree-explorer-filter-group button:hover,
+.worktree-explorer-filter-group button[aria-pressed="true"] {
+  border-color: var(--worktree-blue);
+  color: var(--worktree-blue);
+}
+
+.worktree-explorer-filter-group button[aria-pressed="true"] {
+  background: var(--worktree-blue-soft);
+}
+
+.worktree-explorer-list {
+  display: grid;
+  gap: 8px;
+}
+
+.worktree-explorer-card {
+  align-items: stretch;
+  background: var(--worktree-panel);
+  border: 1px solid var(--worktree-border);
+  border-radius: 10px;
+  display: grid;
+  gap: 0;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  min-width: 0;
+  overflow: hidden;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.worktree-explorer-card:hover {
+  border-color: var(--worktree-border-strong);
+  box-shadow: 0 6px 18px rgb(20 32 47 / 7%);
+}
+
+.worktree-explorer-card-marker {
+  background: var(--worktree-green);
+}
+
+.worktree-explorer-card.state-prunable .worktree-explorer-card-marker,
+.worktree-explorer-card.state-locked .worktree-explorer-card-marker,
+.worktree-explorer-card.health-dirty .worktree-explorer-card-marker { background: var(--worktree-amber); }
+.worktree-explorer-card.health-conflict .worktree-explorer-card-marker { background: var(--worktree-red); }
+.worktree-explorer-card.state-detached .worktree-explorer-card-marker { background: var(--worktree-purple); }
+.worktree-explorer-card.state-unknown .worktree-explorer-card-marker,
+.worktree-explorer-card.health-unknown .worktree-explorer-card-marker { background: var(--worktree-muted); }
+
+.worktree-explorer-card-main {
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.worktree-explorer-card-topline {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.worktree-explorer-state-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.worktree-explorer-state,
+.worktree-explorer-health {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font: 700 9px var(--mono);
+  line-height: 1;
+  padding: 5px 7px;
+}
+
+.worktree-explorer-state.state-main,
+.worktree-explorer-state.state-ok { background: var(--worktree-green-soft); color: var(--worktree-green); }
+.worktree-explorer-state.state-detached { background: color-mix(in srgb, var(--worktree-purple) 13%, transparent); color: var(--worktree-purple); }
+.worktree-explorer-state.state-prunable,
+.worktree-explorer-state.state-locked { background: var(--worktree-amber-soft); color: var(--worktree-amber); }
+.worktree-explorer-state.state-unknown,
+.worktree-explorer-health.health-unknown { background: var(--worktree-panel-soft); color: var(--worktree-muted); }
+.worktree-explorer-health.health-dirty { background: var(--worktree-amber-soft); color: var(--worktree-amber); }
+.worktree-explorer-health.health-conflict { background: var(--worktree-red-soft); color: var(--worktree-red); }
+.worktree-explorer-health.health-clean { background: var(--worktree-green-soft); color: var(--worktree-green); }
+
+.worktree-explorer-basename {
+  color: var(--worktree-muted);
+  flex: 0 1 auto;
+  font: 10px var(--mono);
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-explorer-card h3 {
+  font: 600 15px/1.35 var(--mono);
+  margin: 11px 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-explorer-path {
+  color: var(--worktree-muted);
+  display: block;
+  font: 10px/1.5 var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-explorer-facts {
+  align-items: baseline;
+  color: var(--worktree-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font: 10px var(--mono);
+  gap: 9px 16px;
+  margin-top: 11px;
+}
+
+.worktree-explorer-facts b {
+  color: var(--worktree-ink);
+  font-weight: 600;
+}
+
+.worktree-explorer-facts .is-unknown,
+.worktree-explorer-no-lane { color: var(--worktree-muted); }
+
+.worktree-explorer-card-actions {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 14px 16px;
+}
+
+.worktree-explorer-card-actions .copy-control {
+  align-self: center;
+  margin-right: 4px;
+}
+
+.worktree-explorer-action.is-primary {
+  background: var(--worktree-blue-soft);
+  border-color: color-mix(in srgb, var(--worktree-blue) 42%, var(--worktree-border));
+}
+
+.worktree-explorer-no-lane {
+  align-self: center;
+  font: 10px var(--mono);
+  white-space: nowrap;
+}
+
+.worktree-explorer-empty {
+  align-items: center;
+  background: var(--worktree-panel-soft);
+  border: 1px dashed var(--worktree-border-strong);
+  border-radius: 10px;
+  color: var(--worktree-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font: 12px var(--sans);
+  gap: 12px;
+  justify-content: center;
+  min-height: 110px;
+  padding: 20px;
+}
+
+@media (max-width: 940px) {
+  .worktree-explorer-summary { grid-template-columns: repeat(3, minmax(90px, 1fr)); }
+  .worktree-explorer-card { grid-template-columns: 4px minmax(0, 1fr); }
+  .worktree-explorer-card-actions {
+    align-items: center;
+    border-top: 1px solid var(--worktree-border);
+    grid-column: 2;
+    justify-content: flex-start;
+    padding: 10px 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .worktree-explorer-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .worktree-explorer-heading-actions { justify-content: space-between; width: 100%; }
+  .worktree-explorer-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .worktree-explorer-toolbar { align-items: stretch; flex-direction: column; }
+  .worktree-explorer-search { flex: none; min-width: 0; width: 100%; }
+  .worktree-explorer-order { justify-content: space-between; }
+  .worktree-explorer-order select { flex: 1; }
+  .worktree-explorer-filter-title { flex-basis: 100%; }
+  .worktree-explorer-card-main { padding: 13px 12px; }
+  .worktree-explorer-card-actions { padding: 9px 12px; }
+  .worktree-explorer-card-actions .copy-control { margin-right: 0; }
+  .worktree-explorer-card-actions .copy-button,
+  .worktree-explorer-action { min-height: 38px; }
+  .worktree-explorer-basename { max-width: 42%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .worktree-explorer-card { transition: none; }
+}

@@ -1,6 +1,10 @@
 "use client";
 
 import PatchView from "./patch-view";
+import WorktreeExplorer from "./worktree-explorer";
+import PrExplorer from "./pr-explorer";
+import BranchHistoryExplorer from "./branch-history-explorer";
+import { commitHeader } from "./branch-history-tools.mjs";
 import CommitFiles from "./commit-files";
 import GitGuide from "./git-guide";
 import BranchTimeline from "./branch-timeline";
@@ -475,7 +479,7 @@ function ActivityView({
   );
 }
 
-function ProjectInfo({ project }: { project: ProjectResponse }) {
+function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectResponse; onOpenGit: (lane: ProjectLane) => void; onSelectLane: (lane: ProjectLane) => void }) {
   return (
     <section className="info-section" aria-labelledby="info-title">
       <div className="section-heading-row"><div><h3 id="info-title">プロジェクト情報</h3><p className="section-copy">このプロジェクトの基本情報と、今わかっている管理状況です。</p></div></div>
@@ -496,7 +500,8 @@ function ProjectInfo({ project }: { project: ProjectResponse }) {
         <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
       <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">ブランチ状態不明（報告未取得）</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
-      <div className="info-subsection"><h4>worktree 一覧</h4><div className="worktree-records">{project.worktrees.map((item) => <div className="worktree-record" key={item.path}><span className="worktree-shape" aria-hidden="true" /><strong>{item.branch ?? "detached HEAD"}</strong><code title={item.path}>{item.path}</code><CopyButton value={item.path} label={`${item.branch ?? "worktree"} のパスをコピー`} /><span className={`lane-state ${item.state === "prunable" || item.state === "locked" ? "lane-state-warn" : "lane-state-ok"}`}>{item.state ?? "未取得"}</span></div>)}</div></div>
+      <WorktreeExplorer project={project} onOpenGit={onOpenGit} onSelectLane={onSelectLane} />
+      <PrExplorer project={project} />
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
     </section>
   );
@@ -568,11 +573,12 @@ function CommitDetail({
     }, 150);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [hash, path, retryToken]);
+  const header = commitHeader(event, detail);
   return (
     <div className="selection-content">
       <div className="selection-kicker">Git コミット</div>
-      <h3>{detail?.subject ?? event.subject ?? "コミット詳細"}</h3>
-      <div className="selection-commit-meta"><code>{hash ?? "未取得"}</code>{hash && <CopyButton value={hash} label="コミットIDをコピー" />}<span>{event.author ?? "author 未取得"}</span><time dateTime={event.occurred_at ?? undefined}>{exactDate(event.occurred_at)}</time></div>
+      <h3>{header.subject ?? "コミット詳細"}</h3>
+      <div className="selection-commit-meta"><code>{hash ?? "未取得"}</code>{hash && <CopyButton value={hash} label="コミットIDをコピー" />}<span>{header.author ?? "author 未取得"}</span><time dateTime={header.date ?? undefined}>{exactDate(header.date)}</time></div>
       {state === "loading" && <div className="selection-loading" role="status">完全なコミット詳細を取得中…</div>}
       {state === "error" && <div className="selection-error" role="alert">コミット詳細を取得できませんでした。<button className="subtle-button" type="button" onClick={() => setRetryToken((value) => value + 1)}>再試行</button></div>}
       {state === "ready" && detail && <>
@@ -1005,10 +1011,10 @@ export default function ProjectControl() {
       </nav>
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
-          {urlState.tab === "flow" && <BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} />}
+          {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /><BranchHistoryExplorer key={project.main_path} project={project} onSelect={selectEvent} /></>}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
-          {urlState.tab === "info" && <ProjectInfo project={project} />}
+          {urlState.tab === "info" && <ProjectInfo project={project} onOpenGit={openGit} onSelectLane={selectLane} />}
         </section>
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}
       </div>

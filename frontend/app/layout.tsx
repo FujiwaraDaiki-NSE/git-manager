@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./branch-history.css";
+import "./worktree-explorer.css";
+import "./pr-explorer.css";
 import { ThemeProvider } from "./theme-control";
 
 export const metadata: Metadata = {
