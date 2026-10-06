@@ -3,7 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import CopyButton from "./copy-button";
 import { parsePatch } from "./parse-patch.mjs";
-import { findPatchMatches, selectPatchLines, splitPatchByFile, summarizePatchSection } from "./patch-tools.mjs";
+import { findPatchMatches, selectPatchRows, splitPatchByFile, summarizePatchSection } from "./patch-tools.mjs";
 import "./patch-tools.css";
 
 const PATCH_PAGE_LINES = 300;
@@ -34,7 +34,7 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId }: { se
   const [limit, setLimit] = useState(PATCH_PAGE_LINES);
   const containerRef = useRef<HTMLDivElement>(null);
   const focusRow = useRef<number | null>(null);
-  const selectedLines = useMemo(() => selectPatchLines(section.lines, changedOnly), [section.lines, changedOnly]);
+  const selectedLines = useMemo(() => selectPatchRows(section.lines, changedOnly), [section.lines, changedOnly]);
   const lineMatches = useMemo(() => {
     const grouped = new Map<number, PatchMatch[]>();
     for (const match of matches) {
@@ -44,7 +44,7 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId }: { se
     return grouped;
   }, [matches]);
   const activeMatch = matches.find((match) => match.id === activeMatchId) ?? null;
-  const activePosition = activeMatch === null ? -1 : selectedLines.findIndex((line) => section.lines.indexOf(line) === activeMatch.lineIndex);
+  const activePosition = activeMatch === null ? -1 : selectedLines.findIndex(({ lineIndex }) => lineIndex === activeMatch.lineIndex);
   const count = Math.min(limit, selectedLines.length);
 
   useLayoutEffect(() => {
@@ -72,14 +72,13 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId }: { se
   const show = (next: number) => {
     const focusPosition = next > limit ? count : 0;
     const focusLine = selectedLines[focusPosition];
-    focusRow.current = focusLine === undefined ? null : section.lines.indexOf(focusLine);
+    focusRow.current = focusLine === undefined ? null : focusLine.lineIndex;
     setLimit(next);
   };
 
   return <>
     <div ref={containerRef} className={`patch-lines${wrap ? " patch-wrap" : ""}${changedOnly ? " patch-lines-changed-only" : ""}`} tabIndex={0} role="region" aria-label={`${section.title} の差分（左: 変更前、右: 変更後の行番号）`}>
-      <pre>{selectedLines.slice(0, count).map((line) => {
-        const lineIndex = section.lines.indexOf(line);
+      <pre>{selectedLines.slice(0, count).map(({ line, lineIndex }) => {
         const matchesForLine = lineMatches.get(lineIndex) ?? [];
         return <span className={`patch-line patch-${line.kind}${activeMatch?.lineIndex === lineIndex ? " patch-line-active" : ""}`} data-patch-row={lineIndex} tabIndex={-1} key={lineIndex} data-patch-active={activeMatch?.lineIndex === lineIndex ? "true" : undefined}>
           <span className="patch-number" aria-hidden="true">{line.oldLine}</span>

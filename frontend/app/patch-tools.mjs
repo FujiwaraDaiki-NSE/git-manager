@@ -69,6 +69,18 @@ export function selectPatchLines(lines, changedOnly) {
   return changedOnly ? lines.filter((line) => line.kind !== "context") : lines;
 }
 
+/** Keep source indexes attached to rows through filtering and pagination.
+ * @param {PatchLine[]} lines
+ * @param {boolean} changedOnly
+ */
+export function selectPatchRows(lines, changedOnly) {
+  const rows = [];
+  lines.forEach((line, lineIndex) => {
+    if (!changedOnly || line.kind !== "context") rows.push({ line, lineIndex });
+  });
+  return rows;
+}
+
 /**
  * Find every non-overlapping occurrence in rendered patch lines. Matches are
  * line based so a search result always has a concrete row to reveal, including
@@ -87,8 +99,9 @@ export function findPatchMatches(sections, query, options) {
   const matches = [];
   sections.forEach((section, sectionIndex) => {
     if (allowed !== null && !allowed.has(sectionIndex)) return;
-    const lines = selectPatchLines(section.lines, changedOnly);
-    for (const line of lines) {
+    for (let lineIndex = 0; lineIndex < section.lines.length; lineIndex += 1) {
+      const line = section.lines[lineIndex];
+      if (changedOnly && line.kind === "context") continue;
       const haystack = line.text.toLocaleLowerCase();
       let offset = 0;
       while (offset <= haystack.length - needle.length) {
@@ -96,10 +109,10 @@ export function findPatchMatches(sections, query, options) {
         if (found < 0) break;
         matches.push({
           sectionIndex,
-          lineIndex: section.lines.indexOf(line),
+          lineIndex,
           offset: found,
           length: needle.length,
-          id: `${sectionIndex}:${section.lines.indexOf(line)}:${found}`,
+          id: `${sectionIndex}:${lineIndex}:${found}`,
         });
         offset = found + needle.length;
       }

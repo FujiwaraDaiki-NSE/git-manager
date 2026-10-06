@@ -59,3 +59,16 @@ test('content search returns every occurrence, honors filename scope and exclude
   assert.ok(scoped.every((match) => match.sectionIndex === 0));
   assert.ok(scoped.every((match) => sections[0].lines[match.lineIndex].kind !== 'context'));
 });
+
+test('source row indexes survive context removal and a page boundary', async () => {
+  const { selectPatchRows } = await import('../app/patch-tools.mjs');
+  const lines = Array.from({ length: 650 }, (_, i) => ({ text: `+target ${i}`, kind: i % 2 ? 'addition' : 'context', oldLine: null, newLine: i + 1 }));
+  const rows = selectPatchRows(lines, true);
+  assert.equal(rows.length, 325);
+  assert.equal(rows[300].lineIndex, 601);
+  assert.equal(rows[300].line, lines[601]);
+  const matches = findPatchMatches([{title: 'large', lines}], 'target', {changedOnly: true, sectionIndexes: [0]});
+  assert.equal(matches[300].lineIndex, rows[300].lineIndex);
+  assert.equal(matches[300].id, '0:601:1');
+  assert.deepEqual(selectPatchRows(lines, false).map(row => row.line), lines);
+});
