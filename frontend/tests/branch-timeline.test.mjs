@@ -37,33 +37,231 @@ test("timeline ticks include both bounded endpoints", () => {
   assert.equal(ticks.at(-1).position, 100);
 });
 
-import { groupTimelineEventsByRow, selectTimelineRows, selectTimelineConnectionEdges, routeTimelineConnections } from '../app/timeline-layout.mjs';
+import {
+  aggregateTimelineConnectionChipLabel,
+  aggregateTimelineConnectionChips,
+  groupTimelineEventsByRow,
+  isTimelineConnectionStub,
+  routeTimelineConnections,
+  selectDefaultTimelineConnectionEdges,
+  selectTimelineConnectionEdges,
+  selectTimelineRows,
+  sortTimelineRows,
+  timelineConnectionDisplay,
+} from '../app/timeline-layout.mjs';
 
 test('recent branch limit keeps the default branch and sorts by tip date, with unknown dates last', () => {
   const row = (id, date, historical = false) => ({id, name: id, historical, tip_commits: [{date}]});
   const rows = [row('main', '2020-01-01'), row('old', '2024-01-01'), row('unknown', null), row('new', '2026-01-01'), row('deleted', '2027-01-01', true)];
-  assert.deepEqual(selectTimelineRows(rows, 'main', 1, false).rows.map(r => r.id), ['main', 'new']);
-  assert.deepEqual(selectTimelineRows(rows, 'main', null, false).rows.map(r => r.id), ['main', 'new', 'old', 'unknown']);
-  assert.deepEqual(selectTimelineRows(rows, 'main', 1, true).rows.map(r => r.id), ['main', 'deleted']);
+  assert.deepEqual(selectTimelineRows(rows, 'main', 1, false, 'parent', []).rows.map(r => r.id), ['main', 'new']);
+  assert.deepEqual(selectTimelineRows(rows, 'main', null, false, 'parent', []).rows.map(r => r.id), ['main', 'new', 'old', 'unknown']);
+  assert.deepEqual(selectTimelineRows(rows, 'main', 1, true, 'parent', []).rows.map(r => r.id), ['main', 'deleted']);
 });
 
-test('connection channels separate overlapping routes and avoid intervening commit dots', () => {
+function pathXCoordinates(path) {
+  const tokens = path.match(/[A-Z]|[-+]?(?:\d+\.?\d*|\.\d+)/g) ?? [];
+  const arity = { M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, Z: 0 };
+  const xIndexes = { M: [0], L: [0], H: [0], V: [], C: [0, 2, 4], S: [0, 2], Q: [0, 2], T: [0] };
+  const xs = [];
+  let command = null;
+  let index = 0;
+  while (index < tokens.length) {
+    if (/^[A-Z]$/.test(tokens[index])) {
+      command = tokens[index];
+      index += 1;
+      if (command === 'Z') continue;
+    }
+    assert.ok(command && arity[command] !== undefined, `unknown path command near ${tokens[index]}`);
+    const count = arity[command];
+    const values = tokens.slice(index, index + count).map(Number);
+    assert.equal(values.length, count);
+    for (const xIndex of xIndexes[command]) xs.push(values[xIndex]);
+    index += count;
+    if (command === 'M') command = 'L';
+  }
+  return xs;
+}
+
+function cubicCoordinates(path) {
+  const values = path.match(/^M\s+([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s+C\s+([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+),\s+([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+),\s+([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)$/);
+  assert.ok(values, `expected one cubic path: ${path}`);
+  return values.slice(1).map(Number);
+}
+
+function cubicX([x1, , control1X, , control2X, , x2, ], t) {
+  const oneMinusT = 1 - t;
+  return oneMinusT ** 3 * x1
+    + 3 * oneMinusT ** 2 * t * control1X
+    + 3 * oneMinusT * t ** 2 * control2X
+    + t ** 3 * x2;
+}
+
+test('every relation path and stub moves monotonically from past to present', () => {
   const routes = routeTimelineConnections([
-    { x1: 80, x2: 220, y1: 44, y2: 220 },
-    { x1: 80, x2: 220, y1: 44, y2: 220 },
-  ], [{x: 156, y: 132}], 440);
-  assert.ok(Math.abs(routes[0].channel - 156) >= 12);
-  assert.ok(Math.abs(routes[0].channel - routes[1].channel) >= 12);
-  assert.ok(routes[0].path.startsWith('M 80 56 V 64'));
-  assert.ok(routes[0].path.endsWith('H 220 V 208'));
-  assert.match(routes[0].arrow, /L 220 208/);
+    { id: 'down', x1: 80, x2: 220, y1: 44, y2: 220, rowDistance: 1 },
+    { id: 'up', x1: 120, x2: 300, y1: 220, y2: 44, rowDistance: 4 },
+    { id: 'same-time', x1: 220, x2: 220, y1: 44, y2: 220, rowDistance: 1 },
+  ]);
+  for (const route of routes) {
+    if (route.path) {
+      const coordinates = cubicCoordinates(route.path);
+      assert.ok(coordinates[0] <= coordinates[2] && coordinates[2] <= coordinates[4] && coordinates[4] <= coordinates[6], `${route.id} cubic control points must be monotonic: ${route.path}`);
+      let previous = -Infinity;
+      for (const t of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
+        const x = cubicX(coordinates, t);
+        assert.ok(x + 1e-9 >= previous, `${route.id} sampled cubic x must not decrease at t=${t}`);
+        previous = x;
+      }
+    }
+    for (const path of [route.path, route.sourceStubPath, route.targetStubPath, route.arrow].filter(Boolean)) {
+      const xs = pathXCoordinates(path);
+      assert.ok(xs.every((value, index) => index === 0 || value >= xs[index - 1]), `${route.id} path x coordinates must not decrease: ${path}`);
+    }
+  }
+  assert.equal(routes[0].path, 'M 80 44 C 150 44, 150 220, 220 220');
+  assert.equal(routes[1].sourceStubPath, 'M 120 220 H 144');
+  assert.equal(routes[1].targetStubPath, 'M 276 44 H 300');
 });
 
-test('upward connection points into the target dot without reversing source and target', () => {
-  const [route] = routeTimelineConnections([{x1: 300, x2: 120, y1: 220, y2: 44}], [], 440);
-  assert.ok(route.path.startsWith('M 300 208 V 200'));
-  assert.ok(route.path.endsWith('H 120 V 56'));
-  assert.equal(route.arrow, 'M 115 64 L 120 56 L 125 64 Z');
+test('reversed timestamps have endpoint markers only and explain why the line is absent', () => {
+  const [route] = routeTimelineConnections([{ x1: 300, x2: 120, y1: 220, y2: 44, rowDistance: 5 }]);
+  assert.equal(route.path, null);
+  assert.equal(route.arrow, null);
+  assert.equal(route.sourceStubPath, null);
+  assert.equal(route.targetStubPath, null);
+  assert.equal(route.reversed, true);
+  assert.match(route.reason, /逆走/);
+});
+
+test('stub threshold starts at a four-row distance', () => {
+  assert.equal(isTimelineConnectionStub(3), false);
+  assert.equal(isTimelineConnectionStub(4), true);
+  assert.equal(isTimelineConnectionStub(-4), true);
+  const [route] = routeTimelineConnections([{ x1: 80, x2: 220, y1: 44, y2: 396, rowDistance: 4 }]);
+  assert.equal(route.stub, true);
+  assert.equal(route.sourceStubPath, 'M 80 44 H 104');
+  assert.equal(route.targetStubPath, 'M 196 396 H 220');
+});
+
+test('stub routing rejects a missing row distance instead of drawing a full line', () => {
+  assert.throws(() => routeTimelineConnections([{ x1: 80, x2: 220, y1: 44, y2: 396 }]), /rowDistance/);
+});
+
+test('non-default far relations stay hidden until an explicit context is present', () => {
+  const route = { id: 'far', sourceRowId: 'main', targetRowId: 'topic', defaultVisible: false, drawn: true, stub: true };
+  assert.equal(timelineConnectionDisplay(route, { showAll: false, focusedRouteId: null, activeRowIds: new Set() }), 'hidden');
+  assert.equal(timelineConnectionDisplay({ ...route, defaultVisible: true }, { showAll: false, focusedRouteId: null, activeRowIds: new Set() }), 'stub');
+  assert.equal(timelineConnectionDisplay(route, { showAll: false, focusedRouteId: null, activeRowIds: new Set(['topic']) }), 'full');
+  assert.equal(timelineConnectionDisplay(route, { showAll: true, focusedRouteId: null, activeRowIds: new Set() }), 'full');
+});
+
+test('far relation chips aggregate stable default-visible relations by row and side', () => {
+  const chips = aggregateTimelineConnectionChips([
+    { routeId: 'merge-a', rowId: 'topic', rowIndex: 2, side: 'source', kind: 'merge', glyph: '↘', defaultVisible: true, stub: true, left: 100, width: 90 },
+    { routeId: 'merge-b', rowId: 'topic', rowIndex: 2, side: 'source', kind: 'merge', glyph: '↘', defaultVisible: true, stub: true, left: 120, width: 90 },
+    { routeId: 'merge-c', rowId: 'topic', rowIndex: 2, side: 'source', kind: 'merge', glyph: '↘', defaultVisible: true, stub: true, left: 110, width: 20 },
+    { routeId: 'branch-a', rowId: 'topic', rowIndex: 2, side: 'target', kind: 'branch', glyph: '↙', defaultVisible: true, stub: true, left: 110, width: 20 },
+  ]);
+  assert.equal(chips.length, 2);
+  const aggregate = chips.find((chip) => chip.type === 'aggregate');
+  assert.ok(aggregate);
+  assert.equal(aggregate.count, 3);
+  assert.deepEqual(new Set(aggregate.routeIds), new Set(['merge-a', 'merge-b', 'merge-c']));
+  assert.equal(chips.find((chip) => chip.routeIds.includes('branch-a')).type, 'single');
+});
+
+test('aggregate labels stay stable when contextual relation state changes', () => {
+  const defaultVisible = [
+    { routeId: 'merge-a', rowId: 'main', side: 'target', kind: 'merge', glyph: '↙', defaultVisible: true, stub: true },
+    { routeId: 'merge-b', rowId: 'main', side: 'target', kind: 'merge', glyph: '↙', defaultVisible: true, stub: true },
+  ];
+  const contextual = [
+    ...defaultVisible,
+    { routeId: 'context-only', rowId: 'main', side: 'target', kind: 'merge', glyph: '↙', defaultVisible: false, stub: true, pinned: true },
+    { routeId: 'other-side', rowId: 'main', side: 'source', kind: 'merge', glyph: '↘', defaultVisible: true, stub: true },
+  ];
+  const selected = defaultVisible.map((chip, index) => ({ ...chip, preserve: index === 0 }));
+  assert.equal(aggregateTimelineConnectionChipLabel(defaultVisible, 'main', 'target'), '↙ 2件のマージ元');
+  assert.equal(aggregateTimelineConnectionChipLabel(contextual, 'main', 'target'), '↙ 2件のマージ元');
+  assert.equal(aggregateTimelineConnectionChipLabel(selected, 'main', 'target'), '↙ 2件のマージ元');
+  assert.equal(aggregateTimelineConnectionChips(selected).find((chip) => chip.rowId === 'main' && chip.side === 'target').count, 2);
+  assert.equal(aggregateTimelineConnectionChips(contextual).find((chip) => chip.rowId === 'main' && chip.side === 'target').label, '↙ 2件のマージ元');
+});
+
+test('default relation selection keeps one branch origin and one merge destination per row', () => {
+  const edges = [
+    { id: 'branch-inferred-only', kind: 'branch', source_row_id: 'main', target_row_id: 'topic', evidence: 'merge_base' },
+    { id: 'branch-inferred-extra', kind: 'branch', source_row_id: 'release', target_row_id: 'topic', evidence: 'merge_base' },
+    { id: 'branch-recorded-old', kind: 'branch', source_row_id: 'main', target_row_id: 'topic', evidence: 'reflog', occurred_at: '2026-01-01T00:00:00Z' },
+    { id: 'branch-recorded-new', kind: 'branch', source_row_id: 'release', target_row_id: 'topic', evidence: 'pull_request', occurred_at: '2026-01-02T00:00:00Z' },
+    { id: 'branch-sole-inferred', kind: 'branch', source_row_id: 'main', target_row_id: 'solo', evidence: 'merge_base' },
+    { id: 'merge-recorded-old', kind: 'merge', source_row_id: 'topic', target_row_id: 'main', evidence: 'reflog', occurred_at: '2026-01-01T00:00:00Z' },
+    { id: 'merge-recorded-new', kind: 'merge', source_row_id: 'topic', target_row_id: 'release', evidence: 'pull_request', occurred_at: '2026-01-03T00:00:00Z' },
+    { id: 'merge-inferred', kind: 'merge', source_row_id: 'solo', target_row_id: 'main', evidence: 'merge_base' },
+  ];
+  const selected = selectDefaultTimelineConnectionEdges(edges);
+  assert.deepEqual(selected.map((edge) => edge.id), [
+    'branch-recorded-new',
+    'branch-sole-inferred',
+    'merge-recorded-new',
+  ]);
+  assert.ok(selected.filter((edge) => edge.kind === 'branch' && edge.target_row_id === 'topic').length <= 1);
+  assert.ok(selected.filter((edge) => edge.kind === 'merge' && edge.source_row_id === 'topic').length <= 1);
+});
+
+test('parent order is depth-first, prefers recorded parents, and survives cycles', () => {
+  const row = (id, date) => ({ id, name: id, historical: false, tip_commits: [{ date }] });
+  const rows = [
+    row('unknown', '2026-06-01'),
+    row('old-child', '2025-01-01'),
+    row('main', '2024-01-01'),
+    row('new-child', '2026-01-01'),
+    row('nested', '2024-06-01'),
+    row('cycle-a', '2023-01-01'),
+    row('cycle-b', '2023-02-01'),
+  ];
+  const edges = [
+    { id: 'old-parent', kind: 'branch', source_row_id: 'main', target_row_id: 'old-child', evidence: 'merge_base', occurred_at: '2026-05-01T00:00:00Z' },
+    { id: 'new-parent', kind: 'branch', source_row_id: 'main', target_row_id: 'new-child', evidence: 'reflog', occurred_at: '2026-01-01T00:00:00Z' },
+    { id: 'nested-parent', kind: 'branch', source_row_id: 'new-child', target_row_id: 'nested', evidence: 'reflog', occurred_at: '2025-01-01T00:00:00Z' },
+    { id: 'cycle-a-to-b', kind: 'branch', source_row_id: 'cycle-a', target_row_id: 'cycle-b', evidence: 'reflog' },
+    { id: 'cycle-b-to-a', kind: 'branch', source_row_id: 'cycle-b', target_row_id: 'cycle-a', evidence: 'reflog' },
+  ];
+  assert.deepEqual(sortTimelineRows(rows, 'main', edges, 'parent').map((item) => item.id), [
+    'main', 'new-child', 'nested', 'old-child', 'unknown', 'cycle-b', 'cycle-a',
+  ]);
+  assert.deepEqual(sortTimelineRows(rows, 'main', edges, 'updated').map((item) => item.id), [
+    'main', 'unknown', 'new-child', 'old-child', 'nested', 'cycle-b', 'cycle-a',
+  ]);
+  assert.deepEqual(selectTimelineRows(rows, 'main', 2, false, 'parent', edges).rows.map((item) => item.id), [
+    'main', 'new-child', 'unknown',
+  ]);
+});
+
+test('parent selection ignores candidate parents outside the rendered row set', () => {
+  const row = (id, date) => ({ id, name: id, historical: false, tip_commits: [{ date }] });
+  const rows = [
+    row('main', '2020-01-01'),
+    row('visible-parent', '2026-01-01'),
+    row('other-root', '2025-01-01'),
+    row('child', '2024-01-01'),
+  ];
+  const edges = [
+    { id: 'main-parent', kind: 'branch', source_row_id: 'main', target_row_id: 'visible-parent', evidence: 'reflog', occurred_at: '2026-01-01T00:00:00Z' },
+    { id: 'visible-child', kind: 'branch', source_row_id: 'visible-parent', target_row_id: 'child', evidence: 'merge_base' },
+    { id: 'hidden-child', kind: 'branch', source_row_id: 'hidden-parent', target_row_id: 'child', evidence: 'reflog', occurred_at: '2026-02-01T00:00:00Z' },
+  ];
+  assert.deepEqual(sortTimelineRows(rows, 'main', edges, 'parent').map((item) => item.id), [
+    'main', 'visible-parent', 'child', 'other-root',
+  ]);
+});
+
+test('most-recent parent ranking treats missing occurred_at as unknown', () => {
+  const selected = selectDefaultTimelineConnectionEdges([
+    { id: 'commit-date-only', kind: 'branch', source_row_id: 'main', target_row_id: 'topic', evidence: 'reflog', target_commit: { date: '2099-01-01' } },
+    { id: 'occurred-known', kind: 'branch', source_row_id: 'release', target_row_id: 'topic', evidence: 'reflog', occurred_at: '2026-01-01T00:00:00Z' },
+  ]);
+  assert.deepEqual(selected.map((edge) => edge.id), ['occurred-known']);
 });
 
 test('connection selection counts hidden endpoints without dropping them from the relation index', () => {
@@ -87,23 +285,4 @@ test('full-history event grouping stays responsive with one large lane', () => {
   assert.equal(grouped.get('main')[0].id, '0');
   assert.equal(grouped.get('main').at(-1).id, String(events.length - 1));
   assert.ok(elapsed < 1500, `event grouping took ${elapsed.toFixed(1)}ms`);
-});
-
-test('dense routes fan their horizontal legs without moving commit endpoints or dropping evidence', () => {
-  const input = Array.from({ length: 12 }, (_, id) => ({ id, x1: 420, x2: 422, y1: 44, y2: 220 }));
-  const routes = routeTimelineConnections(input, [], 440);
-  assert.equal(routes.length, input.length);
-  assert.equal(new Set(routes.slice(0, 3).map(route => route.fromY)).size, 3);
-  assert.equal(new Set(routes.slice(0, 3).map(route => route.toY)).size, 3);
-  assert.ok(routes.some(route => route.crowded));
-  for (const [index, route] of routes.entries()) {
-    assert.equal(route.id, input[index].id);
-    assert.equal(route.x2, 422);
-    assert.equal(route.y2, 220);
-    assert.ok(route.fromY > 44 && route.fromY < 88);
-    assert.ok(route.toY > 176 && route.toY < 220);
-    assert.equal(route.arrowY, 208);
-    assert.ok(route.arrow.endsWith(' Z'));
-    assert.ok(!route.path.includes('NaN'));
-  }
 });
