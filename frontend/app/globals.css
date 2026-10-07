@@ -2508,18 +2508,6 @@ body {
   border-style: dashed;
 }
 
-.legend-line-branch {
-  color: var(--control-green);
-}
-
-.legend-line-base {
-  color: var(--control-blue);
-}
-
-.legend-line-merge {
-  color: var(--control-purple);
-}
-
 .flow-axis {
   color: var(--control-muted);
   display: grid;
@@ -2574,44 +2562,8 @@ body {
   stroke-width: 2;
 }
 
-.flow-base-line {
-  stroke: var(--control-blue);
-}
-
 .flow-lane-line {
   stroke: var(--control-green);
-}
-
-.flow-branch-link {
-  stroke: var(--control-green);
-  stroke-dasharray: 3 3;
-  stroke-width: 1.5 !important;
-}
-
-.flow-branch-link-unknown {
-  stroke: var(--control-muted);
-}
-
-.flow-merge-link {
-  fill: none;
-  stroke: var(--control-purple);
-  stroke-width: 1.5;
-}
-
-.flow-merge-link-outside {
-  stroke-dasharray: 4 3;
-}
-
-.flow-merge-route { opacity: .65; }
-.flow-merge-route.is-emphasized { opacity: 1; }
-.flow-merge-route.is-muted { opacity: .12; }
-.flow-merge-direction { fill: none; stroke: var(--control-purple); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.flow-merge-route.is-emphasized .flow-merge-link { stroke-width: 2; }
-
-
-.flow-merge-fact {
-  color: var(--control-purple) !important;
-  font-weight: 700;
 }
 
 .flow-now-line {
@@ -3682,8 +3634,9 @@ body {
 .control-shell ::-webkit-scrollbar-thumb:hover { background: var(--control-blue); }
 .flow-axis { font: 12px var(--control-sans); gap: 0; padding-top: 0; padding-bottom: 0; }
 .flow-axis > span { padding: 12px; border-right: 1px solid var(--control-border); }
-.flow-axis-track { padding: 0; position: relative; min-height: 54px; }
+.flow-axis-track { padding: 0; position: relative; min-height: 68px; }
 .flow-axis-track > span { position: absolute; top: 8px; transform: translateX(-50%); }
+.flow-axis-track > .flow-current-label { top: 48px; transform: translateX(-100%); }
 .flow-time-tick { display: grid; gap: 2px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 .flow-tick-date { min-height: 16px; font-size: 10px; }
 .flow-axis-track > .is-start { transform: none; text-align: left; }
@@ -3700,9 +3653,6 @@ body {
 .flow-row:nth-of-type(even) .flow-track { background: color-mix(in srgb, var(--control-muted) 3%, transparent); }
 .flow-row.is-selected .flow-track { background: color-mix(in srgb, var(--control-blue) 8%, transparent); }
 .flow-lane-line { stroke: color-mix(in srgb, var(--control-green) 65%, var(--control-panel)); }
-.flow-branch-link { opacity: .55; }
-.flow-connection-evidence-reflog .flow-merge-link, .flow-connection-evidence-reflog .flow-branch-link { stroke-dasharray: 7 3; }
-.flow-connection-evidence-pull_request .flow-merge-link { stroke: var(--control-purple); }
 .flow-latest-visible { bottom: 8px; font-size: 12px; gap: 8px; }
 .flow-latest-caption { flex-shrink: 0; font-size: 10px; opacity: .75; }
 .flow-connections path { vector-effect: non-scaling-stroke; }
@@ -4387,25 +4337,16 @@ html[data-theme="dark"] {
 .patch-more > span { flex-basis: 100%; font: 11px var(--sans); color: var(--muted); }
 .patch-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Parent edges remain visible even when historical branch names are unknown. */
-.flow-connection-commit { opacity: .7; }
-.flow-connection-commit .flow-merge-link { stroke: var(--control-green); }
-.flow-connection-branch .flow-merge-link,
-.flow-connection-branch .flow-merge-direction { stroke: var(--control-green); }
 .flow-pr-status { color: var(--control-muted); font-size: 12px; margin-top: 8px; }
 .flow-connection-note ul { border-top: 1px solid var(--control-border); list-style: none; margin: 8px 0 0; padding: 0; }
 .flow-connection-note li { border-bottom: 1px solid var(--control-border); color: var(--control-muted); font: 10px/1.6 var(--control-mono); padding: 5px 0; }
-.flow-connection-default .flow-merge-link { stroke: var(--control-blue); }
 
 /* Keep row guides distinct from evidence-backed commit and relationship paths. */
 .flow-row-guide { stroke: var(--control-border); stroke-width: 1; stroke-dasharray: 3 5; opacity: .6; }
 .flow-row-guide.is-default { stroke: var(--control-blue); opacity: .75; }
-.flow-connection-anchor { fill: var(--control-panel); stroke: var(--control-muted); stroke-width: 1.5; }
 .flow-branch-count { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 11px; color: var(--control-muted); }
-.flow-connection-merge path, .flow-connection-branch path { paint-order: stroke; }
+.flow-row-order { align-items: center; color: var(--control-muted); display: flex; flex-wrap: wrap; font-size: 11px; gap: 5px; }
 .legend-line-guide { height: 0; border-top: 1px dashed var(--control-muted); background: transparent; }
-.flow-connection-branch .flow-branch-link { fill: none; opacity: 1; }
-.flow-connection-branch { opacity: .85; }
 
 .branch-relation-route { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); align-items: center; gap: 12px; padding: 8px 0; }
 .branch-relation-endpoint { min-width: 0; display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--control-border); border-radius: 8px; }
@@ -4418,25 +4359,46 @@ html[data-theme="dark"] {
 }
 
 /* Relationship paths have their own visual hierarchy, separate from row/time guides. */
-.flow-readable-route { color: var(--control-purple); opacity: .9; }
-.flow-readable-route.flow-connection-branch { color: var(--control-green); }
-.flow-readable-route.is-muted { opacity: .08; }
+.flow-readable-route { --flow-route-color: var(--control-blue); color: var(--flow-route-color); opacity: .9; }
+.flow-readable-route.flow-connection-branch { --flow-route-color: var(--control-blue); }
+.flow-readable-route.flow-connection-merge { --flow-route-color: var(--control-green); }
+.flow-readable-route.is-muted { opacity: .14; }
 .flow-readable-route.is-emphasized { opacity: 1; }
-.flow-readable-route .flow-route-line { fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.flow-readable-route .flow-route-line,
+.flow-readable-route .flow-route-stub { fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
 .flow-readable-route.flow-connection-evidence-merge_base .flow-route-line { stroke-dasharray: 8 5; }
 .flow-readable-route .flow-route-halo { fill: none; stroke: var(--control-panel); stroke-width: 6; stroke-linejoin: round; }
 .flow-readable-route.is-muted .flow-route-halo { stroke: none; }
 .flow-readable-route.is-emphasized .flow-route-line { stroke-width: 3; }
 .flow-readable-route .flow-route-source, .flow-readable-route .flow-route-anchor { fill: var(--control-panel); stroke: currentColor; stroke-width: 2; }
 .flow-readable-route .flow-route-arrow { fill: currentColor; stroke: var(--control-panel); stroke-width: .75; stroke-linejoin: round; }
+.flow-readable-route .flow-route-invalid-target { fill: var(--control-amber-soft); stroke: var(--control-amber); stroke-width: 2; stroke-dasharray: 2 2; }
+.flow-readable-route.is-reversed { color: var(--control-amber); }
 .flow-connections .flow-time-grid { stroke-dasharray: none; opacity: .3; }
 .flow-connections .flow-row-guide { stroke-dasharray: none; opacity: .45; }
 .flow-connection-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; margin: 12px 0; padding: 12px; border: 1px solid var(--control-border); border-radius: 8px; }
 .flow-connection-controls label { flex: 1 1 280px; min-width: 0; display: grid; gap: 6px; font: 12px var(--control-sans); }
 .flow-connection-controls select { width: 100%; min-width: 0; min-height: 36px; color: var(--control-ink); background: var(--control-panel); border: 1px solid var(--control-border); border-radius: 6px; padding: 6px; }
 .flow-connection-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.flow-connection-toggle { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.flow-connection-toggle > span { color: var(--control-muted); font: 10px var(--control-mono); }
 .flow-connection-status { flex-basis: 100%; min-height: 40px; margin: 0; display: grid; align-content: start; gap: 4px; color: var(--control-muted); font: 12px/1.6 var(--control-sans); overflow-wrap: anywhere; }
 .flow-connection-status strong { color: var(--control-ink); }
+.flow-connection-stub-layer { height: calc(var(--flow-row-height) * var(--flow-lanes, 1)); left: var(--control-label-width); pointer-events: none; position: absolute; top: 0; width: var(--flow-track-width, var(--flow-track-min-width, 440px)); z-index: 4; }
+.flow-connection-chip-row { align-items: flex-start; display: grid; gap: 4px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); height: 20px; left: 0; padding: 1px 4px; pointer-events: none; position: absolute; right: 0; }
+.flow-connection-chip-side { align-items: flex-start; display: flex; gap: 4px; min-width: 0; pointer-events: none; }
+.flow-connection-chip-side.is-target { justify-content: flex-end; }
+.flow-connection-stub-chip { background: var(--control-panel); border: 1px solid currentColor; border-radius: 999px; box-sizing: border-box; cursor: pointer; font: 9px/16px var(--control-sans); height: 18px; max-width: 100%; min-height: 18px; min-width: 0; overflow: hidden; padding: 0 6px; pointer-events: auto; text-overflow: ellipsis; white-space: nowrap; }
+.flow-connection-stub-chip.flow-connection-chip-kind-branch { color: var(--control-blue); }
+.flow-connection-stub-chip.flow-connection-chip-kind-merge { color: var(--control-green); }
+.flow-connection-stub-chip.flow-connection-chip-kind-mixed { color: var(--control-muted); }
+.flow-connection-stub-chip:hover { background: color-mix(in srgb, currentColor 12%, var(--control-panel)); }
+.flow-connection-stub-chip.is-muted { opacity: .14; }
+.flow-connection-stub-chip.is-selected { box-shadow: 0 0 0 1px currentColor; }
+.flow-connection-stub-chip:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
+.flow-row.is-connection-active .flow-track { background: color-mix(in srgb, var(--control-blue) 7%, transparent); }
 
 .flow-legend .legend-line-guide { border-top-style: solid; opacity: .45; }
+.flow-legend .legend-line-branch { background: var(--control-blue); height: 2px; }
+.flow-legend .legend-line-merge { background: var(--control-green); height: 2px; }
 .flow-legend .legend-line-estimate { background: transparent; height: 0; border-top: 2px dashed var(--control-green); }
