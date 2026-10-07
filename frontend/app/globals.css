@@ -3557,6 +3557,85 @@ body {
   .flow-lane-button { font-size: 12px; }
 }
 
+/* Complete ref relation index.  The graph is intentionally sparse; this
+   panel keeps every pair and every historical operation readable when rows or
+   dates are outside the current graph window. */
+.branch-relations-panel { border-top: 1px solid var(--control-border); margin-top: 18px; padding-top: 4px; }
+.branch-relations-panel > details > summary { align-items: baseline; color: var(--control-ink); cursor: pointer; display: flex; flex-wrap: wrap; font: 600 13px var(--control-sans); gap: 8px 14px; list-style-position: outside; padding: 10px 0; }
+.branch-relations-panel > details > summary > span { color: var(--control-muted); font: 10px var(--control-mono); font-weight: 400; }
+.branch-relations-body { background: var(--control-panel-soft); border: 1px solid var(--control-border); border-radius: 10px; display: grid; gap: 12px; padding: 14px; }
+.branch-relations-heading { align-items: start; display: flex; gap: 14px; justify-content: space-between; }
+.branch-relations-heading h3 { font: 600 14px var(--control-sans); margin: 0; }
+.branch-relations-heading p { color: var(--control-muted); font: 11px/1.65 var(--control-sans); margin: 5px 0 0; max-width: 800px; }
+.branch-relations-status { border: 1px solid var(--control-border); border-radius: 999px; color: var(--control-muted); flex: 0 0 auto; font: 10px var(--control-mono); padding: 4px 9px; white-space: nowrap; }
+.branch-relations-status.is-available { border-color: color-mix(in srgb, var(--control-green) 50%, var(--control-border)); color: var(--control-green); }
+.branch-relations-status.is-partial { border-color: color-mix(in srgb, var(--control-amber) 55%, var(--control-border)); color: var(--control-amber); }
+.branch-relations-coverage { align-items: center; border-left: 3px solid var(--control-blue); color: var(--control-muted); display: flex; flex-wrap: wrap; font: 10px/1.55 var(--control-mono); gap: 6px 12px; padding: 7px 10px; }
+.branch-relations-coverage .is-complete { color: var(--control-green); }
+.branch-relations-coverage .is-partial { color: var(--control-amber); }
+.branch-relations-coverage .is-unavailable { color: var(--control-muted); }
+.branch-relations-controls { align-items: end; display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.branch-relations-controls label { align-items: center; color: var(--control-muted); display: inline-flex; font: 11px var(--control-sans); gap: 6px; }
+.branch-relations-controls select, .branch-relations-controls input { background: var(--control-panel); border: 1px solid var(--control-border); border-radius: 6px; color: var(--control-ink); font: 11px var(--control-mono); min-height: 34px; max-width: min(360px, 70vw); padding: 5px 8px; }
+.branch-relations-search input { min-width: min(280px, 52vw); }
+.branch-relations-controls > span { color: var(--control-muted); font: 10px var(--control-mono); margin-left: auto; }
+.branch-relations-subheading { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; }
+.branch-relations-subheading h4 { font: 600 12px var(--control-sans); margin: 0; }
+.branch-relation-counts { align-items: center; color: var(--control-muted); display: flex; flex-wrap: wrap; font: 10px var(--control-mono); gap: 4px 9px; }
+.branch-relation-counts span { white-space: nowrap; }
+.branch-relations-pair-section, .branch-relations-history-section { display: grid; gap: 8px; }
+.branch-relations-pairs, .branch-relations-events { border-top: 1px solid var(--control-border); list-style: none; margin: 0; padding: 0; }
+.branch-relations-pairs { max-height: 420px; overflow: auto; padding-right: 6px; }
+.branch-relation-pair, .branch-relation-event { border-bottom: 1px solid var(--control-border); display: grid; gap: 4px; padding: 9px 0; }
+.branch-relation-pair-main { align-items: center; display: flex; flex-wrap: wrap; gap: 5px 8px; min-width: 0; }
+.branch-relation-ref { align-items: center; display: inline-flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.branch-relation-ref strong { font: 600 11px var(--control-mono); overflow-wrap: anywhere; }
+.branch-relation-ref-kind { border: 1px solid var(--control-border); border-radius: 999px; color: var(--control-muted); font: 9px var(--control-sans); padding: 2px 5px; }
+.branch-relation-ref-kind.is-local { border-color: color-mix(in srgb, var(--control-amber) 55%, var(--control-border)); color: var(--control-amber); }
+.branch-relation-ref-kind.is-remote { border-color: color-mix(in srgb, var(--control-blue) 55%, var(--control-border)); color: var(--control-blue); }
+.branch-relation-ref-kind.is-detached { border-style: dashed; }
+.branch-relation-ref-missing { color: var(--control-muted); font: 11px var(--control-mono); }
+.branch-relation-badge { border: 1px solid var(--control-border); border-radius: 999px; color: var(--control-muted); font: 10px var(--control-sans); margin-left: auto; padding: 3px 7px; white-space: nowrap; }
+.branch-relation-badge.is-ahead { border-color: color-mix(in srgb, var(--control-green) 55%, var(--control-border)); color: var(--control-green); }
+.branch-relation-badge.is-behind { border-color: color-mix(in srgb, var(--control-amber) 55%, var(--control-border)); color: var(--control-amber); }
+.branch-relation-badge.is-diverged { border-color: color-mix(in srgb, var(--control-red) 55%, var(--control-border)); color: var(--control-red); }
+.branch-relation-badge.is-unknown { border-style: dashed; }
+.branch-relation-pair-facts, .branch-relation-event-meta, .branch-relation-event-hashes { align-items: baseline; color: var(--control-muted); display: flex; flex-wrap: wrap; font: 10px/1.55 var(--control-mono); gap: 4px 12px; }
+.branch-relation-pair-facts code, .branch-relation-event-hashes code { color: var(--control-blue); font: 10px var(--control-mono); }
+.branch-relation-event { padding-left: 8px; }
+.branch-relation-event.is-selected { background: color-mix(in srgb, var(--control-blue-soft) 55%, transparent); border-left: 3px solid var(--control-blue); padding-left: 7px; }
+.branch-relation-event-head { align-items: center; display: flex; flex-wrap: wrap; gap: 5px 9px; }
+.branch-relation-event-head strong { font: 600 11px var(--control-mono); overflow-wrap: anywhere; }
+.branch-relation-evidence, .branch-relation-operation { border: 1px solid var(--control-border); border-radius: 999px; color: var(--control-muted); font: 9px var(--control-sans); padding: 2px 6px; white-space: nowrap; }
+.branch-relation-evidence.is-pull_request { border-color: color-mix(in srgb, var(--control-purple) 55%, var(--control-border)); color: var(--control-purple); }
+.branch-relation-evidence.is-reflog { border-color: color-mix(in srgb, var(--control-green) 55%, var(--control-border)); color: var(--control-green); }
+.branch-relation-event-meta a, .branch-relations-unresolved a { color: var(--control-blue); }
+.branch-relation-event-note, .branch-relations-note, .branch-relations-coverage-note { color: var(--control-muted); font: 10px/1.6 var(--control-sans); margin: 0; }
+.branch-relations-empty { color: var(--control-muted); font: 11px/1.65 var(--control-sans); margin: 0; }
+.branch-relations-unresolved { border-top: 1px solid var(--control-border); color: var(--control-muted); padding-top: 8px; }
+.branch-relations-unresolved summary { cursor: pointer; font: 11px var(--control-sans); }
+.branch-relations-unresolved-controls { align-items: baseline; display: flex; flex-wrap: wrap; font: 10px/1.6 var(--control-sans); gap: 5px 12px; padding-top: 7px; }
+.branch-relations-unresolved-controls label { align-items: center; display: inline-flex; gap: 5px; }
+.branch-relations-unresolved-controls input { accent-color: var(--control-blue); }
+.branch-relations-unresolved ul { border-top: 1px solid var(--control-border); list-style: none; margin: 7px 0 0; padding: 0; }
+.branch-relations-unresolved li { align-items: baseline; border-bottom: 1px solid var(--control-border); display: flex; flex-wrap: wrap; font: 10px/1.6 var(--control-mono); gap: 4px 10px; padding: 7px 0; }
+.branch-relations-unresolved li strong { color: var(--control-ink); overflow-wrap: anywhere; }
+.branch-relations-unresolved li span { color: var(--control-amber); }
+.flow-lane-refs { align-items: baseline; color: var(--control-muted); display: flex; flex-wrap: wrap; font: 9px/1.45 var(--control-mono); gap: 3px 6px; max-width: 100%; overflow: hidden; }
+.flow-lane-refs > code { color: var(--control-blue); max-width: 100%; overflow-wrap: anywhere; }
+.lane-state-default { border-color: color-mix(in srgb, var(--control-blue) 55%, var(--control-border)) !important; color: var(--control-blue) !important; }
+@media (max-width: 600px) {
+  .branch-relations-body { padding: 11px; }
+  .branch-relations-heading { display: grid; }
+  .branch-relations-status { justify-self: start; }
+  .branch-relations-controls { align-items: stretch; display: grid; }
+  .branch-relations-controls label { align-items: start; display: grid; }
+  .branch-relations-controls select, .branch-relations-controls input { max-width: none; width: 100%; }
+  .branch-relations-controls > span { margin-left: 0; }
+  .branch-relation-badge { margin-left: 0; }
+  .branch-relations-panel > details > summary { line-height: 1.55; }
+}
+
 /* Project workspace: identity, navigation, controls, then the map. */
 .control-shell { padding: 16px clamp(16px, 3vw, 48px) 40px; }
 .control-topbar { min-height: 44px; padding-bottom: 10px; }
@@ -3622,6 +3701,8 @@ body {
 .flow-row.is-selected .flow-track { background: color-mix(in srgb, var(--control-blue) 8%, transparent); }
 .flow-lane-line { stroke: color-mix(in srgb, var(--control-green) 65%, var(--control-panel)); }
 .flow-branch-link { opacity: .55; }
+.flow-connection-evidence-reflog .flow-merge-link, .flow-connection-evidence-reflog .flow-branch-link { stroke-dasharray: 7 3; }
+.flow-connection-evidence-pull_request .flow-merge-link { stroke: var(--control-purple); }
 .flow-latest-visible { bottom: 8px; font-size: 12px; gap: 8px; }
 .flow-latest-caption { flex-shrink: 0; font-size: 10px; opacity: .75; }
 .flow-connections path { vector-effect: non-scaling-stroke; }
@@ -4312,6 +4393,8 @@ html[data-theme="dark"] {
 .flow-connection-branch .flow-merge-link,
 .flow-connection-branch .flow-merge-direction { stroke: var(--control-green); }
 .flow-pr-status { color: var(--control-muted); font-size: 12px; margin-top: 8px; }
+.flow-connection-note ul { border-top: 1px solid var(--control-border); list-style: none; margin: 8px 0 0; padding: 0; }
+.flow-connection-note li { border-bottom: 1px solid var(--control-border); color: var(--control-muted); font: 10px/1.6 var(--control-mono); padding: 5px 0; }
 .flow-connection-default .flow-merge-link { stroke: var(--control-blue); }
 
 /* Keep row guides distinct from evidence-backed commit and relationship paths. */

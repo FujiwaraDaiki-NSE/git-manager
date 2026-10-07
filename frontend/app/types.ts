@@ -269,17 +269,51 @@ export type ProjectBranchRow = {
 export type ProjectBranchConnectionEdge = {
   id: string;
   kind: "merge" | "branch";
-  source_row_id: string;
-  target_row_id: string;
-  evidence: "pull_request" | "merge_base";
+  source_row_id: string | null;
+  target_row_id: string | null;
+  /** Historical display labels are retained when the current ref is gone. */
+  source?: string | null;
+  target?: string | null;
+  evidence: "pull_request" | "merge_base" | "reflog";
   commit_hash: string | null;
   pr_number: number | null;
   pr_url: string | null;
   label: string;
+  /** Reflog-backed operation facts. They are absent on legacy PR/merge-base edges. */
+  operation?: "fast_forward" | "merge" | "branch_create" | "pull_request" | null;
+  occurred_at?: string | null;
+  source_ref_id?: string | null;
+  target_ref_id?: string | null;
   source_commit_hash?: string | null;
   target_commit_hash?: string | null;
   source_commit?: ProjectBranchCommit | null;
   target_commit?: ProjectBranchCommit | null;
+};
+
+export type ProjectBranchConnectionRef = {
+  id: string;
+  row_id: string | null;
+  name: string;
+  kind: "local" | "remote" | "detached";
+  hash: string | null;
+};
+
+export type ProjectBranchConnectionPairRelation =
+  | "equal"
+  | "ahead"
+  | "behind"
+  | "diverged"
+  | "unrelated"
+  | "unknown";
+
+export type ProjectBranchConnectionPair = {
+  left_ref_id: string;
+  right_ref_id: string;
+  relation: ProjectBranchConnectionPairRelation;
+  left_only: number | null;
+  right_only: number | null;
+  merge_bases: string[] | null;
+  reason: string | null;
 };
 
 export type ProjectBranchConnectionUnresolved = {
@@ -292,12 +326,25 @@ export type ProjectBranchConnectionUnresolved = {
   reason: string;
   pr_number: number | null;
   pr_url: string | null;
+  evidence?: "pull_request" | "merge_base" | "reflog" | null;
+  operation?: "fast_forward" | "merge" | "branch_create" | "pull_request" | null;
+  occurred_at?: string | null;
+  source_ref_id?: string | null;
+  target_ref_id?: string | null;
+  commit_hash?: string | null;
+  source_commit_hash?: string | null;
+  target_commit_hash?: string | null;
 };
 
 export type ProjectBranchConnections = {
   edges: ProjectBranchConnectionEdge[];
   unresolved: ProjectBranchConnectionUnresolved[];
   status: "available" | "partial" | "unavailable";
+  /** All refs and all unordered ref pairs are supplied by the new contract. */
+  refs?: ProjectBranchConnectionRef[];
+  pairs?: ProjectBranchConnectionPair[];
+  ancestry_status?: "complete" | "partial" | "shallow" | "unavailable" | null;
+  reflog_status?: "available" | "partial" | "unavailable" | null;
 };
 
 export type ProjectWorktree = {
@@ -325,6 +372,12 @@ export type ProjectEvent = {
   author?: string | null;
   parents?: string[];
   stats?: CommitStats | null;
+  evidence?: "pull_request" | "merge_base" | "reflog" | null;
+  operation?: "fast_forward" | "merge" | "branch_create" | "pull_request" | null;
+  source_ref_id?: string | null;
+  target_ref_id?: string | null;
+  source_label?: string | null;
+  target_label?: string | null;
   task_id?: string | null;
   agent_id?: string | null;
   event_id?: string | null;

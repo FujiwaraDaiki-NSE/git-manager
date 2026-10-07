@@ -41,6 +41,7 @@ export function parseProjectUrl(search) {
     event: params.get("event"),
     lane: params.get("lane"),
     branchRow: params.get("branchRow"),
+    relationRef: params.get("relationRef"),
     at,
     laneQuery: params.get("laneQuery") ?? "",
     activityQuery: params.get("activityQuery") ?? "",

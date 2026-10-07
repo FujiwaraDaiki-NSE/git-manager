@@ -8,6 +8,8 @@ import { commitHeader } from "./branch-history-tools.mjs";
 import CommitFiles from "./commit-files";
 import GitGuide from "./git-guide";
 import BranchTimeline from "./branch-timeline";
+import { laneRecordedMerges } from "./lane-relations.mjs";
+import { edgeDisplayLabel } from "./branch-relations-tools.mjs";
 
 import Link from "next/link";
 import { homeReturnHref } from "./home-overview.mjs";
@@ -101,10 +103,10 @@ function laneLabel(lane: ProjectLane) {
   return lane.historical ? lane.name : lane.branch || "detached HEAD";
 }
 
-function laneMergeSummary(lane: ProjectLane) {
-  const outgoing = lane.merge_sources.map((relation) => `→ ${relation.target_branch ?? "不明"}`);
-  const incoming = lane.merge_targets.map((relation) => `${relation.source_branch ?? "不明"} →`);
-  return [...outgoing, ...incoming].join(" / ") || "合流関係なし / 不明";
+function laneMergeSummary(lane: ProjectLane, project: ProjectResponse) {
+  if (!project.branch_connections) return "取り込み記録未取得";
+  const { incoming, outgoing } = laneRecordedMerges(project.branch_connections, lane);
+  return [...outgoing, ...incoming].map((edge) => edgeDisplayLabel(edge, project.branch_connections?.refs ?? [])).join(" / ") || "確定した取り込み記録なし";
 }
 
 function laneState(lane: ProjectLane, defaultBranch: string | null = null) {
@@ -201,6 +203,7 @@ function projectFromSearch(search: string) {
     event: parsed.event,
     lane: parsed.lane,
     branchRow: parsed.branchRow,
+    relationRef: parsed.relationRef,
     at: parsed.at,
     laneQuery: parsed.laneQuery,
     laneFilter: parsed.laneFilter as LaneFilter,
@@ -347,7 +350,7 @@ function WorkLanes({
                 </td>
                 <td className="mono-cell" data-label="既定ブランチとの差">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
                 <td className="lane-message" data-label="最新メッセージ"><span title={lane.last_commit?.subject}>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "コミット未取得"}</span>{currentLaneAgent(lane)?.summary && <small>報告: {currentLaneAgent(lane)?.summary}</small>}</td>
-                <td className="unknown-cell" data-label="合流関係">{laneMergeSummary(lane)}</td>
+                <td className="unknown-cell" data-label="合流関係">{laneMergeSummary(lane, project)}</td>
                 <td className="unknown-cell" data-label="次の工程 / 注意">{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</td>
                 <td data-label="操作"><button className="table-action" type="button" disabled={!lane.path} title={!lane.path ? "このブランチには作業ディレクトリがありません" : undefined} onClick={() => onOpenGit(lane)}>Git詳細</button>{!lane.path && <small className="no-checkout">作業ディレクトリなし</small>}</td>
               </tr>
@@ -511,7 +514,12 @@ function InfoField({ label, value, code = false }: { label: string; value: strin
   return <div className="info-field"><span>{label}</span>{code ? <code title={valueOrUnknown(value)}>{valueOrUnknown(value)}</code> : <strong>{valueOrUnknown(value)}</strong>}{code && typeof value === "string" && value.length > 0 && <CopyButton value={value} label={`${label}をコピー`} />}</div>;
 }
 
-function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; defaultBranch: string | null; onOpenGit: (lane: ProjectLane) => void }) {
+function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: ProjectLane; project: ProjectResponse; defaultBranch: string | null; onOpenGit: (lane: ProjectLane) => void }) {
+  const searchParams = useSearchParams();
+  const { incoming, outgoing } = laneRecordedMerges(project.branch_connections, lane);
+  const relationText = (edges: typeof incoming) => !project.branch_connections ? "取り込み記録未取得" : edges.map((edge) => `${edgeDisplayLabel(edge, project.branch_connections?.refs ?? [])} (${shortHash(edge.commit_hash)})`).join(" / ") || "確定した取り込み記録なし";
+  const localRef = lane.branch !== null ? `refs/heads/${lane.branch}` : lane.path !== null ? `detached:${lane.path}` : null;
+  const relationHref = updateProjectUrl(`/project?${searchParams.toString()}`, { tab: "flow", lane: null, event: null, branchRow: null, relationRef: localRef });
   return (
     <div className="selection-content">
       <div className="selection-kicker">作業レーン</div>
@@ -520,15 +528,16 @@ function LaneDetail({ lane, defaultBranch, onOpenGit }: { lane: ProjectLane; def
       <dl className="selection-list">
         <div><dt>作業パス</dt><dd><code>{lane.path ?? "未取得"}</code>{lane.path && <CopyButton value={lane.path} label="作業パスをコピー" />}</dd></div>
         <div><dt>作業先端</dt><dd><code>{lane.unborn ? "初回コミット前" : lane.head ?? "未取得"}</code></dd></div>
-        <div><dt>分岐点 (merge-base)</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
+        <div><dt>既定ブランチとの共通祖先</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "未取得"}{!lane.unborn && <small>{exactDate(lane.last_commit?.date)}</small>}</dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
         <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}</dd></div>
         <div><dt>ブランチの作業状況</dt><dd>{agentStateLabel(agentTaskState(currentLaneAgent(lane)))}</dd></div>
-        <div><dt>このブランチからの合流</dt><dd>{lane.merge_sources.length ? lane.merge_sources.map((relation) => `${relation.target_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
-        <div><dt>このブランチへの合流</dt><dd>{lane.merge_targets.length ? lane.merge_targets.map((relation) => `${relation.source_branch ?? "不明"} (${shortHash(relation.commit_hash)})`).join(" / ") : "なし / 不明"}</dd></div>
+        <div><dt>このローカルブランチからの取り込み記録</dt><dd>{relationText(outgoing)}</dd></div>
+        <div><dt>このローカルブランチへの取り込み記録</dt><dd>{relationText(incoming)}</dd></div>
         <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || (currentLaneAgent(lane)?.attention ? agentStateLabel(currentLaneAgent(lane)?.attention) : null) || "未取得"}</dd></div>
       </dl>
+      <p>記録がない場合も、取り込まれていないとは限りません。<Link href={`${relationHref.split("#")[0]}#branch-relations-title`}>現在の包含関係・未解決の記録を確認</Link></p>
       <details className="flow-help selection-help">
         <summary>Git状態と比較先の見方</summary>
         <p>「変更なし」は作業ディレクトリに未コミットの変更がない状態です。追跡先にまだ送っていないコミットがある場合もあります。</p>
@@ -696,7 +705,7 @@ function SelectionPane({
   return (
     <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal={modal ? true : undefined} role={modal ? "dialog" : "complementary"} tabIndex={-1}>
       <div className="selection-head"><span className="selection-title">選択した項目の詳細</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
-      {selectedEvent && selectedHash ? <CommitDetail event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail defaultBranch={project.default_branch} lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
+      {selectedEvent && selectedHash ? <CommitDetail event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail defaultBranch={project.default_branch} project={project} lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
     </aside>
   );
 }
@@ -796,7 +805,7 @@ export default function ProjectControl() {
 
   useEffect(() => {
     setProjectUrlCopyState("idle");
-  }, [urlState.at, urlState.branchRow, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder]);
+  }, [urlState.at, urlState.branchRow, urlState.relationRef, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder]);
 
   const projectSnapshotKey = useMemo(() => {
     if (!urlState.path) return "";
@@ -958,9 +967,9 @@ export default function ProjectControl() {
     // remote-only rows and local branches may share a name, and multiple
     // locals may intentionally track one remote row.
     const lane = event.lane_id ? project?.lanes.find((item) => item.id === event.lane_id) : null;
-    updateUrl({ event: hash, lane: lane?.id ?? null, branchRow: branchRowId ?? null });
+    updateUrl({ event: hash, lane: lane?.id ?? null, branchRow: branchRowId ?? null, relationRef: null });
   }, [project?.lanes, updateUrl]);
-  const selectLane = useCallback((lane: ProjectLane) => updateUrl({ lane: lane.id, event: null }), [updateUrl]);
+  const selectLane = useCallback((lane: ProjectLane) => updateUrl({ lane: lane.id, event: null, branchRow: null, relationRef: null }), [updateUrl]);
   const openGit = useCallback((lane: ProjectLane) => {
     setCopyError(null);
     if (lane.path) setGitPath(lane.path);
@@ -1011,7 +1020,7 @@ export default function ProjectControl() {
       </nav>
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
-          {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /><BranchHistoryExplorer key={project.main_path} project={project} onSelect={selectEvent} /></>}
+          {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} relationRef={urlState.relationRef} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /><BranchHistoryExplorer key={project.main_path} project={project} onSelect={selectEvent} /></>}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "info" && <ProjectInfo project={project} onOpenGit={openGit} onSelectLane={selectLane} />}

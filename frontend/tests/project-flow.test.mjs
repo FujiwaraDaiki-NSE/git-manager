@@ -18,6 +18,7 @@ test("URL state is restored and updated without dropping the project path", () =
     event: "abc",
     lane: "branch:feature",
     branchRow: null,
+    relationRef: null,
     at: 35,
     laneQuery: "", laneFilter: "all", laneOrder: "name",
     activityQuery: "", activityFilter: "all", activityOrder: "newest",
@@ -39,6 +40,19 @@ test("invalid project view parameters remain explicit", () => {
   assert.deepEqual(parseProjectUrl("?tab=bogus").invalidParams, ["tab"]);
   assert.deepEqual(parseProjectUrl("?at=101").invalidParams, ["at"]);
   assert.deepEqual(parseProjectUrl("?merged=false&at=0").invalidParams, []);
+});
+
+test("relation links close details while preserving exact ref and display context", () => {
+  const href = updateProjectUrl("/project?path=%2Frepo&range=7d&lane=branch%3Atopic&event=abc&branchRow=shared", {
+    tab: "flow", lane: null, event: null, branchRow: null, relationRef: "refs/heads/topic",
+  });
+  const state = parseProjectUrl(new URL(href, "http://localhost").search);
+  assert.equal(state.lane, null);
+  assert.equal(state.event, null);
+  assert.equal(state.branchRow, null);
+  assert.equal(state.relationRef, "refs/heads/topic");
+  assert.equal(state.path, "/repo");
+  assert.equal(state.range, "7d");
 });
 
 test("merged and prunable worktrees fold only when they are safe to hide", () => {

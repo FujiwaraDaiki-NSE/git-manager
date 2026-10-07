@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, Dispatch, MutableRefObject, SetStateAction } from "react";
-import { selectTimelineRows, routeTimelineConnections } from "./timeline-layout.mjs";
+import { groupTimelineEventsByRow, selectTimelineRows, selectTimelineConnectionEdges, routeTimelineConnections } from "./timeline-layout.mjs";
 import { createPortal } from "react-dom";
 import {
   eventLeaderGeometry,
@@ -17,6 +17,8 @@ import {
 } from "./project-flow.mjs";
 import { agentStateLabel, agentTaskState } from "./agent-overview.mjs";
 import { uniqueLocalForCommit } from "./project-flow.mjs";
+import BranchRelations from "./branch-relations";
+import { connectionEventTime, edgeDisplayLabel, evidenceLabel, operationLabel, referenceDisplayName } from "./branch-relations-tools.mjs";
 import type {
   ProjectBranchCommit,
   ProjectBranchConnectionEdge,
@@ -38,6 +40,8 @@ type TimelineEvent = {
   pointOffset: number;
   id: string;
 };
+
+const DENSE_EVENT_THRESHOLD = 5000;
 
 const ranges: { id: TimeRange; label: string }[] = [
   { id: "current", label: "各ブランチの先端" },
@@ -76,7 +80,6 @@ function rowLocal(row: TimelineRow) {
 }
 
 function rowStatus(row: TimelineRow, defaultBranch: string | null) {
-  if (row.remote_ref === `origin/${defaultBranch}`) return ["既定", "lane-state-ok"];
   const labels: Record<string, [string, string]> = {
     synchronized: ["同期済み", "lane-state-ok"],
     local_ahead: ["ローカル先行（未push）", "lane-state-warn"],
@@ -95,6 +98,10 @@ function rowStatus(row: TimelineRow, defaultBranch: string | null) {
   if (labels[row.status]) return labels[row.status];
   if (row.historical) return ["履歴", "lane-state-muted"];
   return ["状態未取得", "lane-state-muted"];
+}
+
+function isDefaultRow(row: TimelineRow, defaultBranch: string | null) {
+  return Boolean(defaultBranch) && row.name === defaultBranch;
 }
 
 function commitEvent(project: ProjectResponse, row: TimelineRow, commit: ProjectBranchCommit): ProjectEvent {
@@ -276,14 +283,100 @@ function FlowEventButton({
   );
 }
 
+// The full-history view can contain every commit in a repository.  Keep every
+// point and its keyboard/click target, but avoid one timer and effect cleanup
+// per point.  The active point still uses the same preview popover as the
+// normal view; the close timer is shared by the parent.
+function FlowDenseEventButton({
+  event,
+  selected,
+  preview,
+  popoverBelow,
+  onNavigate,
+  onRegister,
+  onPreview,
+  onClosePreview,
+  onSelect,
+  trackWidth,
+}: {
+  event: TimelineEvent;
+  selected: boolean;
+  preview: boolean;
+  popoverBelow: boolean;
+  onNavigate: (event: TimelineEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => void;
+  onRegister: (id: string, node: HTMLButtonElement | null) => void;
+  onPreview: (id: string | null) => void;
+  onClosePreview: (id: string) => void;
+  onSelect: (event: TimelineEvent) => void;
+  trackWidth: number;
+}) {
+  const pointerRef = useRef(false);
+  const previewAtPointerRef = useRef(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const leader = eventLeaderGeometry(event.timestampX, event.hitX, trackWidth);
+  const keepPreview = () => onPreview(event.id);
+  const closePreview = () => onClosePreview(event.id);
+  const select = () => {
+    onPreview(null);
+    onSelect(event);
+  };
+  return (
+    <div className={`flow-event-hit${event.hitX < 24 ? " flow-event-left" : event.hitX > 76 ? " flow-event-right" : ""}`} data-flow-event-key={event.id} style={{ left: `${event.hitX}%`, "--flow-point-offset": `${event.pointOffset}px` } as CSSProperties} onMouseEnter={keepPreview} onMouseLeave={closePreview}>
+      {leader.width > 0.5 && <span className="flow-event-leader" aria-hidden="true" style={{ left: `calc(50% + ${leader.left}px)`, width: `${leader.width}px` }} />}
+      <button
+        aria-label={`${rowLabel(event.lane)} ${shortHash(event.row.hash)} ${event.row.subject}`}
+        aria-pressed={selected}
+        aria-describedby={preview ? flowPopoverId(event.id) : undefined}
+        className={`flow-event-button${selected ? " is-selected" : ""}`}
+        data-flow-event-key={event.id}
+        ref={(node) => { buttonRef.current = node; onRegister(event.id, node); }}
+        onPointerDown={(pointerEvent) => { if (pointerEvent.pointerType === "touch") { pointerRef.current = true; previewAtPointerRef.current = preview; } }}
+        onClick={() => {
+          const action = mobileEventAction({ isMobile: typeof window !== "undefined" && window.matchMedia("(max-width: 1199px)").matches, isTouch: pointerRef.current, previewAtPointerDown: previewAtPointerRef.current });
+          pointerRef.current = false;
+          previewAtPointerRef.current = false;
+          if (action === "preview") onPreview(event.id); else select();
+        }}
+        onKeyDown={(keyboardEvent) => {
+          const action = flowKeyboardAction(keyboardEvent.key);
+          if (action === "move") { keyboardEvent.preventDefault(); onNavigate(event, keyboardEvent.key as "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"); }
+          else if (action === "select") { keyboardEvent.preventDefault(); select(); }
+        }}
+        onFocus={keepPreview}
+        onBlur={(focusEvent) => { const next = focusEvent.relatedTarget; const popover = typeof document === "undefined" ? null : document.getElementById(flowPopoverId(event.id)); if (!(next instanceof Node) || (!focusEvent.currentTarget.parentElement?.contains(next) && !popover?.contains(next))) closePreview(); }}
+        title={`${shortHash(event.row.hash)} · ${event.row.subject || "コミット"}`}
+        type="button"
+      >
+        <span className={`flow-event-point${event.row.is_merge ? " is-merge" : ""}${event.row.is_head ? " is-head" : ""}`} aria-hidden="true" />
+      </button>
+      {preview && <FlowEventPopover buttonRef={buttonRef} event={event} onPreviewEnter={keepPreview} onPreviewLeave={closePreview} onSelect={select} popoverBelow={popoverBelow} />}
+    </div>
+  );
+}
+
 type LoadedHistory = { commits: ProjectBranchCommit[]; offset: number | null; loading: boolean; error: string | null };
 
 function edgeCommit(edge: ProjectBranchConnectionEdge & { source_commit?: ProjectBranchCommit | null; target_commit?: ProjectBranchCommit | null }, side: "source" | "target") {
   return side === "source" ? edge.source_commit ?? null : edge.target_commit ?? null;
 }
 
-function hasEdgeEvidence(edge: ProjectBranchConnectionEdge & { source_commit_hash?: string | null; target_commit_hash?: string | null; source_commit?: ProjectBranchCommit | null; target_commit?: ProjectBranchCommit | null }) {
-  return Boolean(edge.source_commit_hash && edge.target_commit_hash && edge.source_commit?.date && edge.target_commit?.date && Number.isFinite(Date.parse(edge.source_commit.date)) && Number.isFinite(Date.parse(edge.target_commit.date)));
+function hasEdgeEvidence(edge: ProjectBranchConnectionEdge) {
+  const operationTime = edge.occurred_at ? Date.parse(edge.occurred_at) : NaN;
+  if (edge.operation) return Number.isFinite(operationTime);
+  if (Number.isFinite(operationTime)) return true;
+  return Boolean(
+    edge.source_commit_hash
+    && edge.target_commit_hash
+    && edge.source_commit?.date
+    && edge.target_commit?.date
+    && Number.isFinite(Date.parse(edge.source_commit.date))
+    && Number.isFinite(Date.parse(edge.target_commit.date)),
+  );
+}
+
+function tipRefLabel(ref: { id: string; name: string; kind: string }) {
+  const kind = ref.kind === "local" ? "local" : ref.kind === "remote" ? "remote" : "detached";
+  return `${kind}: ${referenceDisplayName(ref)}`;
 }
 
 export default function BranchTimeline({
@@ -293,6 +386,7 @@ export default function BranchTimeline({
   selectedKey,
   selectedRowId,
   selectedLane,
+  relationRef,
   showMerged,
   onTimelineChange,
   onRangeChange,
@@ -307,6 +401,7 @@ export default function BranchTimeline({
   selectedKey: string | null;
   selectedRowId: string | null;
   selectedLane: string | null;
+  relationRef: string | null;
   showMerged: boolean;
   onTimelineChange: (value: number) => void;
   onRangeChange: (range: TimeRange) => void;
@@ -316,12 +411,27 @@ export default function BranchTimeline({
   onSelectLane: (lane: ProjectLane) => void;
 }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const densePreviewCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepDensePreview = useCallback((id: string | null) => {
+    if (densePreviewCloseTimer.current) clearTimeout(densePreviewCloseTimer.current);
+    setPreviewId(id);
+  }, []);
+  const closeDensePreview = useCallback((id: string) => {
+    if (densePreviewCloseTimer.current) clearTimeout(densePreviewCloseTimer.current);
+    densePreviewCloseTimer.current = setTimeout(() => setPreviewId((current) => current === id ? null : current), 160);
+  }, []);
+  useEffect(() => () => {
+    if (densePreviewCloseTimer.current) clearTimeout(densePreviewCloseTimer.current);
+  }, []);
   const [historyOpen, setHistoryOpen] = useState(timeline < 100);
   const [history, setHistory] = useState<Record<string, LoadedHistory>>({});
   const historyRequestKeys = useRef(new Map<string, string>());
   const flowScrollRef = useRef<HTMLDivElement>(null);
   const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const [branchLimit, setBranchLimit] = useState<number | null>(5);
+  // The relation panel always keeps every ref/pair.  The graph may still be
+  // narrowed by the user, but its initial state must not hide connections
+  // simply because the old default was five rows.
+  const [branchLimit, setBranchLimit] = useState<number | null>(null);
   useEffect(() => {
     const saved = window.localStorage.getItem("gitdash.timeline.branchLimit");
     if (saved === "all") setBranchLimit(null);
@@ -394,25 +504,50 @@ export default function BranchTimeline({
     return [row.id, commits] as const;
   })), [history, now, range, rows]);
   const visibleRowIds = new Set(rows.map(row => row.id));
-  const connectionEdges = (project.branch_connections?.edges ?? []).filter(edge => visibleRowIds.has(edge.source_row_id) && visibleRowIds.has(edge.target_row_id)) as (ProjectBranchConnectionEdge & { source_commit_hash?: string | null; target_commit_hash?: string | null; source_commit?: ProjectBranchCommit | null; target_commit?: ProjectBranchCommit | null })[];
+  // Keep all edges in memory.  The SVG only draws endpoints that are present
+  // in the current row window; the relation panel remains the complete index
+  // for hidden rows and deleted/ambiguous refs.
+  const connectionEdges = (project.branch_connections?.edges ?? []) as ProjectBranchConnectionEdge[];
+  const connectionSelection = selectTimelineConnectionEdges(connectionEdges, visibleRowIds);
+  const sameRowConnectionEdges = connectionEdges.filter((edge) => (
+    typeof edge.source_row_id === "string"
+    && typeof edge.target_row_id === "string"
+    && edge.source_row_id === edge.target_row_id
+  ));
   const rangeCutoff = range === "24h" ? now - 86400000 : range === "7d" ? now - 604800000 : null;
   const allTimes = rows.flatMap((row) => rowCommits.get(row.id) ?? []).map(eventDate).filter((value): value is number => value !== null);
-  const relationTimes = range === "current" ? [] : connectionEdges.flatMap((edge) => {
-    const date = edge.target_commit?.date ? Date.parse(edge.target_commit.date) : NaN;
-    return Number.isFinite(date) && date <= now && (rangeCutoff === null || date >= rangeCutoff) ? [date] : [];
+  const relationTimes = connectionEdges.flatMap((edge) => {
+    const date = connectionEventTime(edge, now);
+    return date === null ? [] : [date];
   });
-  const minTime = rangeCutoff ?? Math.min(now - 1, ...(allTimes.length || relationTimes.length ? [...allTimes, ...relationTimes] : [now]));
+  // A time-range cutoff controls commit points.  Relation events are retained
+  // even when older and use an outside anchor at the left edge.
+  const minTime = rangeCutoff ?? Math.min(now - 1, ...(allTimes.length ? allTimes : relationTimes.length ? relationTimes : [now]));
   const observationTime = minTime + ((now - minTime) * timeline) / 100;
   const positioned = rows.flatMap((row) => (rowCommits.get(row.id) ?? []).flatMap((commit) => {
     const time = eventDate(commit);
     if (time === null || time > observationTime) return [];
     return [{ row: { ...commit, is_head: row.tip_commits.some((tip) => tip.hash === commit.hash), is_merge: commit.parents.length > 1 }, lane: row, x: recentTimePosition(time, minTime, now), hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(row.id, commit.hash) }];
   }));
-  const minimumTrackWidth = Math.max(440, ...rows.map((row) => Math.max(1, positioned.filter((event) => event.lane.id === row.id).length) * 44));
+  const positionedByRow = new Map<string, typeof positioned>();
+  positioned.forEach((event) => {
+    const current = positionedByRow.get(event.lane.id);
+    if (current) current.push(event);
+    else positionedByRow.set(event.lane.id, [event]);
+  });
+  const minimumTrackWidth = Math.max(440, ...rows.map((row) => Math.max(1, positionedByRow.get(row.id)?.length ?? 0) * 44));
   const trackWidth = Math.max(minimumTrackWidth, availableTrackWidth);
-  const events = rows.flatMap((row) => layoutFlowEvents(positioned.filter((event) => event.lane.id === row.id), trackWidth));
-  const eventsByRow = new Map<string, TimelineEvent[]>();
-  events.forEach((event) => eventsByRow.set(event.lane.id, [...(eventsByRow.get(event.lane.id) ?? []), event]));
+  const events = rows.flatMap((row) => layoutFlowEvents(positionedByRow.get(row.id) ?? [], trackWidth));
+  const eventsByRow = groupTimelineEventsByRow(events) as Map<string, TimelineEvent[]>;
+  const denseEventMode = events.length > DENSE_EVENT_THRESHOLD;
+  const refs = project.branch_connections?.refs ?? [];
+  const tipRefsByRow = useMemo(() => new Map(rows.map((row) => {
+    const hashes = new Set([
+      ...row.tip_commits.map((commit) => commit.hash),
+      ...(row.remote_hash ? [row.remote_hash] : []),
+    ]);
+    return [row.id, refs.filter((ref) => ref.row_id === row.id && (ref.hash === null || hashes.has(ref.hash)))] as const;
+  })), [refs, rows]);
   const ticks = graphTimeTicks(minTime, now, trackWidth);
   const register = useCallback((id: string, node: HTMLButtonElement | null) => { if (node) eventButtonRefs.current.set(id, node); else eventButtonRefs.current.delete(id); }, []);
   const navigate = useCallback((current: TimelineEvent, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") => {
@@ -429,9 +564,10 @@ export default function BranchTimeline({
   const eventSelect = useCallback((event: TimelineEvent) => onSelect(commitEvent(project, event.lane, event.row), event.lane.id), [onSelect, project]);
   const routeLinks = useMemo(() => {
     const byRow = new Map(rows.map((row) => [row.id, row]));
+    const rowIndexById = new Map(rows.map((row, index) => [row.id, index]));
     const byHash = new Map<string, TimelineEvent>();
     events.forEach((event) => byHash.set(`${event.lane.id}:${event.row.hash}`, event));
-    const routes: { kind: "merge" | "branch"; x1: number; x2: number; y1: number; y2: number; outside: boolean; label: string; sourceAnchor: boolean; targetAnchor: boolean }[] = [];
+    const routes: { kind: "merge" | "branch"; evidence: string; x1: number; x2: number; y1: number; y2: number; outside: boolean; label: string; sourceAnchor: boolean; targetAnchor: boolean }[] = [];
     const links: { kind: "commit" | "merge" | "branch"; path: string; arrow: string | null; outside: boolean; label: string }[] = [];
     rows.forEach((row, rowIndex) => {
       const own = eventsByRow.get(row.id) ?? [];
@@ -446,38 +582,38 @@ export default function BranchTimeline({
       }));
     });
     connectionEdges.forEach((edge) => {
-      if (!hasEdgeEvidence(edge)) return;
-      const sourceRow = byRow.get(edge.source_row_id);
-      const targetRow = byRow.get(edge.target_row_id);
+      const sourceRow = edge.source_row_id ? byRow.get(edge.source_row_id) : undefined;
+      const targetRow = edge.target_row_id ? byRow.get(edge.target_row_id) : undefined;
       if (!sourceRow || !targetRow || sourceRow.id === targetRow.id) return;
       const sourceHash = edge.source_commit_hash ?? edgeCommit(edge, "source")?.hash ?? null;
       const targetHash = edge.target_commit_hash ?? edgeCommit(edge, "target")?.hash ?? null;
-      if (!sourceHash || !targetHash) return;
       const sourceEvent = byHash.get(`${sourceRow.id}:${sourceHash}`);
       const targetEvent = byHash.get(`${targetRow.id}:${targetHash}`);
-      const sourceDate = Date.parse(edge.source_commit!.date!);
-      const targetDate = Date.parse(edge.target_commit!.date!);
-      if (!Number.isFinite(sourceDate) || !Number.isFinite(targetDate) || sourceDate > observationTime || targetDate > observationTime) return;
-      if (edge.kind === "merge" && range === "current" && targetDate < minTime) return;
-      if (edge.kind === "merge" && rangeCutoff !== null && targetDate < rangeCutoff) return;
-      const sourceX = sourceEvent?.hitX ?? Math.max(8 / trackWidth * 100, recentTimePosition(sourceDate, minTime, now));
-      const targetX = targetEvent?.hitX ?? Math.max(8 / trackWidth * 100, recentTimePosition(targetDate, minTime, now));
-      const sourceIndex = rows.findIndex((row) => row.id === sourceRow.id);
-      const targetIndex = rows.findIndex((row) => row.id === targetRow.id);
+      const operationTime = connectionEventTime(edge, now);
+      if (operationTime === null || operationTime > observationTime) return;
+      const sourceDate = edge.source_commit?.date ? Date.parse(edge.source_commit.date) : operationTime;
+      const targetDate = edge.target_commit?.date ? Date.parse(edge.target_commit.date) : operationTime;
+      const sourceTime = Number.isFinite(sourceDate) ? sourceDate : operationTime;
+      const targetTime = Number.isFinite(targetDate) ? targetDate : operationTime;
+      const sourceX = sourceEvent?.hitX ?? Math.max(8 / trackWidth * 100, recentTimePosition(sourceTime, minTime, now));
+      const targetX = targetEvent?.hitX ?? Math.max(8 / trackWidth * 100, recentTimePosition(targetTime, minTime, now));
+      const sourceIndex = rowIndexById.get(sourceRow.id) ?? 0;
+      const targetIndex = rowIndexById.get(targetRow.id) ?? 0;
       const x1 = sourceX * trackWidth / 100;
       const x2 = targetX * trackWidth / 100;
       const y1 = (sourceIndex + 0.5) * 88;
       const y2 = (targetIndex + 0.5) * 88;
-      const outside = sourceDate < minTime || targetDate < minTime;
+      const outside = operationTime < minTime || sourceTime < minTime || targetTime < minTime;
       const kind = edge.kind === "merge" ? "merge" : "branch";
-      routes.push({ kind, x1, x2, y1, y2, outside, sourceAnchor: !sourceEvent, targetAnchor: !targetEvent,
-        label: `${edge.label} · ${sourceRow.name} → ${targetRow.name}${outside ? " · 表示期間より前の接続" : ""}` });
+      routes.push({ kind, evidence: edge.evidence, x1, x2, y1, y2, outside, sourceAnchor: !sourceEvent, targetAnchor: !targetEvent,
+        label: `${edgeDisplayLabel(edge, refs)} · ${edge.label || "関係イベント"} · ${evidenceLabel(edge.evidence)}${edge.operation ? ` · ${operationLabel(edge.operation)}` : ""}${outside ? " · 表示期間より前の接続" : ""}` });
     });
-    const points = events.map(event => ({ x: event.hitX * trackWidth / 100, y: (rows.findIndex(row => row.id === event.lane.id) + .5) * 88 }));
+    const points = events.map(event => ({ x: event.hitX * trackWidth / 100, y: ((rowIndexById.get(event.lane.id) ?? 0) + .5) * 88 }));
     return { links, routes: routeTimelineConnections(routes, points, trackWidth) };
 
-  }, [connectionEdges, events, eventsByRow, minTime, now, observationTime, range, rangeCutoff, rows, trackWidth]);
+  }, [connectionEdges, events, eventsByRow, minTime, now, observationTime, refs, rows, trackWidth]);
   const mergedCount = (project.branch_rows ?? []).filter((row) => row.historical).length;
+  const hiddenConnectionCount = connectionSelection.hidden.length;
   const observationX = recentTimePosition(observationTime, minTime, now);
   return (
     <section className="flow-section" aria-labelledby="flow-map-title">
@@ -497,27 +633,32 @@ export default function BranchTimeline({
           <svg aria-hidden="true" className="flow-connections" preserveAspectRatio="none" viewBox={`0 0 ${trackWidth} ${rows.length * 88}`}>
             {ticks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={rows.length * 88} />)}<line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={rows.length * 88} />
             {rows.map((row, index) => <line key={`guide:${row.id}`} className={`flow-row-guide${row.name === project.default_branch ? " is-default" : ""}`} x1="0" x2={trackWidth} y1={(index + .5) * 88} y2={(index + .5) * 88}><title>{row.name} · ブランチ行のガイド（コミットの親子関係ではありません）</title></line>)}
-            {[...routeLinks.links, ...routeLinks.routes].map((link, index) => <g className={`flow-merge-route flow-connection-${link.kind}${link.outside ? " is-outside" : ""}`} key={`${link.label}:${index}`}><title>{link.label}</title><path className={`${link.kind === "branch" ? "flow-branch-link" : link.kind === "merge" ? "flow-merge-link" : "flow-lane-line"}${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />{link.arrow && <path className={link.kind === "branch" ? "flow-branch-direction" : "flow-merge-direction"} d={link.arrow} />}</g>)}
+            {[...routeLinks.links, ...routeLinks.routes].map((link, index) => <g className={`flow-merge-route flow-connection-${link.kind}${"evidence" in link ? ` flow-connection-evidence-${link.evidence}` : ""}${link.outside ? " is-outside" : ""}`} key={`${link.label}:${index}`}><title>{link.label}</title><path className={`${link.kind === "branch" ? "flow-branch-link" : link.kind === "merge" ? "flow-merge-link" : "flow-lane-line"}${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />{link.arrow && <path className={link.kind === "branch" ? "flow-branch-direction" : "flow-merge-direction"} d={link.arrow} />}</g>)}
             {routeLinks.routes.map((route: {label: string; x1: number; x2: number; y1: number; y2: number; sourceAnchor: boolean; targetAnchor: boolean}, index: number) => <g key={`anchor:${index}`} className="flow-connection-anchor"><title>{route.label} · 接続根拠のコミット位置</title>{route.sourceAnchor && <circle cx={route.x1} cy={route.y1} r="4" />}{route.targetAnchor && <circle cx={route.x2} cy={route.y2} r="4" />}</g>)}
           </svg>
           {rows.map((row, index) => {
             const laneEvents = eventsByRow.get(row.id) ?? [];
             const [status, statusClass] = rowStatus(row, project.default_branch);
+            const defaultRow = isDefaultRow(row, project.default_branch);
             const local = rowLocal(row);
             const visibleCommits = rowCommits.get(row.id) ?? [];
             const rowEvent = visibleCommits[0];
-            return <div className={`flow-row${row.remote_ref === `origin/${project.default_branch}` ? " is-default" : ""}${selectedRowId === row.id ? " is-selected" : ""}`} data-flow-row={row.id} key={row.id}>
-              <div className="flow-lane-label" title={row.locals.length > 1 ? `${row.locals.length} local branches` : row.tracking_ref ?? "履歴と親子関係を表示"} ref={index === 0 ? firstLabelRef : undefined}><div className="flow-lane-title"><span className="lane-shape" aria-hidden="true" />{local || rowEvent ? <button className="flow-lane-button" aria-pressed={selectedLane === local?.id || selectedRowId === row.id} type="button" onClick={() => { if (local) onSelectLane(local); else if (rowEvent) onSelect(commitEvent(project, row, rowEvent), row.id); }}>{rowLabel(row)}</button> : <strong className="flow-lane-button">{rowLabel(row)}</strong>}</div><div className="flow-lane-meta"><span className={`lane-state ${statusClass}`}>{status}</span><span>{row.locals.length ? `${row.locals.length} local` : "remote only"}</span></div><div className="flow-lane-actions">{row.locals.length > 0 && <details className="flow-lane-locals"><summary>ローカル {row.locals.length}件</summary><div>{row.locals.map((lane) => <div key={lane.id}><button type="button" className="flow-lane-button" aria-pressed={selectedLane === lane.id} onClick={() => onSelectLane(lane)}>{lane.branch ?? lane.name}</button>{lane.path && <button type="button" className="subtle-button" onClick={() => onOpenGit(lane)}>Git詳細</button>}</div>)}</div></details>}{range !== "current" && history[row.id]?.offset !== null && <button className="flow-history-more" type="button" onClick={() => loadMore(row)} disabled={history[row.id]?.loading}>{history[row.id]?.loading ? "履歴を取得中…" : "さらに履歴"}</button>}{history[row.id]?.error && <span className="flow-history-note" role="alert">履歴取得失敗</span>}</div></div>
-              <div className="flow-track">{laneEvents.length === 0 && <span className="flow-track-empty">{history[row.id]?.loading ? "履歴を取得中…" : row.history_available ? "この表示範囲にコミットなし" : "履歴未取得"}</span>}{laneEvents.map((event) => <FlowEventButton event={event} key={event.id} onPreview={setPreviewId} onRegister={register} onNavigate={navigate} onSelect={eventSelect} popoverBelow={index < 2} preview={previewId === event.id} selected={selectedRowId === event.lane.id && selectedKey === event.row.hash} trackWidth={trackWidth} />)}{laneEvents.length > 0 && <div className="flow-latest-visible"><span className="flow-latest-caption">最新</span><span title={laneEvents[laneEvents.length - 1].row.subject}>{laneEvents[laneEvents.length - 1].row.subject}</span><time dateTime={laneEvents[laneEvents.length - 1].row.date ?? undefined}>{exactDate(laneEvents[laneEvents.length - 1].row.date)}</time></div>}</div>
+            const tipRefs = tipRefsByRow.get(row.id) ?? [];
+            return <div className={`flow-row${defaultRow ? " is-default" : ""}${selectedRowId === row.id ? " is-selected" : ""}`} data-flow-row={row.id} key={row.id}>
+              <div className="flow-lane-label" title={row.locals.length > 1 ? `${row.locals.length} local branches` : row.tracking_ref ?? "履歴と親子関係を表示"} ref={index === 0 ? firstLabelRef : undefined}><div className="flow-lane-title"><span className="lane-shape" aria-hidden="true" />{local || rowEvent ? <button className="flow-lane-button" aria-pressed={selectedLane === local?.id || selectedRowId === row.id} type="button" onClick={() => { if (local) onSelectLane(local); else if (rowEvent) onSelect(commitEvent(project, row, rowEvent), row.id); }}>{rowLabel(row)}</button> : <strong className="flow-lane-button">{rowLabel(row)}</strong>}</div><div className="flow-lane-meta"><span className={`lane-state ${statusClass}`}>{status}</span>{defaultRow && <span className="lane-state lane-state-default">既定</span>}<span>{row.locals.length ? `${row.locals.length} local` : "remote only"}</span></div><div className="flow-lane-refs" aria-label="現在のref"><span>現在の先端:</span>{tipRefs.length ? tipRefs.map((ref) => <code key={ref.id} title={ref.hash ?? undefined}>{tipRefLabel(ref)}</code>) : <span>local / remote ref 未取得</span>}</div><div className="flow-lane-actions">{row.locals.length > 0 && <details className="flow-lane-locals"><summary>ローカル {row.locals.length}件</summary><div>{row.locals.map((lane) => <div key={lane.id}><button type="button" className="flow-lane-button" aria-pressed={selectedLane === lane.id} onClick={() => onSelectLane(lane)}>{lane.branch ?? lane.name}</button>{lane.path && <button type="button" className="subtle-button" onClick={() => onOpenGit(lane)}>Git詳細</button>}</div>)}</div></details>}{range !== "current" && history[row.id]?.offset !== null && <button className="flow-history-more" type="button" onClick={() => loadMore(row)} disabled={history[row.id]?.loading}>{history[row.id]?.loading ? "履歴を取得中…" : "さらに履歴"}</button>}{history[row.id]?.error && <span className="flow-history-note" role="alert">履歴取得失敗</span>}</div></div>
+              <div className="flow-track">{laneEvents.length === 0 && <span className="flow-track-empty">{history[row.id]?.loading ? "履歴を取得中…" : row.history_available ? "この表示範囲にコミットなし" : "履歴未取得"}</span>}{laneEvents.map((event) => denseEventMode ? <FlowDenseEventButton event={event} key={event.id} onClosePreview={closeDensePreview} onNavigate={navigate} onPreview={keepDensePreview} onRegister={register} onSelect={eventSelect} popoverBelow={index < 2} preview={previewId === event.id} selected={selectedRowId === event.lane.id && selectedKey === event.row.hash} trackWidth={trackWidth} /> : <FlowEventButton event={event} key={event.id} onPreview={setPreviewId} onRegister={register} onNavigate={navigate} onSelect={eventSelect} popoverBelow={index < 2} preview={previewId === event.id} selected={selectedRowId === event.lane.id && selectedKey === event.row.hash} trackWidth={trackWidth} />)}{laneEvents.length > 0 && <div className="flow-latest-visible"><span className="flow-latest-caption">最新</span><span title={laneEvents[laneEvents.length - 1].row.subject}>{laneEvents[laneEvents.length - 1].row.subject}</span><time dateTime={laneEvents[laneEvents.length - 1].row.date ?? undefined}>{exactDate(laneEvents[laneEvents.length - 1].row.date)}</time></div>}</div>
             </div>;
           })}
           <div className="flow-current-label" style={{ left: `${renderedLabelWidth + observationX * trackWidth / 100}px` }} aria-hidden="true">{timeline === 100 ? "最新の観測" : "選択日時"}</div>
         </div>
       </div>}
-      {selection.total > rows.length && <p className="flow-pr-status">更新が新しいブランチを表示中。線は表示中の行同士を結びます。「すべて」で他のブランチも確認できます。</p>}
+      {selection.total > rows.length && <p className="flow-pr-status">更新が新しいブランチを表示中。{hiddenConnectionCount > 0 ? `表示行の外に ${hiddenConnectionCount} 件の関係があります。` : "関係線は表示中の行同士を結びます。"}全関係は下の一覧で確認できます。「すべて」で他の行も表示します。</p>}
+      {selection.total <= rows.length && hiddenConnectionCount > 0 && <p className="flow-pr-status">{hiddenConnectionCount} 件の関係は表示行の外にあります。参照を選んだ全関係一覧で確認できます。</p>}
+      {sameRowConnectionEdges.length > 0 && <details className="flow-help flow-connection-note"><summary>同じブランチ行にある参照間イベント ({sameRowConnectionEdges.length}件)</summary><p>取り込み元と取り込み先が同じ行に重なるため、グラフ上で矢印を分けて描画できません。下の全関係一覧ではローカル・リモートなどの参照 ID を分けて確認できます。</p><ul>{sameRowConnectionEdges.map((edge) => <li key={`same-row:${edge.id}`}>{edgeDisplayLabel(edge, refs)} · {edge.label || "関係イベント"} · {evidenceLabel(edge.evidence)}{edge.operation ? ` · ${operationLabel(edge.operation)}` : ""} · グラフ未描画（同一行）</li>)}</ul></details>}
+      <BranchRelations project={project} relationRef={relationRef} selectedLane={selectedLane} selectedRowId={selectedRowId} />
       <div className="flow-legend" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
-      {((project.branch_connections?.unresolved.length ?? 0) > 0 || connectionEdges.some((edge) => !hasEdgeEvidence(edge))) && <details className="flow-help"><summary>未解決のブランチ関係 ({(project.branch_connections?.unresolved.length ?? 0) + connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).length})</summary>{project.branch_connections?.unresolved.map((item) => <p key={item.id} role="status">{item.source} → {item.target} · {item.reason}</p>)}{connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).map((edge) => <p key={`missing:${edge.id}`} role="status">{edge.label} · 接続元または接続先コミットのハッシュ・日時の証拠が未取得のため、線を描画できません。</p>)}</details>}
-      <details className="flow-help"><summary>グラフの見方・キーボード操作</summary><p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進み、直近ほど広く表示します。左右キーで同じ行のコミット、上下キーで別の行へ移動し、Enterで詳細を開きます。</p><p>薄い横線はブランチ行のガイドです。コミット間の線は実際の親子関係を表します。紫の線はPRマージ、緑の破線は共通祖先からの分岐推定です。左端の白抜きの接続点は表示期間より前の分岐・合流を含みます。点の間隔は重なりを避けて調整し、細い補助線で本来の時刻位置を示します。</p></details>
+      {((project.branch_connections?.unresolved.length ?? 0) > 0 || connectionEdges.some((edge) => !hasEdgeEvidence(edge))) && <details className="flow-help"><summary>未解決のブランチ関係 ({(project.branch_connections?.unresolved.length ?? 0) + connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).length})</summary><p role="status">未解決の操作と関係は、上の「ブランチ・参照の全関係と関連履歴」で対象の参照ごとに確認できます。取得できない参照を含む全件表示にも切り替えられます。</p><a href="#branch-relations-title">全関係一覧を開く</a>{connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).map((edge) => <p key={`missing:${edge.id}`} role="status">{edge.label || "関係イベント"} · 接続元または接続先コミットのハッシュ・日時の証拠が未取得のため、線を描画できません。</p>)}</details>}
+      <details className="flow-help"><summary>グラフの見方・キーボード操作</summary><p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進み、直近ほど広く表示します。左右キーで同じ行のコミット、上下キーで別の行へ移動し、Enterで詳細を開きます。</p><p>薄い横線はブランチ行のガイドです。コミット間の線は実際の親子関係を表します。紫の実線はPRマージ、紫の破線はreflogに記録された取り込み、緑の破線はreflogに記録されたブランチ作成です。左端の白抜きの接続点は表示期間より前の分岐・合流を含みます。点の間隔は重なりを避けて調整し、細い補助線で本来の時刻位置を示します。</p></details>
       <div className="branch-row-notes" role="status">
         {project.branch_rows === null && <span>ブランチ行の取得に失敗しました。再走査してから再試行してください。</span>}
         {project.branch_connections?.status === "unavailable" && <span>ブランチ関係情報を取得できませんでした。</span>}
