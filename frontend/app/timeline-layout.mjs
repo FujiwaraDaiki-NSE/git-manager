@@ -103,11 +103,22 @@ export function routeTimelineConnections(connections, points, width) {
     return low;
   };
   const occupied = [];
+  const horizontal = [];
+  const placeLeg = (rowY, direction, start, end) => {
+    const left = Math.min(start, end) - 6;
+    const right = Math.max(start, end) + 6;
+    const options = [20, 28, 36].map(offset => {
+      const y = rowY + direction * offset;
+      const overlaps = horizontal.filter(leg => leg.y === y && leg.left < right && leg.right > left).length;
+      return { y, overlaps };
+    });
+    const best = options.reduce((best, option) => option.overlaps < best.overlaps ? option : best);
+    horizontal.push({ y: best.y, left, right });
+    return best;
+  };
   return connections.map(connection => {
     const { x1, x2, y1, y2 } = connection;
     const direction = Math.sign(y2 - y1);
-    const fromY = y1 + direction * 20;
-    const toY = y2 - direction * 20;
     const low = Math.min(y1, y2), high = Math.max(y1, y2);
     const midpoint = (x1 + x2) / 2;
     const candidates = [];
@@ -133,9 +144,15 @@ export function routeTimelineConnections(connections, points, width) {
     for (const route of occupied) if (route.low < high && route.high > low) addCost(route.x, 10000);
     const channel = candidates.reduce((best, candidate) => candidate.cost < best.cost ? candidate : best).x;
     occupied.push({ x: channel, low, high });
-    return { ...connection, channel,
-      path: `M ${x1} ${y1} V ${fromY} H ${channel} V ${toY} H ${x2} V ${y2}`,
-      arrow: `M ${x2 - 4} ${y2 - direction * 7} L ${x2} ${y2} L ${x2 + 4} ${y2 - direction * 7}`,
+    const from = placeLeg(y1, direction, x1, channel);
+    const to = placeLeg(y2, -direction, channel, x2);
+    // Stop outside the commit dot: its HTML hit target otherwise hides the arrow.
+    const arrowY = y2 - direction * 12;
+    const sourceY = y1 + direction * 12;
+    return { ...connection, channel, fromY: from.y, toY: to.y, sourceY, arrowY,
+      crowded: from.overlaps > 0 || to.overlaps > 0,
+      path: `M ${x1} ${sourceY} V ${from.y} H ${channel} V ${to.y} H ${x2} V ${arrowY}`,
+      arrow: `M ${x2 - 5} ${arrowY - direction * 8} L ${x2} ${arrowY} L ${x2 + 5} ${arrowY - direction * 8} Z`,
     };
   });
 }

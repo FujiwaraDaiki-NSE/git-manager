@@ -442,6 +442,8 @@ export default function BranchTimeline({
     window.localStorage.setItem("gitdash.timeline.branchLimit", limit === null ? "all" : String(limit));
   };
   const [navigationRow, setNavigationRow] = useState("");
+  const [focusedConnection, setFocusedConnection] = useState<string | null>(null);
+  useEffect(() => setFocusedConnection(null), [project.id]);
   const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
   const [renderedLabelWidth, setRenderedLabelWidth] = useState(260);
   const firstLabelRef = useRef<HTMLDivElement>(null);
@@ -567,7 +569,7 @@ export default function BranchTimeline({
     const rowIndexById = new Map(rows.map((row, index) => [row.id, index]));
     const byHash = new Map<string, TimelineEvent>();
     events.forEach((event) => byHash.set(`${event.lane.id}:${event.row.hash}`, event));
-    const routes: { kind: "merge" | "branch"; evidence: string; x1: number; x2: number; y1: number; y2: number; outside: boolean; label: string; sourceAnchor: boolean; targetAnchor: boolean }[] = [];
+    const routes: { id: string; endpoints: string; kind: "merge" | "branch"; evidence: string; x1: number; x2: number; y1: number; y2: number; outside: boolean; label: string; sourceAnchor: boolean; targetAnchor: boolean }[] = [];
     const links: { kind: "commit" | "merge" | "branch"; path: string; arrow: string | null; outside: boolean; label: string }[] = [];
     rows.forEach((row, rowIndex) => {
       const own = eventsByRow.get(row.id) ?? [];
@@ -605,13 +607,20 @@ export default function BranchTimeline({
       const y2 = (targetIndex + 0.5) * 88;
       const outside = operationTime < minTime || sourceTime < minTime || targetTime < minTime;
       const kind = edge.kind === "merge" ? "merge" : "branch";
-      routes.push({ kind, evidence: edge.evidence, x1, x2, y1, y2, outside, sourceAnchor: !sourceEvent, targetAnchor: !targetEvent,
+      routes.push({ id: edge.id, endpoints: edgeDisplayLabel(edge, refs), kind, evidence: edge.evidence, x1, x2, y1, y2, outside, sourceAnchor: !sourceEvent, targetAnchor: !targetEvent,
         label: `${edgeDisplayLabel(edge, refs)} · ${edge.label || "関係イベント"} · ${evidenceLabel(edge.evidence)}${edge.operation ? ` · ${operationLabel(edge.operation)}` : ""}${outside ? " · 表示期間より前の接続" : ""}` });
     });
     const points = events.map(event => ({ x: event.hitX * trackWidth / 100, y: ((rowIndexById.get(event.lane.id) ?? 0) + .5) * 88 }));
     return { links, routes: routeTimelineConnections(routes, points, trackWidth) };
 
   }, [connectionEdges, events, eventsByRow, minTime, now, observationTime, refs, rows, trackWidth]);
+  const focusedRoute = routeLinks.routes.find((route: { id: string }) => route.id === focusedConnection);
+  const focusedIndex = routeLinks.routes.findIndex((route: { id: string }) => route.id === focusedConnection);
+  const crowdedConnections = routeLinks.routes.filter((route: { crowded: boolean }) => route.crowded).length;
+  const stepConnection = (step: number) => {
+    const count = routeLinks.routes.length;
+    if (count) setFocusedConnection(routeLinks.routes[(focusedIndex + step + count) % count].id);
+  };
   const mergedCount = (project.branch_rows ?? []).filter((row) => row.historical).length;
   const hiddenConnectionCount = connectionSelection.hidden.length;
   const observationX = recentTimePosition(observationTime, minTime, now);
@@ -627,14 +636,30 @@ export default function BranchTimeline({
       </div>
       <details className="flow-history" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}><summary>履歴をたどる <span>{timeline === 100 ? "最新の観測" : "過去を表示中"} · {exactDate(new Date(observationTime).toISOString())}</span></summary><div className="flow-observation"><label className="timeline-control"><span>表示時点</span><input aria-label="過去の観測時点" max="100" min="0" onChange={(event) => onTimelineChange(100 * (recentTimeAt(Number(event.target.value), minTime, now) - minTime) / (now - minTime))} step="1" type="range" value={observationX} /><output>{timeline === 100 ? "最新の観測" : "選択日時"} · {exactDate(new Date(observationTime).toISOString())}</output></label><button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button></div></details>
       {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・ブランチ作業履歴を表示中。ブランチ名とGit作業状態は現在の情報です。</p>}
+      {routeLinks.routes.length > 0 && <div className="flow-connection-controls">
+        <label><span>接続を1本ずつ確認</span><select aria-label="強調する接続" value={focusedRoute?.id ?? ""} onChange={event => setFocusedConnection(event.target.value || null)}>
+          <option value="">すべての接続 ({routeLinks.routes.length}件)</option>
+          {routeLinks.routes.map((route: { id: string; label: string }, index: number) => <option key={route.id} value={route.id}>{index + 1}. {route.label}</option>)}
+        </select></label>
+        <div className="flow-connection-buttons"><button type="button" className="subtle-button" onClick={() => stepConnection(-1)} disabled={!focusedRoute}>前の接続</button><button type="button" className="subtle-button" onClick={() => stepConnection(1)}>次の接続</button><button type="button" className="subtle-button" onClick={() => setFocusedConnection(null)} disabled={!focusedRoute}>すべて表示</button></div>
+        <p className="flow-connection-status" role="status">{focusedRoute ? <><strong>{focusedIndex + 1} / {routeLinks.routes.length} · {focusedRoute.endpoints}</strong><span>{focusedRoute.label}</span></> : crowdedConnections > 0 ? "接続が集中しています。曲がる位置をずらして表示中です。1本選ぶと他の線が薄くなり、元から先まで追えます。" : "○ が元、▶ が先。実線は操作の記録、破線は推定です。"}</p>
+      </div>}
       {rows.length === 0 ? <div className="empty-flow">{project.branch_rows === null ? "ブランチ行の取得に失敗しました。" : "表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。"}</div> : <div className="flow-scroll" role="region" aria-label="Gitフローマップ（横スクロール可能）" ref={flowScrollRef} style={{ "--flow-popover-space": previewId ? "360px" : "0px" } as CSSProperties} tabIndex={0}>
         <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}><span>ブランチ / 現在の作業状態</span><div className="flow-axis-track">{ticks.map((tick) => <span className={`flow-time-tick${tick.edge ? ` is-${tick.edge}` : ""}`} key={tick.time} style={{ left: `${tick.position}%` }}><span className="flow-tick-date">{tick.dateLabel}</span><span>{tick.timeLabel}</span></span>)}</div></div>
         <div className="flow-rows" style={{ "--flow-row-height": "88px", "--flow-lanes": rows.length, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}>
           <svg aria-hidden="true" className="flow-connections" preserveAspectRatio="none" viewBox={`0 0 ${trackWidth} ${rows.length * 88}`}>
             {ticks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={rows.length * 88} />)}<line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={rows.length * 88} />
             {rows.map((row, index) => <line key={`guide:${row.id}`} className={`flow-row-guide${row.name === project.default_branch ? " is-default" : ""}`} x1="0" x2={trackWidth} y1={(index + .5) * 88} y2={(index + .5) * 88}><title>{row.name} · ブランチ行のガイド（コミットの親子関係ではありません）</title></line>)}
-            {[...routeLinks.links, ...routeLinks.routes].map((link, index) => <g className={`flow-merge-route flow-connection-${link.kind}${"evidence" in link ? ` flow-connection-evidence-${link.evidence}` : ""}${link.outside ? " is-outside" : ""}`} key={`${link.label}:${index}`}><title>{link.label}</title><path className={`${link.kind === "branch" ? "flow-branch-link" : link.kind === "merge" ? "flow-merge-link" : "flow-lane-line"}${link.outside ? " flow-merge-link-outside" : ""}`} d={link.path} />{link.arrow && <path className={link.kind === "branch" ? "flow-branch-direction" : "flow-merge-direction"} d={link.arrow} />}</g>)}
-            {routeLinks.routes.map((route: {label: string; x1: number; x2: number; y1: number; y2: number; sourceAnchor: boolean; targetAnchor: boolean}, index: number) => <g key={`anchor:${index}`} className="flow-connection-anchor"><title>{route.label} · 接続根拠のコミット位置</title>{route.sourceAnchor && <circle cx={route.x1} cy={route.y1} r="4" />}{route.targetAnchor && <circle cx={route.x2} cy={route.y2} r="4" />}</g>)}
+            {routeLinks.links.map((link, index) => <path key={index} className="flow-lane-line" d={link.path}><title>{link.label}</title></path>)}
+            {[...routeLinks.routes].sort((a, b) => Number(a.id === focusedRoute?.id) - Number(b.id === focusedRoute?.id)).map(route => <g className={`flow-readable-route flow-connection-${route.kind} flow-connection-evidence-${route.evidence}${focusedRoute ? route.id === focusedRoute.id ? " is-emphasized" : " is-muted" : ""}`} key={route.id}>
+              <title>{route.label}</title>
+              <path className="flow-route-halo" d={route.path} />
+              <path className="flow-route-line" d={route.path} />
+              <circle className="flow-route-source" cx={route.x1} cy={route.sourceY} r="4" />
+              <path className="flow-route-arrow" d={route.arrow} />
+              {route.sourceAnchor && <circle className="flow-route-anchor" cx={route.x1} cy={route.y1} r="4" />}
+              {route.targetAnchor && <circle className="flow-route-anchor" cx={route.x2} cy={route.y2} r="4" />}
+            </g>)}
           </svg>
           {rows.map((row, index) => {
             const laneEvents = eventsByRow.get(row.id) ?? [];
@@ -656,9 +681,9 @@ export default function BranchTimeline({
       {selection.total <= rows.length && hiddenConnectionCount > 0 && <p className="flow-pr-status">{hiddenConnectionCount} 件の関係は表示行の外にあります。参照を選んだ全関係一覧で確認できます。</p>}
       {sameRowConnectionEdges.length > 0 && <details className="flow-help flow-connection-note"><summary>同じブランチ行にある参照間イベント ({sameRowConnectionEdges.length}件)</summary><p>取り込み元と取り込み先が同じ行に重なるため、グラフ上で矢印を分けて描画できません。下の全関係一覧ではローカル・リモートなどの参照 ID を分けて確認できます。</p><ul>{sameRowConnectionEdges.map((edge) => <li key={`same-row:${edge.id}`}>{edgeDisplayLabel(edge, refs)} · {edge.label || "関係イベント"} · {evidenceLabel(edge.evidence)}{edge.operation ? ` · ${operationLabel(edge.operation)}` : ""} · グラフ未描画（同一行）</li>)}</ul></details>}
       <BranchRelations project={project} relationRef={relationRef} selectedLane={selectedLane} selectedRowId={selectedRowId} />
-      <div className="flow-legend" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 作業経路</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 合流元 → 合流先</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
+      <div className="flow-legend" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージ</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 記録された分岐</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 記録された取り込み</span><span><i className="legend-line legend-line-estimate" aria-hidden="true" /> 推定の関係</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
       {((project.branch_connections?.unresolved.length ?? 0) > 0 || connectionEdges.some((edge) => !hasEdgeEvidence(edge))) && <details className="flow-help"><summary>未解決のブランチ関係 ({(project.branch_connections?.unresolved.length ?? 0) + connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).length})</summary><p role="status">未解決の操作と関係は、上の「ブランチ・参照の全関係と関連履歴」で対象の参照ごとに確認できます。取得できない参照を含む全件表示にも切り替えられます。</p><a href="#branch-relations-title">全関係一覧を開く</a>{connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).map((edge) => <p key={`missing:${edge.id}`} role="status">{edge.label || "関係イベント"} · 接続元または接続先コミットのハッシュ・日時の証拠が未取得のため、線を描画できません。</p>)}</details>}
-      <details className="flow-help"><summary>グラフの見方・キーボード操作</summary><p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進み、直近ほど広く表示します。左右キーで同じ行のコミット、上下キーで別の行へ移動し、Enterで詳細を開きます。</p><p>薄い横線はブランチ行のガイドです。コミット間の線は実際の親子関係を表します。紫の実線はPRマージ、紫の破線はreflogに記録された取り込み、緑の破線はreflogに記録されたブランチ作成です。左端の白抜きの接続点は表示期間より前の分岐・合流を含みます。点の間隔は重なりを避けて調整し、細い補助線で本来の時刻位置を示します。</p></details>
+      <details className="flow-help"><summary>グラフの見方・キーボード操作</summary><p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進み、直近ほど広く表示します。左右キーで同じ行のコミット、上下キーで別の行へ移動し、Enterで詳細を開きます。</p><p>薄い横線はブランチ行のガイドです。コミット間の線は実際の親子関係を表します。紫の実線は記録された取り込み、緑の実線は記録されたブランチ作成です。推定の関係だけ破線で示します。接続元は白抜きの丸、接続先は塗りつぶした矢印です。接続が集中する場合は曲がる高さを分け、上の選択欄で1本ずつ強調できます。左端の白抜きの接続点は表示期間より前の分岐・合流を含みます。点の間隔は重なりを避けて調整し、細い補助線で本来の時刻位置を示します。</p></details>
       <div className="branch-row-notes" role="status">
         {project.branch_rows === null && <span>ブランチ行の取得に失敗しました。再走査してから再試行してください。</span>}
         {project.branch_connections?.status === "unavailable" && <span>ブランチ関係情報を取得できませんでした。</span>}

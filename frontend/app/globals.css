@@ -4416,3 +4416,27 @@ html[data-theme="dark"] {
   .branch-relation-route { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .branch-relation-route-arrow { transform: rotate(90deg); line-height: 28px; }
 }
+
+/* Relationship paths have their own visual hierarchy, separate from row/time guides. */
+.flow-readable-route { color: var(--control-purple); opacity: .9; }
+.flow-readable-route.flow-connection-branch { color: var(--control-green); }
+.flow-readable-route.is-muted { opacity: .08; }
+.flow-readable-route.is-emphasized { opacity: 1; }
+.flow-readable-route .flow-route-line { fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.flow-readable-route.flow-connection-evidence-merge_base .flow-route-line { stroke-dasharray: 8 5; }
+.flow-readable-route .flow-route-halo { fill: none; stroke: var(--control-panel); stroke-width: 6; stroke-linejoin: round; }
+.flow-readable-route.is-muted .flow-route-halo { stroke: none; }
+.flow-readable-route.is-emphasized .flow-route-line { stroke-width: 3; }
+.flow-readable-route .flow-route-source, .flow-readable-route .flow-route-anchor { fill: var(--control-panel); stroke: currentColor; stroke-width: 2; }
+.flow-readable-route .flow-route-arrow { fill: currentColor; stroke: var(--control-panel); stroke-width: .75; stroke-linejoin: round; }
+.flow-connections .flow-time-grid { stroke-dasharray: none; opacity: .3; }
+.flow-connections .flow-row-guide { stroke-dasharray: none; opacity: .45; }
+.flow-connection-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; margin: 12px 0; padding: 12px; border: 1px solid var(--control-border); border-radius: 8px; }
+.flow-connection-controls label { flex: 1 1 280px; min-width: 0; display: grid; gap: 6px; font: 12px var(--control-sans); }
+.flow-connection-controls select { width: 100%; min-width: 0; min-height: 36px; color: var(--control-ink); background: var(--control-panel); border: 1px solid var(--control-border); border-radius: 6px; padding: 6px; }
+.flow-connection-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.flow-connection-status { flex-basis: 100%; min-height: 40px; margin: 0; display: grid; align-content: start; gap: 4px; color: var(--control-muted); font: 12px/1.6 var(--control-sans); overflow-wrap: anywhere; }
+.flow-connection-status strong { color: var(--control-ink); }
+
+.flow-legend .legend-line-guide { border-top-style: solid; opacity: .45; }
+.flow-legend .legend-line-estimate { background: transparent; height: 0; border-top: 2px dashed var(--control-green); }
