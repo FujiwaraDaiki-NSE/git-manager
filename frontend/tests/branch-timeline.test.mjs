@@ -54,16 +54,16 @@ test('connection channels separate overlapping routes and avoid intervening comm
   ], [{x: 156, y: 132}], 440);
   assert.ok(Math.abs(routes[0].channel - 156) >= 12);
   assert.ok(Math.abs(routes[0].channel - routes[1].channel) >= 12);
-  assert.ok(routes[0].path.startsWith('M 80 44 V 64'));
-  assert.ok(routes[0].path.endsWith('H 220 V 220'));
-  assert.match(routes[0].arrow, /L 220 220/);
+  assert.ok(routes[0].path.startsWith('M 80 56 V 64'));
+  assert.ok(routes[0].path.endsWith('H 220 V 208'));
+  assert.match(routes[0].arrow, /L 220 208/);
 });
 
 test('upward connection points into the target dot without reversing source and target', () => {
   const [route] = routeTimelineConnections([{x1: 300, x2: 120, y1: 220, y2: 44}], [], 440);
-  assert.ok(route.path.startsWith('M 300 220 V 200'));
-  assert.ok(route.path.endsWith('H 120 V 44'));
-  assert.equal(route.arrow, 'M 116 51 L 120 44 L 124 51');
+  assert.ok(route.path.startsWith('M 300 208 V 200'));
+  assert.ok(route.path.endsWith('H 120 V 56'));
+  assert.equal(route.arrow, 'M 115 64 L 120 56 L 125 64 Z');
 });
 
 test('connection selection counts hidden endpoints without dropping them from the relation index', () => {
@@ -87,4 +87,23 @@ test('full-history event grouping stays responsive with one large lane', () => {
   assert.equal(grouped.get('main')[0].id, '0');
   assert.equal(grouped.get('main').at(-1).id, String(events.length - 1));
   assert.ok(elapsed < 1500, `event grouping took ${elapsed.toFixed(1)}ms`);
+});
+
+test('dense routes fan their horizontal legs without moving commit endpoints or dropping evidence', () => {
+  const input = Array.from({ length: 12 }, (_, id) => ({ id, x1: 420, x2: 422, y1: 44, y2: 220 }));
+  const routes = routeTimelineConnections(input, [], 440);
+  assert.equal(routes.length, input.length);
+  assert.equal(new Set(routes.slice(0, 3).map(route => route.fromY)).size, 3);
+  assert.equal(new Set(routes.slice(0, 3).map(route => route.toY)).size, 3);
+  assert.ok(routes.some(route => route.crowded));
+  for (const [index, route] of routes.entries()) {
+    assert.equal(route.id, input[index].id);
+    assert.equal(route.x2, 422);
+    assert.equal(route.y2, 220);
+    assert.ok(route.fromY > 44 && route.fromY < 88);
+    assert.ok(route.toY > 176 && route.toY < 220);
+    assert.equal(route.arrowY, 208);
+    assert.ok(route.arrow.endsWith(' Z'));
+    assert.ok(!route.path.includes('NaN'));
+  }
 });
