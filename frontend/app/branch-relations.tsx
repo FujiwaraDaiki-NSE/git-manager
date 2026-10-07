@@ -151,10 +151,17 @@ function ConnectionEventRow({
 }) {
   const ids = edgeReferenceIds(edge, refs);
   const selected = selectedRefId && (ids.source === selectedRefId || ids.target === selectedRefId);
+  const sourceLabel = edge.kind === "branch" ? "分岐元" : "取り込み元 · 変更を渡す側";
+  const targetLabel = edge.kind === "branch" ? "分岐先" : "取り込み先 · 変更を受け取る側";
   return <li className={`branch-relation-event${selected ? " is-selected" : ""}`}>
-    <div className="branch-relation-event-head"><strong>{endpointLabel(edge, "source", refs, rows)} → {endpointLabel(edge, "target", refs, rows)}</strong><span className={`branch-relation-evidence is-${edge.evidence}`}>{evidenceLabel(edge.evidence)}</span>{edge.operation && <span className="branch-relation-operation">{operationLabel(edge.operation)}</span>}</div>
+    <div className="branch-relation-event-head"><span className={`branch-relation-evidence is-${edge.evidence}`}>{evidenceLabel(edge.evidence)}</span>{edge.operation && <span className="branch-relation-operation">{operationLabel(edge.operation)}</span>}</div>
+    <div className="branch-relation-route">
+      <div className="branch-relation-endpoint"><span>{sourceLabel}</span><strong>{endpointLabel(edge, "source", refs, rows)}</strong></div>
+      <span className="branch-relation-route-arrow" aria-hidden="true">→</span>
+      <div className="branch-relation-endpoint"><span>{targetLabel}</span><strong>{endpointLabel(edge, "target", refs, rows)}</strong></div>
+    </div>
     <div className="branch-relation-event-meta"><span>{edgeTimeLabel(edge)}</span><span>{edge.label || "関係イベント"}</span>{edge.pr_number !== null && edge.pr_number !== undefined && (edge.pr_url ? <a href={edge.pr_url} target="_blank" rel="noreferrer">PR #{edge.pr_number}</a> : <span>PR #{edge.pr_number}</span>)}</div>
-    <div className="branch-relation-event-hashes"><span>取り込み元 {hashText(edge.source_commit_hash ?? edge.source_commit?.hash ?? null)}</span><span>取り込み先 {hashText(edge.target_commit_hash ?? edge.target_commit?.hash ?? null)}</span><span>根拠コミット {hashText(edge.commit_hash)}</span></div>
+    <div className="branch-relation-event-hashes"><span>{edge.kind === "branch" ? "分岐元" : "取り込み元"} {hashText(edge.source_commit_hash ?? edge.source_commit?.hash ?? null)}</span><span>{edge.kind === "branch" ? "分岐先" : "取り込み先"} {hashText(edge.target_commit_hash ?? edge.target_commit?.hash ?? null)}</span><span>根拠コミット {hashText(edge.commit_hash)}</span></div>
     {(!ids.source || !ids.target) && <p className="branch-relation-event-note">取り込み元・先の参照 ID の一意な対応付けは未取得です。行名だけから参照を推測していません。</p>}
     {edge.source_row_id && !rowName(rows, edge.source_row_id) && <p className="branch-relation-event-note">操作元のブランチ行は現在の一覧にありません。</p>}
   </li>;
