@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ブランチ間の関係 — 実装サマリー</title>
+<style>
+body{font:16px/1.8 system-ui,sans-serif;color:#172536;background:#f4f7fb;max-width:1050px;margin:32px auto;padding:0 24px}article{background:white;padding:32px;border:1px solid #d5dfeb;border-radius:12px}h1,h2{line-height:1.4}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d5dfeb;padding:10px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere;background:#edf2f7;padding:2px 5px}p,li{max-width:90ch}.evidence{border-left:4px solid #176764;padding:12px 18px;background:#eef8f6}
+</style>
+<article>
+<h1>ブランチ間の現在の関係と、分岐・取り込みの記録</h1>
+<p>対象は gitdash のブランチフロー。ローカルの Fast-forward が表示されない問題を起点に、ローカルとリモートを区別し、各参照とすべての相手の関係を調べられるようにした。</p>
+<h2>判断の根拠</h2>
+<table><thead><tr><th>表示する事実</th><th>根拠</th><th>混同しない事柄</th></tr></thead><tbody>
+<tr><td>同じ先端・相手を含む・相手に含まれる・分岐中・共通履歴なし</td><td>観測した先端 SHA から到達できる Git の親子関係</td><td>包含だけでは過去に merge コマンドを実行したとは断定しない。</td></tr>
+<tr><td>ブランチ作成、Fast-forward、通常マージ</td><td>reflog の操作名、指定された参照名、操作日時、当時のコミット</td><td>コミットの作成日時と取り込み操作の日時は異なる。SHA 指定の操作からブランチ名を推測しない。</td></tr>
+<tr><td>PR による取り込み</td><td>GitHub が返したマージ済み PR の source/base、SHA、merged_at</td><td>squash/rebase により元 SHA が祖先に存在しなくても、PR の記録は保持する。</td></tr>
+<tr><td>判定不能・未解決</td><td>失敗した読み取り、欠損した履歴・参照、曖昧な名前</td><td>情報不足を「関係なし」にしない。reflog の取得成功を過去すべての復元成功としない。</td></tr>
+</tbody></table>
+<h2>構成</h2>
+<ul>
+<li><code>branch_ref_relations.py</code> は行内の全ローカル・リモート・detached HEAD を独立に比較する。全参照対を返し、グラフの200コミット上限には依存しない。</li>
+<li><code>branch_relation_events.py</code> は明示的な操作記録を収集する。現在の包含状態と履歴上の操作を分離し、現在のブランチ行に結び付けられない記録も残す。</li>
+<li><code>branch_rows.connections</code> はPR、操作記録、現在の全参照比較を一つの応答にまとめる。既定ブランチとの共通祖先だけから作成元を決める線は、全参照の共通祖先表示に置き換えた。</li>
+<li>フローの先端はローカル・リモートを明示する。期間外の取り込みには根拠点を残し、表示行から隠れた関係数と全関係一覧への導線を表示する。</li>
+<li>関係一覧はグラフの行数や表示期間に依存しない。選んだ参照と全相手の比較、記録された操作、未解決の記録を調べられる。</li>
+</ul>
+<h2>浅い履歴</h2>
+<p>リポジトリ全体が shallow でも、比較する両参照が同じ欠落境界を共有していれば、欠落した祖先は双方に共通する。比較対象ごとに確定できる差分と、履歴不足で確定できない結果を区別する。</p>
+<h2>稼働環境への反映</h2>
+<p>開始時ブランチは <code>main</code>。実装は <code>codex/complete-branch-relations</code> の worktree で行い、共通hooksと環境設定を読む <code>/home/solution2024/.local/bin/gitdash-compose</code> を使用する。Compose のビルド元のみ worktree に指定した一時 override を使い、既存ポート・永続データ・認証の設定を引き継ぐ。</p>
+<p>PR を取り込む前に通常の main から再ビルドすると main のコードに戻る。再現用の build override は <code>/tmp/gitdash-complete-branch-relations.compose.yml</code>。</p>
+<h2>検証結果</h2>
+<div class="evidence" id="verification">
+<p><code>design_db</code> の実データで223参照・24,753組（223 × 222 ÷ 2）の現在関係を取得し、稼働コンテナのAPIとブラウザで照合した。</p>
+<table><thead><tr><th>照合した事実</th><th>API・実画面の結果</th></tr></thead><tbody>
+<tr><td>UCUM → ローカル UI改善</td><td>UCUM先端をUI改善が包含。UCUMのみ0件、UI改善のみ8件。共通祖先 <code>6c21b12fc0</code>。</td></tr>
+<tr><td>UCUM ↔ origin/UI改善</td><td>分岐中。双方の固有コミットは各1件。共通祖先 <code>737b1eb057</code>。</td></tr>
+<tr><td>Fast-forward記録</td><td>ローカルUCUM → ローカルUI改善、2026年10月6日18:24:22（JST）、<code>6c21b12fc0</code>。</td></tr>
+<tr><td>ブランチ作成記録</td><td>ローカルUI改善 → ローカルUCUM、2026年10月6日17:45:03（JST）。</td></tr>
+</tbody></table>
+<p>「各ブランチの先端」「24時間」「7日」「全期間」の各表示で、UCUMの取り込み線をSVG上で確認。5件表示でも全関係一覧に記録が残り、行外の関係数を明示する。詳細パネルも同じFast-forward記録を表示する。390px幅で参照名・種別・比較結果を確認し、横方向のページあふれがないことを確認した。比較一覧はキーボードでスクロールできる。</p>
+<p>実画面で発見したReactの予約propによる参照名の欠落を修正した。ブランチ名の再利用、rename、同一秒内の操作、local/remote同名の反例をレビューし、修正後の再検証で既知のP1指摘が残っていないことを確認した。</p>
+<p>最終自動検証はbackend 164件、frontend 108件が成功し、Next.js本番ビルドも成功した。backendには既存依存関係のStarlette/httpx非推奨警告が1件ある。通常マージ、octopus、Fast-forward後の進行・reset、source/targetの改名・削除再作成、改名の往復、同名を別々に改名した場合、同じ秒の複数target・同一targetの複数操作を回帰テストに含む。</p>
+<p>390px幅で詳細から関係一覧へ移動した後、詳細パネルが閉じて正確なrefが選ばれることを確認した。大量履歴でもキーボード移動と詳細プレビューを実画面で確認し、ブラウザコンソールにエラーはなかった。接続経路計算は179行・34,515点・105経路で約15ms。全期間の初回描画には大量の点を展開する待ち時間がある。</p>
+</div>
+</article>
+</html>

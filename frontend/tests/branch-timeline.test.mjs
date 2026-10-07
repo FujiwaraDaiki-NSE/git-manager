@@ -37,7 +37,7 @@ test("timeline ticks include both bounded endpoints", () => {
   assert.equal(ticks.at(-1).position, 100);
 });
 
-import { selectTimelineRows, routeTimelineConnections } from '../app/timeline-layout.mjs';
+import { groupTimelineEventsByRow, selectTimelineRows, selectTimelineConnectionEdges, routeTimelineConnections } from '../app/timeline-layout.mjs';
 
 test('recent branch limit keeps the default branch and sorts by tip date, with unknown dates last', () => {
   const row = (id, date, historical = false) => ({id, name: id, historical, tip_commits: [{date}]});
@@ -64,4 +64,27 @@ test('upward connection points into the target dot without reversing source and 
   assert.ok(route.path.startsWith('M 300 220 V 200'));
   assert.ok(route.path.endsWith('H 120 V 44'));
   assert.equal(route.arrow, 'M 116 51 L 120 44 L 124 51');
+});
+
+test('connection selection counts hidden endpoints without dropping them from the relation index', () => {
+  const result = selectTimelineConnectionEdges([
+    { id: 'visible', source_row_id: 'main', target_row_id: 'topic' },
+    { id: 'hidden', source_row_id: 'main', target_row_id: 'old' },
+    { id: 'unresolved', source_row_id: null, target_row_id: 'main' },
+  ], new Set(['main', 'topic']));
+  assert.deepEqual(result.visible.map((edge) => edge.id), ['visible']);
+  assert.deepEqual(result.hidden.map((edge) => edge.id), ['hidden', 'unresolved']);
+  assert.equal(result.total, 3);
+});
+
+test('full-history event grouping stays responsive with one large lane', () => {
+  const events = Array.from({ length: 34515 }, (_, index) => ({ lane: { id: 'main' }, id: String(index) }));
+  const started = performance.now();
+  const grouped = groupTimelineEventsByRow(events);
+  const elapsed = performance.now() - started;
+  assert.equal(grouped.size, 1);
+  assert.equal(grouped.get('main').length, events.length);
+  assert.equal(grouped.get('main')[0].id, '0');
+  assert.equal(grouped.get('main').at(-1).id, String(events.length - 1));
+  assert.ok(elapsed < 1500, `event grouping took ${elapsed.toFixed(1)}ms`);
 });
