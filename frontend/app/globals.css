@@ -4406,3 +4406,13 @@ html[data-theme="dark"] {
 .legend-line-guide { height: 0; border-top: 1px dashed var(--control-muted); background: transparent; }
 .flow-connection-branch .flow-branch-link { fill: none; opacity: 1; }
 .flow-connection-branch { opacity: .85; }
+
+.branch-relation-route { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); align-items: center; gap: 12px; padding: 8px 0; }
+.branch-relation-endpoint { min-width: 0; display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--control-border); border-radius: 8px; }
+.branch-relation-endpoint > span { color: var(--control-muted); font: 12px/1.5 var(--control-sans); }
+.branch-relation-endpoint strong { overflow-wrap: anywhere; font: 600 13px/1.6 var(--control-mono); }
+.branch-relation-route-arrow { text-align: center; color: var(--control-blue); font-size: 24px; }
+@media (max-width: 600px) {
+  .branch-relation-route { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .branch-relation-route-arrow { transform: rotate(90deg); line-height: 28px; }
+}
