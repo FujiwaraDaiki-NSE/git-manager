@@ -8,8 +8,12 @@
  */
 
 export const COMMIT_FILE_FILTERS = ["all", "text", "binary", "renamed"];
-export const COMMIT_FILE_SORTS = ["path", "volume"];
+export const COMMIT_FILE_SORTS = ["path", "volume", "additions", "deletions"];
 export const COMMIT_FILE_ORDERS = ["asc", "desc"];
+export const COMMIT_FILE_DIRECTORY_ALL = "all";
+export const COMMIT_FILE_DIRECTORY_ROOT = ".";
+export const COMMIT_FILE_EXTENSION_ALL = "all";
+export const COMMIT_FILE_EXTENSION_NONE = "none";
 
 export function isBinaryFile(file) {
   return file.binary === true;
@@ -29,6 +33,91 @@ export function matchesCommitFileQuery(file, query) {
 
 export function searchCommitFiles(files, query) {
   return files.filter((file) => matchesCommitFileQuery(file, query));
+}
+
+/** Return the directory of the current path. A file without a slash is in the explicit root directory. */
+export function commitFileDirectory(file) {
+  return pathDirectory(file.path);
+}
+
+/**
+ * Return the lower-case extension of the current path, including its dot.
+ * A plain dotfile such as `.gitignore`, a name without a dot, and a trailing
+ * dot are deliberately treated as having no extension. A dotfile with a
+ * suffix, such as `.env.local`, has the final suffix `.local`.
+ */
+export function commitFileExtension(file) {
+  return pathExtension(file.path);
+}
+
+function pathDirectory(path) {
+  const separator = path.lastIndexOf("/");
+  return separator === -1 ? COMMIT_FILE_DIRECTORY_ROOT : path.slice(0, separator);
+}
+
+function pathExtension(path) {
+  const separator = path.lastIndexOf("/");
+  const basename = path.slice(separator + 1);
+  const dot = basename.lastIndexOf(".");
+  if (dot <= 0 || dot === basename.length - 1) return null;
+  return basename.slice(dot).toLocaleLowerCase();
+}
+
+function commitFilePaths(file) {
+  return file.old_path === undefined || file.old_path === null
+    ? [file.path]
+    : [file.old_path, file.path];
+}
+
+export function listCommitFileDirectories(files) {
+  const directories = new Set(files.flatMap((file) => commitFilePaths(file).map(pathDirectory)));
+  return [...directories].sort((left, right) => {
+    if (left === COMMIT_FILE_DIRECTORY_ROOT) return -1;
+    if (right === COMMIT_FILE_DIRECTORY_ROOT) return 1;
+    return left.localeCompare(right, undefined, { sensitivity: "base" });
+  });
+}
+
+export function listCommitFileExtensions(files) {
+  const extensions = new Set();
+  for (const file of files) {
+    for (const extension of commitFilePaths(file).map(pathExtension)) {
+      extensions.add(extension === null ? COMMIT_FILE_EXTENSION_NONE : extension);
+    }
+  }
+  return [...extensions].sort((left, right) => {
+    if (left === COMMIT_FILE_EXTENSION_NONE) return -1;
+    if (right === COMMIT_FILE_EXTENSION_NONE) return 1;
+    return left.localeCompare(right, undefined, { sensitivity: "base" });
+  });
+}
+
+export function filterCommitFilesByDirectory(files, directory) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new RangeError(`Unknown commit file directory: ${directory}`);
+  }
+  if (directory === COMMIT_FILE_DIRECTORY_ALL) return [...files];
+  // A rename has two displayed paths, so either actual directory can match.
+  return files.filter((file) => commitFilePaths(file).some((path) => pathDirectory(path) === directory));
+}
+
+export function filterCommitFilesByExtension(files, extension) {
+  if (typeof extension !== "string" || extension.length === 0) {
+    throw new RangeError(`Unknown commit file extension: ${extension}`);
+  }
+  if (extension === COMMIT_FILE_EXTENSION_ALL) return [...files];
+  if (extension !== COMMIT_FILE_EXTENSION_NONE && !extension.startsWith(".")) {
+    throw new RangeError(`Unknown commit file extension: ${extension}`);
+  }
+  // A rename has two displayed paths, so either actual extension can match.
+  return files.filter((file) => {
+    return commitFilePaths(file).some((path) => {
+      const fileExtension = pathExtension(path);
+      return extension === COMMIT_FILE_EXTENSION_NONE
+        ? fileExtension === null
+        : fileExtension === extension.toLocaleLowerCase();
+    });
+  });
 }
 
 export function filterCommitFiles(files, filter) {
@@ -65,6 +154,15 @@ function comparePath(a, b) {
   return oldA.localeCompare(oldB, undefined, { sensitivity: "base" });
 }
 
+function commitFileSortValue(file, sort) {
+  if (sort === "volume") return commitFileChangeVolume(file);
+  if (sort === "additions" || sort === "deletions") {
+    if (isBinaryFile(file) || typeof file[sort] !== "number") return null;
+    return file[sort];
+  }
+  return null;
+}
+
 export function sortCommitFiles(files, sort, order) {
   if (!COMMIT_FILE_SORTS.includes(sort)) {
     throw new RangeError(`Unknown commit file sort: ${sort}`);
@@ -75,16 +173,16 @@ export function sortCommitFiles(files, sort, order) {
   const multiplier = order === "asc" ? 1 : -1;
   return [...files].sort((a, b) => {
     if (sort === "path") return multiplier * comparePath(a, b);
-    const volumeA = commitFileChangeVolume(a);
-    const volumeB = commitFileChangeVolume(b);
+    const valueA = commitFileSortValue(a, sort);
+    const valueB = commitFileSortValue(b, sort);
     // Unknown values are deliberately kept together at the end.  They are
     // never compared as zero, which would make binary files look unchanged.
-    if (volumeA === null && volumeB !== null) return 1;
-    if (volumeA !== null && volumeB === null) return -1;
-    if (volumeA !== null && volumeB !== null && volumeA !== volumeB) {
-      return multiplier * (volumeA - volumeB);
+    if (valueA === null && valueB !== null) return 1;
+    if (valueA !== null && valueB === null) return -1;
+    if (valueA !== null && valueB !== null && valueA !== valueB) {
+      return multiplier * (valueA - valueB);
     }
-    return comparePath(a, b);
+    return multiplier * comparePath(a, b);
   });
 }
 
@@ -152,6 +250,11 @@ export function buildCommitFilesTsv(files) {
     ]),
   ];
   return `${rows.map((row) => row.map(tsvCell).join("\t")).join("\r\n")}\r\n`;
+}
+
+/** Build one current path per line for the supplied (possibly filtered) files. */
+export function buildCommitFilesPathList(files) {
+  return files.map((file) => file.path).join("\n");
 }
 
 export { tsvCell as escapeTsvCell };

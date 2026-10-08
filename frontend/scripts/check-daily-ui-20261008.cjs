@@ -1,0 +1,153 @@
+// Run with PLAYWRIGHT_MODULE, GITDASH_TEST_ORIGIN and GITDASH_TEST_OUTPUT set.
+// Uses the existing git-manager history, plus an intercepted diff for boundary cases.
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE);
+const origin = process.env.GITDASH_TEST_ORIGIN;
+const output = process.env.GITDASH_TEST_OUTPUT;
+assert.ok(origin && output, 'Explicit origin and output directory are required');
+const projectPath = '/home/solution2024/git-manager';
+const hash = 'f00cae441575413107dc0e4a855b0cb17871f27a';
+const projectUrl = `${origin}/project?path=${encodeURIComponent(projectPath)}&tab=flow&range=current`;
+const detailUrl = `${projectUrl}&event=${hash}&branchRow=remote%3Aorigin%2Fmain`;
+
+(async () => {
+  await fs.mkdir(output, { recursive: true });
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, timezoneId: 'Asia/Tokyo', permissions: ['clipboard-read', 'clipboard-write'] });
+  const page = await context.newPage();
+  page.setDefaultTimeout(15000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
+  const record = [];
+  try {
+    await page.goto(projectUrl);
+    await page.locator('#branch-history-explorer-title').click();
+    await page.getByLabel('履歴を調べるブランチ').selectOption({ label: 'main · origin/main' });
+    const history = page.locator('.branch-history-explorer');
+    await page.getByLabel('作成者で絞り込み').selectOption({ label: 'fujiwara daiki' });
+    await page.getByLabel('履歴の開始日').fill('2026-09-03');
+    await page.getByLabel('履歴の終了日').fill('2026-09-03');
+    await page.getByLabel('main のコミットを検索').fill('f00cae44');
+    assert.equal(await history.locator('tbody tr').count(), 1);
+    await history.getByRole('button', { name: '一致するコミットのハッシュをコピー', exact: true }).click();
+    assert.equal(await clipboard(), hash);
+    await history.getByRole('button', { name: '選択ブランチの git log コマンドをコピー', exact: true }).click();
+    assert.match(await clipboard(), /^git -C '\/home\/solution2024\/git-manager' log --date-order '[a-f0-9]{40}'/);
+    await page.getByLabel('履歴の開始日').fill('2026-09-04');
+    assert.match(await history.getByRole('alert').innerText(), /開始日は終了日以前/);
+    assert.equal(await history.locator('tbody tr').count(), 0);
+    await history.getByRole('button', { name: '条件をリセット', exact: true }).click();
+    assert.equal(await page.getByLabel('履歴の開始日').inputValue(), '');
+    await history.scrollIntoViewIfNeeded();
+    await history.screenshot({ path: `${output}/history.png` });
+    record.push('History: exact author, inclusive dates, reversed range, reset, full hash clipboard, git log clipboard');
+
+    await page.goto(detailUrl);
+    const files = page.locator('.commit-files');
+    await files.locator('tbody tr').first().waitFor();
+    assert.equal(await files.locator('tbody tr').count(), 8);
+    await page.getByLabel('コミットの変更ファイルをディレクトリで絞り込み').selectOption({ label: 'frontend/app' });
+    assert.equal(await files.locator('tbody tr').count(), 5);
+    await page.getByLabel('コミットの変更ファイルを拡張子で絞り込み').selectOption({ label: '.tsx' });
+    assert.equal(await files.locator('tbody tr').count(), 3);
+    await files.getByRole('button', { name: '表示中の3件のパスをコピー', exact: true }).click();
+    assert.deepEqual((await clipboard()).split('\n'), ['frontend/app/graph-view.tsx', 'frontend/app/page.tsx', 'frontend/app/repo-detail.tsx']);
+    await page.getByLabel('コミットの変更ファイルを並べ替え').selectOption('additions');
+    let numbers = await files.locator('tbody .additions').allTextContents();
+    assert.deepEqual(numbers, ['+79', '+409', '+584']);
+    await files.getByRole('button', { name: '並べ替えを降順に変更', exact: true }).click();
+    assert.deepEqual(await files.locator('tbody .additions').allTextContents(), ['+584', '+409', '+79']);
+    await page.getByLabel('コミットの変更ファイルを並べ替え').selectOption('deletions');
+    assert.deepEqual(await files.locator('tbody .deletions').allTextContents(), ['−287', '−158', '−26']);
+    const downloadPromise = page.waitForEvent('download');
+    await files.getByRole('button', { name: '表示中の3ファイルをTSVで保存', exact: true }).click();
+    const download = await downloadPromise;
+    const tsv = await fs.readFile(await download.path(), 'utf8');
+    assert.ok(tsv.includes('frontend/app/page.tsx') && !tsv.includes('README.md'));
+    await files.screenshot({ path: `${output}/files.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await files.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${output}/files-mobile.png` });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    record.push('Files: directory + extension intersection, full path clipboard, additions/deletions sort, filtered TSV, mobile layout');
+
+    await page.goto(projectUrl.replace('tab=flow', 'tab=info'));
+    const worktrees = page.locator('.worktree-explorer');
+    await worktrees.locator('.worktree-explorer-card').first().waitFor();
+    const initial = await worktrees.locator('.worktree-explorer-card').count();
+    await page.getByLabel('worktree のブランチで絞り込み').selectOption({ label: 'main' });
+    assert.equal(await worktrees.locator('.worktree-explorer-card').count(), 1);
+    await worktrees.getByRole('button', { name: '表示中の cd をコピー', exact: true }).click();
+    assert.equal(await clipboard(), "cd -- '/home/solution2024/git-manager'");
+    const comfortable = await worktrees.locator('.worktree-explorer-card').first().boundingBox();
+    await worktrees.getByRole('button', { name: 'コンパクト', exact: true }).click();
+    assert.equal(await worktrees.getByRole('button', { name: 'コンパクト', exact: true }).getAttribute('aria-pressed'), 'true');
+    assert.ok((await worktrees.locator('.worktree-explorer-card').first().boundingBox()).height < comfortable.height);
+    assert.equal(await worktrees.getByRole('button', { name: 'Gitを開く', exact: true }).count(), 1);
+    await worktrees.getByRole('button', { name: '絞り込みを解除', exact: true }).click();
+    assert.equal(await worktrees.locator('.worktree-explorer-card').count(), initial);
+    const syncGroup = worktrees.getByRole('group', { name: 'upstream の同期状態で絞り込み', exact: true });
+    await syncGroup.getByRole('button', { name: '同期済み', exact: true }).click();
+    assert.ok(await worktrees.locator('.worktree-explorer-card').count() > 0);
+    const syncStates = await worktrees.locator('.worktree-explorer-card').allTextContents();
+    assert.ok(syncStates.every(text => text.includes('同期済み')));
+    await worktrees.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${output}/worktrees.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await worktrees.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${output}/worktrees-mobile.png` });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    record.push('Worktrees: exact branch, filtered cd clipboard, density change with actions retained, reset, synchronization filter, mobile layout');
+
+    await page.goto(detailUrl.replace(hash, 'd0e3e206a84fe78ba82a5af3c5aabc2be3e760bb'));
+    await page.getByLabel('差分の内容を検索', { exact: true }).fill('const');
+    await page.locator('.patch-match-active').waitFor();
+    assert.match(await page.locator('.patch-content-search [role=status]').innerText(), /件/);
+    await page.getByRole('button', { name: '単語単位で検索', exact: true }).click();
+    await page.getByLabel('差分の内容を検索', { exact: true }).press('Enter');
+    await page.locator('.patch-content-search').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${output}/real-patch.png` });
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.screenshot({ path: `${output}/real-patch-dark.png` });
+    await page.emulateMedia({ colorScheme: 'light' });
+    record.push('Real non-merge patch: rendered backend diff, whole-word search and Enter navigation, light/dark screenshots');
+
+    // Real commit metadata and files, controlled patch for exact search boundaries.
+    await page.route('**/api/repo/commit?**', async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.patch = 'diff --git a/search.txt b/search.txt\n@@ -1 +1,652 @@\n-old\n+Target target targetValue my_target $target\n' + Array.from({ length: 650 }, (_, index) => `+filler ${index}`).join('\n') + '\n+target';
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto(detailUrl);
+    await page.getByLabel('差分の内容を検索', { exact: true }).fill('Target');
+    const status = page.locator('.patch-content-search [role=status]');
+    await page.waitForFunction(() => document.querySelector('.patch-content-search [role=status]')?.textContent === '1 / 6 件');
+    await page.getByRole('button', { name: '大文字・小文字を区別', exact: true }).click();
+    assert.equal(await status.innerText(), '1 / 1 件');
+    await page.getByRole('button', { name: '大文字・小文字を区別', exact: true }).click();
+    await page.getByRole('button', { name: '単語単位で検索', exact: true }).click();
+    assert.equal(await status.innerText(), '1 / 3 件');
+    await page.getByRole('button', { name: '前の差分検索結果へ', exact: true }).click();
+    assert.equal(await status.innerText(), '3 / 3 件');
+    assert.equal(await page.locator('.patch-match-active').innerText(), 'target');
+    assert.ok(Number(await page.locator('[data-patch-active=true]').getAttribute('data-patch-row')) > 600);
+    await page.locator('.patch-content-search').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${output}/patch-search.png` });
+    record.push('Patch: case-sensitive mode, Unicode identifier boundaries (unit), whole-word mode, previous-result wraparound beyond 600 rows');
+    assert.deepEqual(errors, []);
+    await fs.writeFile(`${output}/result.json`, JSON.stringify({ origin, passed: record, pageErrors: errors }, null, 2));
+    console.log(JSON.stringify({ passed: record, pageErrors: errors }, null, 2));
+  } catch (error) {
+    await page.screenshot({ path: `${output}/failure.png` });
+    console.error(error);
+    console.error((await page.locator('body').innerText()).slice(-2200));
+    process.exitCode = 1;
+  } finally {
+    await browser.close();
+  }
+})();

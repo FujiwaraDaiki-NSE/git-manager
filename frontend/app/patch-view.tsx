@@ -114,6 +114,8 @@ export default function PatchView({ patch }: { patch: string }) {
   const [changedOnly, setChangedOnly] = useState(false);
   const [fileQuery, setFileQuery] = useState("");
   const [contentQuery, setContentQuery] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [wholeWord, setWholeWord] = useState(false);
   const fileSearchRef = useRef<HTMLInputElement>(null);
   const contentSearchRef = useRef<HTMLInputElement>(null);
   const patchResultsId = `patch-results-${useId().replaceAll(":", "")}`;
@@ -123,7 +125,7 @@ export default function PatchView({ patch }: { patch: string }) {
   const normalizedFileQuery = fileQuery.trim().toLocaleLowerCase();
   const visible = useMemo(() => sections.map((section, index) => ({ section, index })).filter(({ section }) => section.title.toLocaleLowerCase().includes(normalizedFileQuery)), [normalizedFileQuery, sections]);
   const visibleIndexes = useMemo(() => visible.map(({ index }) => index), [visible]);
-  const matches = useMemo(() => findPatchMatches(sections, contentQuery, { changedOnly, sectionIndexes: visibleIndexes }), [changedOnly, contentQuery, sections, visibleIndexes]);
+  const matches = useMemo(() => findPatchMatches(sections, contentQuery, { changedOnly, sectionIndexes: visibleIndexes, caseSensitive, wholeWord }), [changedOnly, contentQuery, sections, visibleIndexes, caseSensitive, wholeWord]);
   const matchesBySection = useMemo(() => {
     const grouped = new Map<number, PatchMatch[]>();
     for (const match of matches) {
@@ -179,6 +181,8 @@ export default function PatchView({ patch }: { patch: string }) {
         <button type="button" disabled={!contentQuery} onClick={() => { setContentQuery(""); contentSearchRef.current?.focus(); }}>クリア</button>
         <button type="button" aria-label="前の差分検索結果へ" disabled={!matches.length} onClick={() => goToMatch(-1)}>前へ</button>
         <button type="button" aria-label="次の差分検索結果へ" disabled={!matches.length} onClick={() => goToMatch(1)}>次へ</button>
+        <button type="button" aria-pressed={caseSensitive} onClick={() => setCaseSensitive((value) => !value)}>大文字・小文字を区別</button>
+        <button type="button" aria-pressed={wholeWord} title="前後に文字・数字・結合文字・アンダースコア・$がない一致を検索します" onClick={() => setWholeWord((value) => !value)}>単語単位で検索</button>
         <span role="status" aria-live="polite">{contentQuery.trim() === "" ? "差分内容を検索" : matches.length === 0 ? "一致する行がありません" : activeMatchIndex < 0 ? `${matches.length} 件の一致候補` : `${activeMatchIndex + 1} / ${matches.length} 件`}</span>
       </div>
     </div>

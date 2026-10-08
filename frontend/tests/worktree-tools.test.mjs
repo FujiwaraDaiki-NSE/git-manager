@@ -5,6 +5,9 @@ import {
   buildWorktreeInventory,
   escapeTsvCell,
   filterWorktreeInventory,
+  worktreeBranchFilterValue,
+  worktreeBranchKey,
+  worktreeCdCommands,
   shellQuote,
   sortWorktreeInventory,
   summarizeWorktreeInventory,
@@ -14,6 +17,7 @@ import {
   worktreeInventoryTsv,
   worktreeState,
   worktreeStateTokens,
+  worktreeSync,
 } from "../app/worktree-tools.mjs";
 
 function worktree(overrides = {}) {
@@ -36,6 +40,20 @@ function lane(path, overrides = {}) {
     branch: "main",
     dirty: false,
     conflict: false,
+    upstream: "origin/main",
+    upstream_ahead: 0,
+    upstream_behind: 0,
+    ...overrides,
+  };
+}
+
+function filterOptions(overrides = {}) {
+  return {
+    query: "",
+    state: "all",
+    health: "all",
+    sync: "all",
+    branch: "all",
     ...overrides,
   };
 }
@@ -68,11 +86,11 @@ test("null worktree and lane facts remain unknown instead of becoming clean", ()
   };
   assert.equal(worktreeState(row.worktree), "unknown");
   assert.equal(worktreeHealth(row), "unknown");
-  assert.equal(filterWorktreeInventory([row], { query: "", state: "unknown", health: "unknown" }).length, 1);
-  assert.equal(filterWorktreeInventory([row], { query: "", state: "ok", health: "clean" }).length, 0);
+  assert.equal(filterWorktreeInventory([row], filterOptions({ state: "unknown", health: "unknown" })).length, 1);
+  assert.equal(filterWorktreeInventory([row], filterOptions({ state: "ok", health: "clean" })).length, 0);
   const mainWithMissingState = { worktree: worktree({ state: null }), lane: lane("/repo/main", { dirty: false, conflict: false }) };
   assert.deepEqual(worktreeStateTokens(mainWithMissingState.worktree), ["main", "unknown"]);
-  assert.equal(filterWorktreeInventory([mainWithMissingState], { query: "", state: "unknown", health: "all" }).length, 1);
+  assert.equal(filterWorktreeInventory([mainWithMissingState], filterOptions({ state: "unknown" })).length, 1);
 });
 
 test("state and health filters select only explicit facts", () => {
@@ -82,13 +100,13 @@ test("state and health filters select only explicit facts", () => {
     { worktree: worktree({ path: "/repo/detached", branch: null, is_main: false, state: "ok", detached: true }), lane: lane("/repo/detached", { conflict: true, dirty: true }) },
     { worktree: worktree({ path: "/repo/stale", branch: null, is_main: false, state: "prunable" }), lane: null },
   ];
-  assert.deepEqual(filterWorktreeInventory(rows, { query: "", state: "detached", health: "all" }).map((row) => row.worktree.path), ["/repo/detached"]);
-  assert.deepEqual(filterWorktreeInventory(rows, { query: "", state: "all", health: "dirty" }).map((row) => row.worktree.path), ["/repo/feature", "/repo/detached"]);
-  assert.deepEqual(filterWorktreeInventory(rows, { query: "", state: "all", health: "conflict" }).map((row) => row.worktree.path), ["/repo/detached"]);
-  assert.deepEqual(filterWorktreeInventory(rows, { query: "", state: "prunable", health: "unknown" }).map((row) => row.worktree.path), ["/repo/stale"]);
+  assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ state: "detached" })).map((row) => row.worktree.path), ["/repo/detached"]);
+  assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ health: "dirty" })).map((row) => row.worktree.path), ["/repo/feature", "/repo/detached"]);
+  assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ health: "conflict" })).map((row) => row.worktree.path), ["/repo/detached"]);
+  assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ state: "prunable", health: "unknown" })).map((row) => row.worktree.path), ["/repo/stale"]);
   const partialUnknown = { worktree: worktree({ path: "/repo/partial", branch: "feature/partial", is_main: false }), lane: lane("/repo/partial", { dirty: true, conflict: null }) };
   assert.deepEqual(worktreeHealthTokens(partialUnknown), ["dirty", "unknown"]);
-  assert.deepEqual(filterWorktreeInventory([partialUnknown], { query: "", state: "all", health: "unknown" }).map((row) => row.worktree.path), ["/repo/partial"]);
+  assert.deepEqual(filterWorktreeInventory([partialUnknown], filterOptions({ health: "unknown" })).map((row) => row.worktree.path), ["/repo/partial"]);
   assert.deepEqual(summarizeWorktreeInventory(rows), {
     total: 4,
     main: 1,
@@ -101,6 +119,48 @@ test("state and health filters select only explicit facts", () => {
     conflict: 1,
     healthUnknown: 1,
   });
+});
+
+test("upstream synchronization uses only explicit lane tracking facts", () => {
+  const rows = [
+    { worktree: worktree({ path: "/repo/synced", branch: "main" }), lane: lane("/repo/synced", { upstream: "origin/main", upstream_ahead: 0, upstream_behind: 0 }) },
+    { worktree: worktree({ path: "/repo/ahead", branch: "feature/ahead", is_main: false }), lane: lane("/repo/ahead", { upstream: "origin/ahead", upstream_ahead: 2, upstream_behind: 0 }) },
+    { worktree: worktree({ path: "/repo/behind", branch: "feature/behind", is_main: false }), lane: lane("/repo/behind", { upstream: "origin/behind", upstream_ahead: 0, upstream_behind: 3 }) },
+    { worktree: worktree({ path: "/repo/diverged", branch: "feature/diverged", is_main: false }), lane: lane("/repo/diverged", { upstream: "origin/diverged", upstream_ahead: 2, upstream_behind: 3 }) },
+    { worktree: worktree({ path: "/repo/no-upstream", branch: "feature/local", is_main: false }), lane: lane("/repo/no-upstream", { upstream: null, upstream_ahead: 7, upstream_behind: 4 }) },
+    { worktree: worktree({ path: "/repo/missing-counts", branch: "feature/missing", is_main: false }), lane: lane("/repo/missing-counts", { upstream: "origin/missing", upstream_ahead: null, upstream_behind: null }) },
+    { worktree: worktree({ path: "/repo/missing-upstream", branch: "feature/unknown", is_main: false }), lane: lane("/repo/missing-upstream", { upstream: undefined, upstream_ahead: 0, upstream_behind: 0 }) },
+    { worktree: worktree({ path: "/repo/no-lane", branch: "feature/no-lane", is_main: false }), lane: null },
+  ];
+  assert.deepEqual(rows.map((row) => worktreeSync(row)), [
+    "synced", "ahead", "behind", "diverged", "no-upstream", "unknown", "unknown", "unknown",
+  ]);
+  for (const filter of ["ahead", "behind", "diverged", "synced", "no-upstream", "unknown"]) {
+    assert.deepEqual(
+      filterWorktreeInventory(rows, filterOptions({ sync: filter })).map((row) => row.worktree.path),
+      rows.filter((row) => worktreeSync(row) === filter).map((row) => row.worktree.path),
+    );
+  }
+  const combined = filterWorktreeInventory(rows, filterOptions({
+    query: "feature",
+    state: "ok",
+    health: "clean",
+    sync: "ahead",
+    branch: worktreeBranchFilterValue("feature/ahead"),
+  }));
+  assert.deepEqual(combined.map((row) => row.worktree.path), ["/repo/ahead"]);
+});
+
+test("branch selector preserves exact branches and distinguishes detached from unknown", () => {
+  const exact = { worktree: worktree({ path: "/repo/exact", branch: "detached", detached: false }), lane: null };
+  const detached = { worktree: worktree({ path: "/repo/detached", branch: null, detached: true }), lane: null };
+  const unknown = { worktree: worktree({ path: "/repo/unknown", branch: null, detached: false }), lane: null };
+  assert.equal(worktreeBranchKey(exact), "branch:detached");
+  assert.equal(worktreeBranchKey(detached), "detached");
+  assert.equal(worktreeBranchKey(unknown), "unknown");
+  assert.deepEqual(filterWorktreeInventory([exact, detached, unknown], filterOptions({ branch: "branch:detached" })).map((row) => row.worktree.path), ["/repo/exact"]);
+  assert.deepEqual(filterWorktreeInventory([exact, detached, unknown], filterOptions({ branch: "detached" })).map((row) => row.worktree.path), ["/repo/detached"]);
+  assert.deepEqual(filterWorktreeInventory([exact, detached, unknown], filterOptions({ branch: "unknown" })).map((row) => row.worktree.path), ["/repo/unknown"]);
 });
 
 test("sorting supports branch, path, and status without mutating the source", () => {
@@ -119,6 +179,11 @@ test("sorting supports branch, path, and status without mutating the source", ()
 test("shell commands quote apostrophes and refuse a missing path", () => {
   assert.equal(shellQuote("/tmp/it's repo"), "'/tmp/it'\\''s repo'");
   assert.equal(worktreeCdCommand("/tmp/it's repo"), "cd -- '/tmp/it'\\''s repo'");
+  assert.equal(worktreeCdCommands([
+    { worktree: { path: "/tmp/it's repo" } },
+    { worktree: { path: "/tmp/second" } },
+    { worktree: { path: "" } },
+  ]), "cd -- '/tmp/it'\\''s repo'\ncd -- '/tmp/second'");
   assert.equal(worktreeCdCommand(null), null);
   assert.equal(worktreeCdCommand(""), null);
 });
@@ -132,7 +197,7 @@ test("TSV cells neutralize formula prefixes and delimiters while preserving unkn
     lane: lane("/repo/feature\t=bad", { dirty: null, conflict: null }),
   }];
   const tsv = worktreeInventoryTsv(rows);
-  assert.match(tsv, /^path\tbranch\thead\tstate\tis_main\tdetached\tdirty\tconflict\tlane_id\n/);
+  assert.match(tsv, /^path\tbranch\thead\tstate\tis_main\tdetached\tdirty\tconflict\tlane_id\tupstream\tupstream_ahead\tupstream_behind\tupstream_sync\n/);
   assert.match(tsv, /\t'=formula\t/);
   assert.match(tsv, /\/repo\/feature =bad\t/);
   assert.match(tsv, /\t\tfalse\tfalse\t\t\t/);

@@ -25,6 +25,9 @@
 .branch-history-explorer-tools { margin-top: 14px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--control-panel-soft); }
 .branch-history-explorer-tools label { color: var(--control-muted); }
 .branch-history-explorer-tools input, .branch-history-explorer-tools select { border-color: var(--control-border); background: var(--control-panel); color: var(--control-ink); }
+.branch-history-explorer-tools .copy-control { align-self: end; }
+.branch-history-explorer-tools .copy-button { min-height: 36px; }
+.branch-history-explorer-date-error { margin: 10px 0 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--control-red) 32%, var(--control-border)); border-radius: 7px; background: var(--control-red-soft); color: var(--control-red); font: 11px/1.6 var(--control-mono); }
 .branch-history-explorer-coverage { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 10px 0; color: var(--control-muted); font: 10px var(--control-mono); }
 .branch-history-explorer-coverage span:first-child { color: var(--control-ink); font-weight: 700; }
 .branch-history-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--control-border); border-radius: 8px; }
@@ -50,4 +53,6 @@
   .branch-history-explorer-tools { align-items: stretch; }
   .branch-history-explorer-tools label { flex: 1 1 160px; }
   .branch-history-explorer-tools .subtle-button { flex: 1 1 170px; }
+  .branch-history-explorer-tools .copy-control { flex: 1 1 190px; }
+  .branch-history-explorer-tools .copy-button { width: 100%; justify-content: center; }
 }

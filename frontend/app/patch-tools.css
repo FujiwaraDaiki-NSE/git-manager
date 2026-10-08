@@ -30,6 +30,15 @@
 }
 
 .patch-search-group > button:disabled { opacity: .55; cursor: default; }
+.patch-search-group > button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent);
+}
+.patch-search-group > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .patch-search-group > span {
   align-self: flex-end;

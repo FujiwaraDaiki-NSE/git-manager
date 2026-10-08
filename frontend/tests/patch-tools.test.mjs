@@ -3,6 +3,31 @@ import assert from 'node:assert/strict';
 import { parsePatch } from '../app/parse-patch.mjs';
 import { findPatchMatches, selectPatchLines, splitPatchByFile, summarizePatchSection } from '../app/patch-tools.mjs';
 
+test('literal case-sensitive search keeps original Unicode offsets and regex punctuation', () => {
+  const text = '+İ before Target target TARGET [a+b]';
+  const sections = [{ title: 'unicode', lines: [{ text, kind: 'addition' }] }];
+  const insensitive = findPatchMatches(sections, 'target', { caseSensitive: false });
+  assert.deepEqual(insensitive.map(m => text.slice(m.offset, m.offset + m.length)), ['Target', 'target', 'TARGET']);
+  const sensitive = findPatchMatches(sections, 'Target', { caseSensitive: true });
+  assert.equal(sensitive.length, 1);
+  assert.equal(sensitive[0].offset, text.indexOf('Target'));
+  const literal = findPatchMatches(sections, '[a+b]', { caseSensitive: true });
+  assert.equal(literal.length, 1);
+  assert.equal(literal[0].offset, text.indexOf('[a+b]'));
+  assert.deepEqual(findPatchMatches(sections, '.*', {}), []);
+});
+
+test('whole-word mode excludes identifier fragments including Unicode and combining marks', () => {
+  const text = '+target targetValue my_target $target target2 target\u0301 𐐀target 日本target (target) target';
+  const sections = [{ title: 'words', lines: [{ text, kind: 'addition' }, { text: ' target', kind: 'context' }] }];
+  const words = findPatchMatches(sections, 'target', { wholeWord: true, changedOnly: true, sectionIndexes: [0] });
+  assert.equal(words.length, 3);
+  assert.deepEqual(words.map(m => m.offset), [1, text.indexOf('(target)') + 1, text.lastIndexOf('target')]);
+  assert.equal(findPatchMatches(sections, 'target', { wholeWord: true }).length, 4);
+  assert.equal(findPatchMatches(sections, 'Target', { wholeWord: true, caseSensitive: true }).length, 0);
+  assert.equal(findPatchMatches(sections, 'target', { wholeWord: false }).length, 11);
+});
+
 test('per-file chunks preserve the original source, including preamble, CRLF, and final bytes', () => {
   const patch = 'notice\r\ndiff --git a/one.txt b/one.txt\r\n@@ -1 +1 @@\r\n-old\r\n+new\r\ndiff --git a/two.txt b/two.txt\r\nBinary files a/two.txt and b/two.txt differ';
   assert.deepEqual(splitPatchByFile(patch), [

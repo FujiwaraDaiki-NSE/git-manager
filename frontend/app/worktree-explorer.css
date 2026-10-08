@@ -69,7 +69,8 @@
 
 .worktree-explorer-export,
 .worktree-explorer-action,
-.worktree-explorer-empty button {
+.worktree-explorer-empty button,
+.worktree-explorer-clear {
   background: var(--worktree-panel);
   border: 1px solid var(--worktree-border);
   border-radius: 7px;
@@ -88,7 +89,8 @@
 
 .worktree-explorer-export:hover,
 .worktree-explorer-action:hover,
-.worktree-explorer-empty button:hover {
+.worktree-explorer-empty button:hover,
+.worktree-explorer-clear:hover {
   border-color: var(--worktree-blue);
 }
 
@@ -156,6 +158,14 @@ button.worktree-explorer-metric {
   margin: 20px 0 10px;
 }
 
+.worktree-explorer-toolbar-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .worktree-explorer-search {
   flex: 1 1 280px;
   min-width: 180px;
@@ -187,6 +197,43 @@ button.worktree-explorer-metric {
 
 .worktree-explorer-order select {
   min-width: 112px;
+}
+
+.worktree-explorer-toolbar-controls .worktree-explorer-order:first-child select {
+  max-width: min(36vw, 280px);
+  min-width: 150px;
+}
+
+.worktree-explorer-density {
+  align-items: center;
+  color: var(--worktree-muted);
+  display: inline-flex;
+  flex-wrap: wrap;
+  font: 10px var(--mono);
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.worktree-explorer-density button {
+  background: var(--worktree-panel);
+  border: 1px solid var(--worktree-border);
+  border-radius: 999px;
+  color: var(--worktree-muted);
+  cursor: pointer;
+  font: 10px var(--sans);
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.worktree-explorer-density button:hover,
+.worktree-explorer-density button[aria-pressed="true"] {
+  background: var(--worktree-blue-soft);
+  border-color: var(--worktree-blue);
+  color: var(--worktree-blue);
+}
+
+.worktree-explorer-clear {
+  color: var(--worktree-muted);
 }
 
 .worktree-explorer-filters {
@@ -286,7 +333,8 @@ button.worktree-explorer-metric {
 }
 
 .worktree-explorer-state,
-.worktree-explorer-health {
+.worktree-explorer-health,
+.worktree-explorer-sync {
   border: 1px solid transparent;
   border-radius: 999px;
   display: inline-flex;
@@ -305,6 +353,12 @@ button.worktree-explorer-metric {
 .worktree-explorer-health.health-dirty { background: var(--worktree-amber-soft); color: var(--worktree-amber); }
 .worktree-explorer-health.health-conflict { background: var(--worktree-red-soft); color: var(--worktree-red); }
 .worktree-explorer-health.health-clean { background: var(--worktree-green-soft); color: var(--worktree-green); }
+.worktree-explorer-sync.sync-ahead { background: var(--worktree-blue-soft); color: var(--worktree-blue); }
+.worktree-explorer-sync.sync-behind,
+.worktree-explorer-sync.sync-no-upstream { background: var(--worktree-amber-soft); color: var(--worktree-amber); }
+.worktree-explorer-sync.sync-diverged { background: var(--worktree-red-soft); color: var(--worktree-red); }
+.worktree-explorer-sync.sync-synced { background: var(--worktree-green-soft); color: var(--worktree-green); }
+.worktree-explorer-sync.sync-unknown { background: var(--worktree-panel-soft); color: var(--worktree-muted); }
 
 .worktree-explorer-basename {
   color: var(--worktree-muted);
@@ -365,6 +419,27 @@ button.worktree-explorer-metric {
   margin-right: 4px;
 }
 
+.worktree-explorer.density-compact .worktree-explorer-card-main {
+  padding-bottom: 9px;
+  padding-top: 9px;
+}
+
+.worktree-explorer.density-compact .worktree-explorer-card h3 {
+  font-size: 13px;
+  margin-bottom: 2px;
+  margin-top: 7px;
+}
+
+.worktree-explorer.density-compact .worktree-explorer-facts {
+  gap: 5px 12px;
+  margin-top: 7px;
+}
+
+.worktree-explorer.density-compact .worktree-explorer-card-actions {
+  padding-bottom: 9px;
+  padding-top: 9px;
+}
+
 .worktree-explorer-action.is-primary {
   background: var(--worktree-blue-soft);
   border-color: color-mix(in srgb, var(--worktree-blue) 42%, var(--worktree-border));
@@ -409,8 +484,12 @@ button.worktree-explorer-metric {
   .worktree-explorer-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .worktree-explorer-toolbar { align-items: stretch; flex-direction: column; }
   .worktree-explorer-search { flex: none; min-width: 0; width: 100%; }
+  .worktree-explorer-toolbar-controls { align-items: stretch; justify-content: flex-start; width: 100%; }
   .worktree-explorer-order { justify-content: space-between; }
   .worktree-explorer-order select { flex: 1; }
+  .worktree-explorer-toolbar-controls .worktree-explorer-order:first-child { flex: 1 1 100%; }
+  .worktree-explorer-toolbar-controls .worktree-explorer-order:first-child select { max-width: none; }
+  .worktree-explorer-density { margin-right: auto; }
   .worktree-explorer-filter-title { flex-basis: 100%; }
   .worktree-explorer-card-main { padding: 13px 12px; }
   .worktree-explorer-card-actions { padding: 9px 12px; }

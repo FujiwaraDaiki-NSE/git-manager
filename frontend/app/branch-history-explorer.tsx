@@ -3,7 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CopyButton from "./copy-button";
 import { uniqueLocalForCommit } from "./project-flow.mjs";
-import { filterHistory, historyCsv, historyRequestKey, sortHistory } from "./branch-history-tools.mjs";
+import {
+  filterHistory,
+  encodeHistoryAuthor,
+  hasUnknownAuthor,
+  historyAuthors,
+  historyCsv,
+  historyDateRangeError,
+  historyHashList,
+  historyLogCommand,
+  historyRequestKey,
+  sortHistory,
+  UNKNOWN_AUTHOR_FILTER,
+} from "./branch-history-tools.mjs";
 import type { ProjectBranchCommit, ProjectBranchRow, ProjectEvent, ProjectLane, ProjectResponse } from "./types";
 
 type HistoryKind = "all" | "merge" | "regular";
@@ -130,6 +142,9 @@ export default function BranchHistoryExplorer({
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<HistoryKind>("all");
+  const [authorFilter, setAuthorFilter] = useState("");
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
   const [order, setOrder] = useState<HistoryOrder>("git");
   const [visibleCount, setVisibleCount] = useState(20);
   const [extraCommits, setExtraCommits] = useState<ProjectBranchCommit[]>([]);
@@ -184,18 +199,26 @@ export default function BranchHistoryExplorer({
     return [...initial, ...recordsForRow(project, { ...selectedRow, commits: extras, commit_hashes: extras.map((commit) => commit.hash), tip_commits: [] })];
   }, [extraCommits, project, selectedRow]);
 
+  const dateRangeError = useMemo(() => historyDateRangeError(startDate, endDate), [endDate, startDate]);
   const filtered = useMemo(
-    () => sortHistory(filterHistory(records, query, kind), order) as HistoryRecord[],
-    [kind, order, query, records],
+    () => sortHistory(filterHistory(records, query, kind, authorFilter, startDate, endDate), order) as HistoryRecord[],
+    [authorFilter, endDate, kind, order, query, records, startDate],
   );
   const shown = filtered.slice(0, visibleCount);
   const hasBuffered = shown.length < filtered.length;
-  const canLoadPage = !hasBuffered && historyOffset !== null && Boolean(selectedRow?.history_heads.length);
+  const canLoadPage = !dateRangeError && !hasBuffered && historyOffset !== null && Boolean(selectedRow?.history_heads.length);
+
+  const authors = useMemo(() => historyAuthors(records), [records]);
+  const includesUnknownAuthor = useMemo(() => hasUnknownAuthor(records), [records]);
+  const historyCommand = useMemo(
+    () => selectedRow ? historyLogCommand(project.main_path, selectedRow.history_heads) : null,
+    [project.main_path, selectedRow],
+  );
 
   useEffect(() => {
     setVisibleCount(20);
     setExportStatus("");
-  }, [kind, order, query]);
+  }, [authorFilter, endDate, kind, order, query, startDate]);
 
   const exportCsv = useCallback(() => {
     if (!filtered.length) return;
@@ -250,7 +273,7 @@ export default function BranchHistoryExplorer({
   return (
     <section className="branch-history-explorer" aria-labelledby="branch-history-explorer-title">
       <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-        <summary id="branch-history-explorer-title">ブランチ履歴を調査 <span>検索・種類・日時順・CSV</span></summary>
+        <summary id="branch-history-explorer-title">ブランチ履歴を調査 <span>検索・作成者・日付・CSV・コピー</span></summary>
         <div className="branch-history-explorer-body">
           <div className="branch-history-explorer-heading">
             <div>
@@ -281,10 +304,17 @@ export default function BranchHistoryExplorer({
             <div className="history-tools branch-history-explorer-tools" role="group" aria-label={`${selectedRow.name} の履歴操作`}>
               <label><span>検索</span><input aria-label={`${selectedRow.name} のコミットを検索`} type="search" placeholder="件名・作成者・ハッシュ（空白でAND）" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
               <label><span>種類</span><select aria-label="コミットの種類" value={kind} onChange={(event) => setKind(event.target.value as HistoryKind)}><option value="all">すべて</option><option value="merge">マージ</option><option value="regular">通常コミット</option></select></label>
+              <label><span>作成者（完全一致）</span><select aria-label="作成者で絞り込み" value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)}><option value="">すべて</option>{authors.map((author) => <option key={author} value={encodeHistoryAuthor(author)}>{author}</option>)}{includesUnknownAuthor && <option value={UNKNOWN_AUTHOR_FILTER}>作成者未取得</option>}</select></label>
+              <label><span>開始日（ローカル）</span><input aria-describedby={dateRangeError ? "branch-history-date-error" : undefined} aria-invalid={Boolean(dateRangeError)} aria-label="履歴の開始日" type="date" value={startDate ?? ""} onChange={(event) => setStartDate(event.target.value === "" ? null : event.target.value)} /></label>
+              <label><span>終了日（ローカル）</span><input aria-describedby={dateRangeError ? "branch-history-date-error" : undefined} aria-invalid={Boolean(dateRangeError)} aria-label="履歴の終了日" type="date" value={endDate ?? ""} onChange={(event) => setEndDate(event.target.value === "" ? null : event.target.value)} /></label>
               <label><span>並び順</span><select aria-label="コミットの並び順" value={order} onChange={(event) => setOrder(event.target.value as HistoryOrder)}><option value="git">Gitの履歴順</option><option value="newest">日時が新しい順</option><option value="oldest">日時が古い順</option></select></label>
-              <button className="subtle-button" type="button" disabled={!query && kind === "all" && order === "git"} onClick={() => { setQuery(""); setKind("all"); setOrder("git"); }}>条件をリセット</button>
+              <button className="subtle-button" type="button" disabled={!query && kind === "all" && !authorFilter && startDate === null && endDate === null && order === "git"} onClick={() => { setQuery(""); setKind("all"); setAuthorFilter(""); setStartDate(null); setEndDate(null); setOrder("git"); }}>条件をリセット</button>
               <button className="subtle-button" type="button" disabled={!filtered.length} onClick={exportCsv}>一致する履歴をCSV保存</button>
+              {filtered.length > 0 && <CopyButton value={historyHashList(filtered)} label="一致するコミットのハッシュをコピー" />}
+              {historyCommand && <CopyButton value={historyCommand} label="選択ブランチの git log コマンドをコピー" />}
             </div>
+
+            {dateRangeError && <p className="branch-history-explorer-date-error" id="branch-history-date-error" role="alert">{dateRangeError}</p>}
 
             <div className="branch-history-explorer-coverage" role="status">
               <span>表示 {shown.length} / 一致 {filtered.length} / 取得済み {records.length}件</span>
@@ -292,13 +322,13 @@ export default function BranchHistoryExplorer({
               {exportStatus && <span>{exportStatus}</span>}
             </div>
 
-            {records.length === 0 ? <p className="branch-history-explorer-empty" role="status">{selectedRow.history_available ? "このブランチの取得済み履歴はありません。" : "履歴を取得できませんでした。"}</p> : filtered.length === 0 ? <p className="branch-history-explorer-empty" role="status">取得済み履歴に一致するコミットはありません。条件を変えてください。</p> : <div className="branch-history-table-wrap" role="region" aria-label={`${selectedRow.name} のコミット履歴`} tabIndex={0}>
+            {records.length === 0 ? <p className="branch-history-explorer-empty" role="status">{selectedRow.history_available ? "このブランチの取得済み履歴はありません。" : "履歴を取得できませんでした。"}</p> : filtered.length === 0 ? <p className="branch-history-explorer-empty" role="status">{dateRangeError ? "日付範囲が無効なため、コミットを表示できません。" : "取得済み履歴に一致するコミットはありません。条件を変えてください。"}</p> : <div className="branch-history-table-wrap" role="region" aria-label={`${selectedRow.name} のコミット履歴`} tabIndex={0}>
               <table className="branch-history-table">
                 <thead><tr><th scope="col">ハッシュ</th><th scope="col">件名</th><th scope="col">作成者</th><th scope="col">日時</th><th scope="col">種類</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead>
                 <tbody>{shown.map((commit) => <tr key={commit.hash}>
                   <td className="branch-history-hash"><code title={commit.hash}>{shortHash(commit.hash)}</code><CopyButton value={commit.hash} label={`${shortHash(commit.hash)} をコピー`} /></td>
                   <td className="branch-history-subject">{commit.subject ?? "件名未取得"}</td>
-                  <td>{commit.author ?? "作成者未取得"}</td>
+                  <td>{commit.author || "作成者未取得"}</td>
                   <td><time dateTime={commit.date ?? undefined}>{exactDate(commit.date)}</time></td>
                   <td><span className={`branch-history-kind${commit.isMerge === null ? " is-unknown" : ""}`}>{kindLabel(commit.isMerge)}</span></td>
                   <td><button className="table-action" type="button" onClick={() => onSelect(commit.event, selectedRow.id)}>詳細</button></td>

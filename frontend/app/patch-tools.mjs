@@ -88,12 +88,19 @@ export function selectPatchRows(lines, changedOnly) {
  *
  * @param {PatchSection[]} sections
  * @param {string} query
- * @param {{ changedOnly?: boolean, sectionIndexes?: number[] }} options
+ * @param {{ changedOnly?: boolean, sectionIndexes?: number[], caseSensitive?: boolean, wholeWord?: boolean }} options
  * @returns {PatchMatch[]}
  */
 export function findPatchMatches(sections, query, options) {
-  const needle = query.trim().toLocaleLowerCase();
+  const needle = query.trim();
   if (needle === "") return [];
+  // Escape literal input, rather than exposing regular-expression syntax. Match
+  // against original text so Unicode case folding cannot shift source offsets.
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(escaped, options.caseSensitive === true ? "gu" : "giu");
+  // Code identifiers include Unicode letters, marks, numbers, connectors and $.
+  const wordEnd = /[\p{L}\p{M}\p{N}\p{Pc}$]$/u;
+  const wordStart = /^[\p{L}\p{M}\p{N}\p{Pc}$]/u;
   const changedOnly = options.changedOnly === true;
   const allowed = options.sectionIndexes === undefined ? null : new Set(options.sectionIndexes);
   const matches = [];
@@ -102,19 +109,22 @@ export function findPatchMatches(sections, query, options) {
     for (let lineIndex = 0; lineIndex < section.lines.length; lineIndex += 1) {
       const line = section.lines[lineIndex];
       if (changedOnly && line.kind === "context") continue;
-      const haystack = line.text.toLocaleLowerCase();
-      let offset = 0;
-      while (offset <= haystack.length - needle.length) {
-        const found = haystack.indexOf(needle, offset);
-        if (found < 0) break;
+      pattern.lastIndex = 0;
+      let occurrence;
+      while ((occurrence = pattern.exec(line.text)) !== null) {
+        const found = occurrence.index;
+        const length = occurrence[0].length;
+        if (options.wholeWord === true && (
+          wordEnd.test(line.text.slice(Math.max(0, found - 2), found)) ||
+          wordStart.test(line.text.slice(found + length, found + length + 2))
+        )) continue;
         matches.push({
           sectionIndex,
           lineIndex,
           offset: found,
-          length: needle.length,
+          length,
           id: `${sectionIndex}:${lineIndex}:${found}`,
         });
-        offset = found + needle.length;
       }
     }
   });

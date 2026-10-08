@@ -85,8 +85,22 @@
   font: 11px var(--sans);
 }
 
+.commit-files-directory,
+.commit-files-extension,
+.commit-files-sort {
+  display: grid;
+  flex: 0 1 150px;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font: 11px var(--sans);
+}
+
 .commit-files-search input,
+.commit-files-directory select,
+.commit-files-extension select,
 .commit-files-sort select {
+  width: 100%;
   min-height: 34px;
   border: 1px solid var(--rule);
   border-radius: 6px;
@@ -94,13 +108,6 @@
   color: var(--ink);
   font: 12px var(--sans);
   padding: 7px 9px;
-}
-
-.commit-files-sort {
-  display: grid;
-  gap: 4px;
-  color: var(--muted);
-  font: 11px var(--sans);
 }
 
 .commit-files-sort select {
@@ -112,6 +119,27 @@
   color: var(--muted);
   font: 11px var(--sans);
   white-space: nowrap;
+}
+
+.commit-files-copy {
+  max-width: 100%;
+}
+
+.commit-files-copy .copy-button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.commit-files-filter-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font: 10px/1.5 var(--sans);
+}
+
+.commit-files-filter-note code {
+  font: 10px var(--mono);
 }
 
 .commit-files-filters {
@@ -195,8 +223,11 @@
   .commit-files-metrics > div:nth-last-child(-n+2) { border-bottom: 0; }
   .commit-files-tools { align-items: stretch; }
   .commit-files-search { flex-basis: 100%; }
-  .commit-files-sort { flex: 1; }
+  .commit-files-directory,
+  .commit-files-extension,
+  .commit-files-sort { flex: 1 1 130px; }
   .commit-files-order { align-self: flex-end; }
+  .commit-files-copy { margin-left: 0; }
   .commit-files-table th:nth-child(-n+3),
   .commit-files-table td:nth-child(-n+3) { width: 50px; }
   .commit-files-table th,
@@ -208,8 +239,12 @@
 @media (max-width: 440px) {
   .commit-files-tools { align-items: stretch; }
   .commit-files-search { flex-basis: 100%; }
-  .commit-files-sort { flex: 1; }
-  .commit-files-order { align-self: flex-end; }
+  .commit-files-directory,
+  .commit-files-extension,
+  .commit-files-sort { flex: 1 1 120px; }
+  .commit-files-order,
+  .commit-files-copy { flex: 1 1 120px; }
+  .commit-files-copy .copy-button { width: 100%; justify-content: center; }
   .commit-files-table { min-width: 0; }
 }
 

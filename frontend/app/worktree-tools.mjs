@@ -22,6 +22,16 @@ export const WORKTREE_HEALTH_FILTERS = Object.freeze([
   "unknown",
 ]);
 
+export const WORKTREE_SYNC_FILTERS = Object.freeze([
+  "all",
+  "ahead",
+  "behind",
+  "diverged",
+  "synced",
+  "no-upstream",
+  "unknown",
+]);
+
 export const WORKTREE_STATE_LABELS = Object.freeze({
   all: "すべて",
   main: "メイン作業場所",
@@ -38,6 +48,16 @@ export const WORKTREE_HEALTH_LABELS = Object.freeze({
   conflict: "競合",
   clean: "変更なし",
   unknown: "未取得",
+});
+
+export const WORKTREE_SYNC_LABELS = Object.freeze({
+  all: "すべて",
+  ahead: "ahead（未push）",
+  behind: "behind（未pull）",
+  diverged: "分岐",
+  synced: "同期済み",
+  "no-upstream": "追跡先なし",
+  unknown: "同期状態未取得",
 });
 
 /** Return the final path component without making a platform-specific API call. */
@@ -150,6 +170,52 @@ export function worktreeHealthMatches(row, filter) {
   return false;
 }
 
+/**
+ * Classify only the upstream facts published on the linked lane.  A missing
+ * lane, missing upstream field, or incomplete/invalid tracking counts is
+ * explicitly unknown; default-branch counts are a different relation.
+ */
+export function worktreeSync(row) {
+  const lane = row.lane;
+  if (!lane) return "unknown";
+  if (lane.upstream === null) return "no-upstream";
+  if (typeof lane.upstream !== "string" || lane.upstream.length === 0) return "unknown";
+  const ahead = lane.upstream_ahead;
+  const behind = lane.upstream_behind;
+  if (!Number.isInteger(ahead) || ahead < 0 || !Number.isInteger(behind) || behind < 0) return "unknown";
+  if (ahead === 0 && behind === 0) return "synced";
+  if (ahead > 0 && behind === 0) return "ahead";
+  if (ahead === 0 && behind > 0) return "behind";
+  if (ahead > 0 && behind > 0) return "diverged";
+  return "unknown";
+}
+
+export function worktreeSyncLabel(row) {
+  return WORKTREE_SYNC_LABELS[worktreeSync(row)];
+}
+
+export function worktreeSyncMatches(row, filter) {
+  return filter === "all" || worktreeSync(row) === filter;
+}
+
+/** Return the exact branch option key used by the worktree branch selector. */
+export function worktreeBranchFilterValue(branch) {
+  if (typeof branch !== "string" || branch.length === 0) return null;
+  return `branch:${branch}`;
+}
+
+/** Preserve detached and missing branch facts as separate selector values. */
+export function worktreeBranchKey(row) {
+  const branch = worktreeBranchFilterValue(row.worktree.branch);
+  if (branch !== null) return branch;
+  if (row.worktree.detached === true) return "detached";
+  return "unknown";
+}
+
+export function worktreeBranchMatches(row, filter) {
+  return filter === "all" || worktreeBranchKey(row) === filter;
+}
+
 function searchableValues(row) {
   const worktree = row.worktree;
   const lane = row.lane;
@@ -179,10 +245,14 @@ export function filterWorktreeInventory(rows, options) {
   const query = normalizedWorktreeQuery(options.query);
   const state = options.state;
   const health = options.health;
+  const sync = options.sync;
+  const branch = options.branch;
   return rows.filter((row) => (
     worktreeMatchesSearch(row, query)
     && worktreeStateMatches(row, state)
     && worktreeHealthMatches(row, health)
+    && worktreeSyncMatches(row, sync)
+    && worktreeBranchMatches(row, branch)
   ));
 }
 
@@ -258,6 +328,14 @@ export function worktreeCdCommand(path) {
   return `cd -- ${shellQuote(path)}`;
 }
 
+/** Serialize one shell command per currently visible worktree. */
+export function worktreeCdCommands(rows) {
+  return rows
+    .map((row) => worktreeCdCommand(row.worktree.path))
+    .filter((command) => command !== null)
+    .join("\n");
+}
+
 function tsvCell(value) {
   if (value === null || value === undefined) return "";
   const text = String(value)
@@ -279,6 +357,10 @@ export const WORKTREE_TSV_HEADERS = Object.freeze([
   "dirty",
   "conflict",
   "lane_id",
+  "upstream",
+  "upstream_ahead",
+  "upstream_behind",
+  "upstream_sync",
 ]);
 
 /** Serialize only the supplied, already-filtered inventory rows. */
@@ -296,6 +378,10 @@ export function worktreeInventoryTsv(rows) {
       lane?.dirty,
       lane?.conflict,
       lane?.id,
+      lane?.upstream,
+      lane?.upstream_ahead,
+      lane?.upstream_behind,
+      worktreeSync(row),
     ].map(tsvCell).join("\t"));
   }
   return `${lines.join("\n")}\n`;
