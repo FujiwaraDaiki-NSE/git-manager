@@ -10,7 +10,22 @@ import {
   changedPathList,
   visibleBranches,
 } from "./repo-tools.mjs";
+import {
+  STATUS_FILE_DIRECTORY_ALL,
+  STATUS_FILE_DIRECTORY_ROOT,
+  STATUS_FILE_EXTENSION_ALL,
+  STATUS_FILE_EXTENSION_NONE,
+  buildStatusDiffCommands,
+  filterStatusFilesByDirectory,
+  filterStatusFilesByExtension,
+  listStatusFileDirectories,
+  listStatusFileExtensions,
+  searchStatusFiles,
+  sortStatusFiles,
+  statusFilesCsv,
+} from "./status-file-tools.mjs";
 import "./repo-tools.css";
+import "./status-file-tools.css";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -34,6 +49,8 @@ type RepoDetailProps = {
 type LoadState = "idle" | "loading" | "ready" | "error";
 type BranchFilter = "all" | "current" | "worktree" | "untracked-upstream";
 type BranchSort = "name" | "date";
+type StatusFileFilter = "all" | "staged" | "unstaged" | "untracked" | "conflict";
+type StatusFileOrder = "asc" | "desc";
 
 const GRAPH_LIMIT = 200;
 const COMMIT_FETCH_DEBOUNCE_MS = 150;
@@ -104,24 +121,101 @@ function StatusBlock({ repo }: { repo: Repo }) {
 
 function StatusPane({ repo }: { repo: Repo }) {
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | "staged" | "unstaged" | "untracked" | "conflict">("all");
-  const filters = [
+  const [filter, setFilter] = useState<StatusFileFilter>("all");
+  const [directory, setDirectory] = useState<string>(STATUS_FILE_DIRECTORY_ALL);
+  const [extension, setExtension] = useState<string>(STATUS_FILE_EXTENSION_ALL);
+  const [order, setOrder] = useState<StatusFileOrder>("asc");
+  const [downloadStatus, setDownloadStatus] = useState<"idle" | "success" | "error">("idle");
+  const filters: { key: StatusFileFilter; label: string }[] = [
     { key: "all", label: "すべて" }, { key: "staged", label: "ステージ済み" },
     { key: "unstaged", label: "未ステージ" }, { key: "untracked", label: "未追跡" }, { key: "conflict", label: "競合" },
-  ] as const;
+  ];
   const entries = repo.entries;
-  const normalized = query.trim().toLocaleLowerCase();
-  const visible = entries?.filter((entry) => fileStatusGroups(entry.xy)[filter] && entry.path.toLocaleLowerCase().includes(normalized));
+  const availableEntries = entries ?? [];
+  const directoryOptions = useMemo(
+    () => entries === undefined ? [] : listStatusFileDirectories(entries),
+    [entries],
+  );
+  const extensionOptions = useMemo(
+    () => entries === undefined ? [] : listStatusFileExtensions(entries),
+    [entries],
+  );
+  const visible = useMemo(() => {
+    const searched = searchStatusFiles(availableEntries, query);
+    const byDirectory = filterStatusFilesByDirectory(searched, directory);
+    const byExtension = filterStatusFilesByExtension(byDirectory, extension);
+    const byStatus = byExtension.filter((entry) => fileStatusGroups(entry.xy)[filter]);
+    return sortStatusFiles(byStatus, order);
+  }, [availableEntries, directory, extension, filter, order, query]);
+  const diffCommands = useMemo(
+    () => entries === undefined ? null : buildStatusDiffCommands(repo.path, visible),
+    [entries, repo.path, visible],
+  );
+  const excluded = diffCommands?.excluded;
+  const hasRenamedEntry = visible.some((entry) => entry.xy.includes("R"));
+  const exclusionParts = excluded === undefined ? [] : [
+    excluded.untracked.length > 0 ? `未追跡 ${excluded.untracked.length} 件` : null,
+    excluded.conflicts.length > 0 ? `競合 ${excluded.conflicts.length} 件` : null,
+    excluded.unsupported.length > 0 ? `未対応の状態 ${excluded.unsupported.length} 件` : null,
+  ].filter((part): part is string => part !== null);
+  const hasFilters = query.trim().length > 0
+    || filter !== "all"
+    || directory !== STATUS_FILE_DIRECTORY_ALL
+    || extension !== STATUS_FILE_EXTENSION_ALL
+    || order !== "asc";
+  const clearFilters = () => {
+    setQuery("");
+    setFilter("all");
+    setDirectory(STATUS_FILE_DIRECTORY_ALL);
+    setExtension(STATUS_FILE_EXTENSION_ALL);
+    setOrder("asc");
+  };
+  const exportCsv = () => {
+    try {
+      const blob = new Blob([statusFilesCsv(visible)], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${repo.name}-status.csv`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setDownloadStatus("success");
+    } catch {
+      setDownloadStatus("error");
+    }
+  };
   return (
     <section className="status-pane" aria-labelledby="status-pane-title">
       <div className="section-head"><h3 id="status-pane-title">変更ファイル</h3><code className="cmdhint">git status --short</code></div>
       {entries === undefined || repo.error || repo.pending ? <div className="inline-error" role="status">変更ファイルの状態は未取得です。{repo.error && <span>{repo.error}。</span>}再走査で最新の状態を取得できます。</div> : <>
-        <div className="status-file-tools"><label><span className="sr-only">変更ファイルを検索</span><input type="search" aria-label="変更ファイルを検索" placeholder="ファイル名・パスで検索" value={query} onChange={(event) => setQuery(event.target.value)} /></label><span role="status">{visible?.length} / {entries.length} ファイル</span>{visible && visible.length > 0 && <CopyButton value={changedPathList(visible)} label="表示中のパスをコピー" />}</div>
+        <div className="status-file-tools-panel">
+          <div className="status-file-tools-controls" aria-label="変更ファイルの表示条件">
+            <label className="status-file-search"><span>変更ファイルを検索</span><input type="search" aria-label="変更ファイルを検索" placeholder="ファイル名・パスで検索" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+            <label><span>ディレクトリ</span><select aria-label="変更ファイルをディレクトリで絞り込み" value={directory} onChange={(event) => setDirectory(event.target.value)}><option value={STATUS_FILE_DIRECTORY_ALL}>すべて</option>{directoryOptions.map((item) => <option key={item} value={item}>{item === STATUS_FILE_DIRECTORY_ROOT ? "ルート" : item}</option>)}</select></label>
+            <label><span>拡張子</span><select aria-label="変更ファイルを拡張子で絞り込み" value={extension} onChange={(event) => setExtension(event.target.value)}><option value={STATUS_FILE_EXTENSION_ALL}>すべて</option>{extensionOptions.map((item) => <option key={item} value={item}>{item === STATUS_FILE_EXTENSION_NONE ? "拡張子なし" : item}</option>)}</select></label>
+            <button className="status-file-order" type="button" onClick={() => setOrder((value) => value === "asc" ? "desc" : "asc")} aria-label={`パス順を${order === "asc" ? "降順" : "昇順"}に変更`} title={`現在はパス${order === "asc" ? "昇順" : "降順"}`}>{order === "asc" ? "パス順 ↑" : "パス順 ↓"}</button>
+          </div>
+          <div className="status-file-tools-summary">
+            <span role="status">{visible.length} / {entries.length} ファイル</span>
+            {visible.length > 0 && <CopyButton value={changedPathList(visible)} label="表示中のパスをコピー" />}
+            <button className="status-file-export" type="button" onClick={exportCsv} disabled={visible.length === 0} aria-label={`表示中の${visible.length}件をCSVで保存`}>表示中をCSV保存</button>
+            <button className="status-file-reset" type="button" onClick={clearFilters} disabled={!hasFilters}>絞り込みを解除</button>
+            <span className={`status-file-download-status${downloadStatus === "error" ? " is-error" : ""}`} role={downloadStatus === "error" ? "alert" : "status"} aria-live="polite">{downloadStatus === "success" ? "CSVの保存を開始しました。" : downloadStatus === "error" ? "CSVを保存できませんでした。" : ""}</span>
+          </div>
+        </div>
         <div className="status-file-filters" role="group" aria-label="変更ファイルの状態で絞り込み">{filters.map(({ key, label }) => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}<span>{entries.filter((entry) => fileStatusGroups(entry.xy)[key]).length}</span></button>)}</div>
         <div className="status-file-list">
-          {visible?.map((entry) => <div className="status-file-row" key={entry.xy + entry.path}><code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code><code className="status-file-path">{entry.path}</code><span className="status-file-description">{fileStatusDescription(entry.xy)}</span><span className="status-file-copy"><CopyButton value={entry.path} label={`${entry.path} のパスをコピー`} /></span></div>)}
-          {visible?.length === 0 && <div className="status-file-empty">{entries.length === 0 ? "未コミットの変更はありません。" : "条件に一致する変更ファイルはありません。"}{(query || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { setQuery(""); setFilter("all"); }}>絞り込みを解除</button>}</div>}
+          {visible.map((entry) => <div className="status-file-row" key={entry.xy + entry.path}><code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code><code className="status-file-path">{entry.path}</code><span className="status-file-description">{fileStatusDescription(entry.xy)}</span><span className="status-file-copy"><CopyButton value={entry.path} label={`${entry.path} のパスをコピー`} /></span></div>)}
+          {visible.length === 0 && <div className="status-file-empty">{entries.length === 0 ? "未コミットの変更はありません。" : "条件に一致する変更ファイルはありません。"}{hasFilters && <button className="subtle-button" type="button" onClick={clearFilters}>絞り込みを解除</button>}</div>}
         </div>
+        {entries.length > 0 && <div className="status-file-diff-tools" aria-labelledby="status-file-diff-title">
+          <h4 id="status-file-diff-title">表示中の追跡ファイルの差分コマンド</h4>
+          <p className="status-file-diff-empty">コマンドはコピー専用です。この画面では実行しません。</p>
+          <div className="status-file-diff-command"><code>{diffCommands?.staged ?? "ステージ済みの差分はありません。"}</code>{diffCommands?.staged && <CopyButton value={diffCommands.staged} label="ステージ済みの差分コマンドをコピー" />}</div>
+          <div className="status-file-diff-command"><code>{diffCommands?.unstaged ?? "未ステージの差分はありません。"}</code>{diffCommands?.unstaged && <CopyButton value={diffCommands.unstaged} label="未ステージの差分コマンドをコピー" />}</div>
+          {exclusionParts.length > 0 && <p className="status-file-diff-note" role="status">{exclusionParts.join("、")}は差分コマンドから除外しました。未追跡ファイルはGitの差分対象外で、競合と未対応の状態は安全に対象を確定できないためです。</p>}
+          {hasRenamedEntry && <p className="status-file-diff-note" role="status">名前変更はAPIが元のパスを提供しないため、公開された現在のパスだけを差分コマンドに含めています。</p>}
+        </div>}
         <details className="status-file-guide"><summary>ステージと状態記号の見方</summary><div className="status-flow" aria-label="作業ディレクトリからステージ、コミットへの流れ"><div className="status-flow-node"><strong>作業ディレクトリ</strong><span>未ステージ</span><code>git diff</code></div><div className="status-flow-arrow"><code>git add</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>ステージ（index）</strong><span>ステージ済み</span><code>git diff --cached</code></div><div className="status-flow-arrow"><code>git commit</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>コミット</strong><span>履歴に保存</span></div></div><p>ステージ済みは次のコミットに含める変更、未ステージは作業ディレクトリだけにある変更です。同じファイルに両方の変更がある場合は、それぞれの絞り込みに表示します。</p><p>記号は左がステージ、右が作業ディレクトリです。M: 変更、A: 追加、D: 削除、R: 名前変更、??: 未追跡。競合はファイルを確認して解消します。</p></details>
       </>}
     </section>

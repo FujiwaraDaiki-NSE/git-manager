@@ -1,0 +1,142 @@
+.status-file-tools-panel {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.status-file-tools-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.status-file-tools-controls label {
+  display: grid;
+  gap: 5px;
+  min-width: 132px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-file-tools-controls .status-file-search {
+  flex: 1 1 220px;
+}
+
+.status-file-tools-controls input,
+.status-file-tools-controls select {
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 8px 9px;
+  color: var(--ink);
+  background: var(--panel);
+  font: 12px var(--sans);
+}
+
+.status-file-tools-controls select {
+  max-width: 220px;
+}
+
+.status-file-order,
+.status-file-export,
+.status-file-reset {
+  min-height: 34px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--ink);
+  background: var(--panel);
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.status-file-order:hover,
+.status-file-export:hover,
+.status-file-reset:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status-file-export:disabled,
+.status-file-reset:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.status-file-tools-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-file-download-status {
+  color: var(--control-green);
+  font-size: 11px;
+}
+
+.status-file-download-status.is-error {
+  color: var(--control-red);
+}
+
+.status-file-diff-tools {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.status-file-diff-tools h4 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.status-file-diff-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.status-file-diff-command code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.status-file-diff-empty,
+.status-file-diff-note {
+  margin: 0;
+  color: var(--muted);
+  font: 11px/1.65 var(--sans);
+}
+
+.status-file-diff-note {
+  color: var(--control-ink);
+}
+
+@media (max-width: 600px) {
+  .status-file-tools-controls > label,
+  .status-file-tools-controls .status-file-search,
+  .status-file-tools-controls select,
+  .status-file-tools-controls button {
+    width: 100%;
+    max-width: none;
+  }
+
+  .status-file-diff-command {
+    grid-template-columns: 1fr;
+  }
+
+  .status-file-diff-command .copy-control,
+  .status-file-diff-command .copy-button {
+    width: 100%;
+  }
+}
