@@ -4,18 +4,30 @@ import { useMemo, useState } from "react";
 import CopyButton from "./copy-button";
 import {
   buildPullRequestExplorerData,
+  localCalendarDate,
   pullRequestsToCsv,
   targetBranchName,
+  validHttpUrl,
 } from "./pr-tools.mjs";
 import type { ProjectResponse } from "./types";
 
-type PrRange = "7" | "30" | "all";
+type PrRange = "7" | "30" | "all" | "custom";
 type PrSort = "newest" | "oldest" | "number";
+type PrView = "cards" | "table";
+type PullRequestRecord = {
+  number: number;
+  url: string;
+  source: string;
+  target: string;
+  commit_hash: string | null;
+  merged_at: string | null;
+};
 
 const rangeOptions: { id: PrRange; label: string }[] = [
   { id: "7", label: "7日" },
   { id: "30", label: "30日" },
   { id: "all", label: "全期間" },
+  { id: "custom", label: "指定範囲" },
 ];
 
 const sortOptions: { id: PrSort; label: string }[] = [
@@ -26,18 +38,10 @@ const sortOptions: { id: PrSort; label: string }[] = [
 
 function exactDate(value: string | null) {
   if (!value) return "日付未取得";
+  if (localCalendarDate(value) === null) return "日付未取得";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "日付未取得";
   return date.toLocaleString("ja-JP", { dateStyle: "medium", timeStyle: "short" });
-}
-
-function safeHttpUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? value : null;
-  } catch {
-    return null;
-  }
 }
 
 function recordNumber(value: number) {
@@ -62,16 +66,9 @@ function githubStatusMessage(status: string) {
   }
 }
 
-function PullRequestCard({ record }: { record: {
-  number: number;
-  url: string;
-  source: string;
-  target: string;
-  commit_hash: string | null;
-  merged_at: string | null;
-} }) {
-  const href = safeHttpUrl(record.url);
-  const date = record.merged_at && !Number.isNaN(new Date(record.merged_at).getTime())
+function PullRequestCard({ record }: { record: PullRequestRecord }) {
+  const href = validHttpUrl(record.url);
+  const date = record.merged_at && localCalendarDate(record.merged_at) !== null && !Number.isNaN(new Date(record.merged_at).getTime())
     ? new Date(record.merged_at).toISOString()
     : undefined;
   return (
@@ -105,16 +102,83 @@ function PullRequestCard({ record }: { record: {
   );
 }
 
+function PullRequestTable({ records }: { records: PullRequestRecord[] }) {
+  return (
+    <div className="pr-explorer-table-scroll" tabIndex={0} aria-label="マージ済みPRの表。横にスクロールできます">
+      <table className="pr-explorer-table">
+        <caption className="pr-explorer-visually-hidden">表示中のマージ済みPR</caption>
+        <thead>
+          <tr><th scope="col">PR</th><th scope="col">マージ日</th><th scope="col">マージ元</th><th scope="col">マージ先</th><th scope="col">マージコミット</th></tr>
+        </thead>
+        <tbody>
+          {records.map((record, index) => {
+            const href = validHttpUrl(record.url);
+            const date = record.merged_at && localCalendarDate(record.merged_at) !== null && !Number.isNaN(new Date(record.merged_at).getTime())
+              ? new Date(record.merged_at).toISOString()
+              : undefined;
+            return (
+              <tr key={`${record.url}:${record.number}:${index}`}>
+                <th scope="row">
+                  {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(record.number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(record.number)}</strong>}
+                  <span className="pr-explorer-merged-label">マージ済み</span>
+                  {!href && <span className="pr-explorer-table-missing">リンク未取得</span>}
+                </th>
+                <td><time dateTime={date}>{exactDate(record.merged_at)}</time></td>
+                <td><code title={record.source}>{record.source}</code></td>
+                <td><code title={record.target}>{record.target}</code></td>
+                <td className="pr-explorer-table-hash">
+                  {record.commit_hash ? <><code title={record.commit_hash}>{record.commit_hash}</code><CopyButton value={record.commit_hash} label="マージコミットをコピー" /></> : <span className="pr-explorer-missing-hash">マージコミット未取得</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function PullRequestExplorer({ project }: { project: ProjectResponse }) {
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState("all");
+  const [source, setSource] = useState("all");
   const [range, setRange] = useState<PrRange>("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [sort, setSort] = useState<PrSort>("newest");
-  const model = useMemo(() => buildPullRequestExplorerData(project, { query, target, range, sort }), [project, query, range, sort, target]);
+  const [view, setView] = useState<PrView>("cards");
+  const model = useMemo(() => buildPullRequestExplorerData(project, {
+    query,
+    target,
+    source,
+    range,
+    startDate: startDate === "" ? null : startDate,
+    endDate: endDate === "" ? null : endDate,
+    sort,
+  }), [project, query, target, source, range, startDate, endDate, sort]);
   const branchRowsAvailable = project.branch_rows !== null;
   const githubStatus = project.github.status;
   const unavailableMessage = githubStatusMessage(githubStatus);
   const canClaimEmpty = branchRowsAvailable && githubStatus === "available";
+  const hasActiveFilters = query.trim() !== "" || target !== "all" || source !== "all" || range !== "all" || startDate !== "" || endDate !== "" || sort !== "newest";
+
+  const chooseRange = (nextRange: PrRange) => {
+    setRange(nextRange);
+    if (nextRange !== "custom") {
+      setStartDate("");
+      setEndDate("");
+    }
+  };
+
+  const resetFilters = () => {
+    setQuery("");
+    setTarget("all");
+    setSource("all");
+    setRange("all");
+    setStartDate("");
+    setEndDate("");
+    setSort("newest");
+  };
 
   const downloadCsv = () => {
     if (!model.filtered.length) return;
@@ -164,26 +228,49 @@ export default function PullRequestExplorer({ project }: { project: ProjectRespo
           </select>
         </label>
         <label className="pr-explorer-select">
+          <span>マージ元</span>
+          <select value={source} onChange={(event) => setSource(event.target.value)} aria-label="sourceブランチで絞り込む">
+            <option value="all">すべてのマージ元</option>
+            {model.sourceOptions.map((value: string) => <option value={value} title={value} key={value}>{value}</option>)}
+          </select>
+        </label>
+        <label className="pr-explorer-select">
           <span>並び順</span>
           <select value={sort} onChange={(event) => setSort(event.target.value as PrSort)} aria-label="マージ済みPRの並び順">
             {sortOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}
           </select>
         </label>
         <button className="pr-explorer-export" type="button" onClick={downloadCsv} disabled={!model.filtered.length} title={model.filtered.length ? "表示中のPRをCSVで保存" : "保存するPRがありません"}>CSVを保存</button>
+        <div className="pr-explorer-copy-urls">
+          {model.urlDetails.validCount > 0 ? <CopyButton value={model.urlDetails.value} label={`表示中の${model.urlDetails.validCount}件のPR URLをコピー`} /> : <button className="copy-button" type="button" disabled aria-label="有効なPR URLはありません">PR URLをコピー</button>}
+          <span className="pr-explorer-url-summary" role="status">{model.urlDetails.validCount}件をコピー対象{model.urlDetails.invalidCount > 0 && ` · ${model.urlDetails.invalidCount}件は有効なhttp(s) URLではないため除外`}</span>
+        </div>
+        {hasActiveFilters && <button className="pr-explorer-clear-toolbar" type="button" onClick={resetFilters}>条件をすべて解除</button>}
       </div>
 
       <div className="pr-explorer-range-row" role="toolbar" aria-label="マージ日付の範囲">
         <span>マージ日</span>
         <div className="pr-explorer-range-buttons">
-          {rangeOptions.map((option) => <button key={option.id} type="button" aria-pressed={range === option.id} onClick={() => setRange(option.id)}>{option.label}</button>)}
+          {rangeOptions.map((option) => <button key={option.id} type="button" aria-pressed={range === option.id} onClick={() => chooseRange(option.id)}>{option.label}</button>)}
         </div>
+        <label className="pr-explorer-date-input"><span>開始日</span><input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setRange("custom"); }} aria-label="マージ日の開始日" /></label>
+        <label className="pr-explorer-date-input"><span>終了日</span><input type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); setRange("custom"); }} aria-label="マージ日の終了日" /></label>
         <span className="pr-explorer-result-count" role="status">{model.filtered.length} / {model.all.length} 件表示</span>
       </div>
 
+      {model.dateWindow.state === "invalid" && <p className="pr-explorer-inline-note pr-explorer-inline-error" role="alert">期間を適用できません。{model.dateWindow.error}</p>}
       {range !== "all" && model.dateWindow.state === "unknown" && <p className="pr-explorer-inline-note" role="status">プロジェクトの観測時刻が未取得のため、期間を判定できません。全期間の記録を表示しています。</p>}
-      {range !== "all" && model.finiteRangeUnknownDatesExcluded && model.unknownDates > 0 && <p className="pr-explorer-inline-note" role="status">マージ日が未取得の {model.unknownDates} 件は期間を判定できないため除外しています。全期間で確認できます。</p>}
+      {model.finiteRangeUnknownDatesExcluded && model.unknownDates > 0 && <p className="pr-explorer-inline-note" role="status">マージ日が未取得の {model.unknownDates} 件は期間を判定できないため除外しています。全期間で確認できます。</p>}
 
-      {!branchRowsAvailable ? null : model.filtered.length ? <ol className="pr-explorer-timeline">{model.filtered.map((record: { number: number; url: string; source: string; target: string; commit_hash: string | null; merged_at: string | null }, index: number) => <PullRequestCard key={`${record.url}:${record.number}:${index}`} record={record} />)}</ol> : githubStatus !== "available" ? (
+      <div className="pr-explorer-view-row" role="toolbar" aria-label="PRの表示形式">
+        <span>表示形式</span>
+        <div className="pr-explorer-view-buttons">
+          <button type="button" aria-pressed={view === "cards"} onClick={() => setView("cards")}>カード</button>
+          <button type="button" aria-pressed={view === "table"} onClick={() => setView("table")}>コンパクト表</button>
+        </div>
+      </div>
+
+      {!branchRowsAvailable ? null : model.filtered.length ? view === "table" ? <PullRequestTable records={model.filtered} /> : <ol className="pr-explorer-timeline">{model.filtered.map((record: PullRequestRecord, index: number) => <PullRequestCard key={`${record.url}:${record.number}:${index}`} record={record} />)}</ol> : githubStatus !== "available" ? (
         <div className="pr-explorer-empty" role="status">
           <strong>確認できるPR記録はありません</strong>
           <span>GitHubまたはブランチ情報が未取得のため、PRがないとは判断できません。</span>
@@ -191,11 +278,10 @@ export default function PullRequestExplorer({ project }: { project: ProjectRespo
       ) : (
         <div className="pr-explorer-empty" role="status">
           {canClaimEmpty && model.all.length === 0 ? <><strong>マージ済みPRはありません</strong><span>取得済みのブランチ行に紐づく記録はありません。</span></> : <><strong>条件に一致するPRはありません</strong><span>検索・マージ先・期間の条件を解除すると、別の記録を確認できます。</span></>}
-          {(query || target !== "all" || range !== "all") && <button className="pr-explorer-clear" type="button" onClick={() => { setQuery(""); setTarget("all"); setRange("all"); }}>絞り込みを解除</button>}
         </div>
       )}
     </section>
   );
 }
 
-export { PullRequestCard };
+export { PullRequestCard, PullRequestTable };

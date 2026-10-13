@@ -1,0 +1,19 @@
+.workspace-export {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.workspace-export > button {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--accent);
+  padding: 8px 10px;
+  font: 12px var(--sans);
+  cursor: pointer;
+}
+.workspace-export button:disabled { opacity: .55; cursor: default; }
+.workspace-export button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.workspace-export > button:not(:disabled):hover { background: var(--hover); }
+.workspace-export .copy-button { white-space: normal; }

@@ -1,0 +1,18 @@
+.project-switch-options { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; }
+.project-switch-options button, .project-switch-options select {
+  border:1px solid var(--rule); border-radius:6px; background:var(--panel); color:var(--ink);
+  font:12px var(--sans); padding:8px; min-height:34px;
+}
+.project-switch-options button { cursor:pointer; }
+.project-switch-options button[aria-pressed="true"] { color:var(--accent); border-color:var(--accent); background:var(--hover); }
+.project-switch-options button:disabled { cursor:default; opacity:.55; }
+.project-switch-options :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.project-switch-sort { display:flex; gap:8px; align-items:center; font:12px var(--sans); }
+.project-switch-local-note { color:var(--muted); font:12px/1.6 var(--sans); }
+.project-switch-storage-issue { border:1px solid var(--rule); padding:10px; margin:8px 0; font:12px/1.6 var(--sans); }
+.project-switch-results a:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; background:var(--hover); }
+@media(max-width:600px) {
+  .project-switch-sort { flex:1 1 100%; }
+  .project-switch-sort select { flex:1; min-width:0; }
+  .project-switch-footer { flex-wrap:wrap; gap:8px; }
+}

@@ -7,9 +7,14 @@ import {
   dedupePullRequests,
   filterPullRequests,
   filterPullRequestDetails,
+  localCalendarDate,
   pullRequestsToCsv,
+  pullRequestDateRangeError,
+  pullRequestUrlDetails,
+  sourceOptions,
   sortPullRequests,
   targetBranchName,
+  validHttpUrl,
 } from "../app/pr-tools.mjs";
 
 const observedAt = Date.parse("2026-10-02T00:00:00Z") / 1000;
@@ -27,7 +32,7 @@ function pr(number, overrides = {}) {
 }
 
 function filterOptions(overrides = {}) {
-  return { query: "", target: "all", range: "all", observedAt, ...overrides };
+  return { query: "", target: "all", source: "all", range: "all", startDate: null, endDate: null, observedAt, ...overrides };
 }
 
 test("collectMergedPullRequests deduplicates a PR attached to multiple branch rows", () => {
@@ -69,6 +74,17 @@ test("target filter accepts the full target identity or its branch portion", () 
   assert.deepEqual(filterPullRequests(records, filterOptions({ target: "example:main" })).map((item) => item.number), [1]);
 });
 
+test("source options preserve exact backend source identities and filter without shortening", () => {
+  const records = [
+    pr(1, { source: "owner/repo:feature/a" }),
+    pr(2, { source: "fork/repo:feature/a" }),
+    pr(3, { source: "owner/repo:feature/a" }),
+  ];
+  assert.deepEqual(sourceOptions(records), ["fork/repo:feature/a", "owner/repo:feature/a"]);
+  assert.deepEqual(filterPullRequests(records, filterOptions({ source: "owner/repo:feature/a" })).map((item) => item.number), [1, 3]);
+  assert.deepEqual(filterPullRequests(records, filterOptions({ source: "feature/a" })), []);
+});
+
 test("7 and 30 day ranges use observed_at as the inclusive window anchor", () => {
   const records = [
     pr(1, { merged_at: "2026-10-01T23:59:59Z" }),
@@ -96,6 +112,28 @@ test("missing observed_at keeps records visible but reports an unknown date wind
   assert.deepEqual(details.records.map((item) => item.number), [1, 2]);
 });
 
+test("custom date ranges include local calendar boundaries across timezone offsets", () => {
+  const records = [
+    pr(1, { merged_at: "2026-10-01T23:30:00-05:00" }),
+    pr(2, { merged_at: "2026-10-02T00:30:00+09:00" }),
+    pr(3, { merged_at: "2026-10-03T00:00:00Z" }),
+    pr(4, { merged_at: null }),
+  ];
+  assert.deepEqual(filterPullRequests(records, filterOptions({ range: "custom", startDate: "2026-10-02", endDate: "2026-10-02" })).map((item) => item.number), [1, 2]);
+  assert.equal(localCalendarDate("2026-10-01T23:30:00-05:00"), "2026-10-02");
+  assert.equal(localCalendarDate("2026-02-30T10:00:00+09:00"), null);
+  assert.deepEqual(filterPullRequests(records, filterOptions({ range: "custom", startDate: "2026-10-03", endDate: "2026-10-02" })), []);
+});
+
+test("invalid custom ranges are explicit and never fall back to all records", () => {
+  assert.match(pullRequestDateRangeError("2026-02-30", null), /有効な日付/);
+  assert.match(pullRequestDateRangeError("2026-10-03", "2026-10-02"), /以前/);
+  const details = filterPullRequestDetails([pr(1)], filterOptions({ range: "custom", startDate: "bad", endDate: null }));
+  assert.equal(details.dateWindow.state, "invalid");
+  assert.ok(details.dateWindow.error);
+  assert.deepEqual(details.records, []);
+});
+
 test("newest and oldest sorts put unknown dates at the end; number is descending", () => {
   const records = [
     pr(4, { merged_at: null }),
@@ -118,8 +156,49 @@ test("CSV is filtered input, RFC quoted, and protected against spreadsheet formu
   assert.ok(!csv.includes("HYPERLINK(\"https://evil.example\")"));
 });
 
+test("PR URL copying includes only valid http(s) links and reports exclusions", () => {
+  const records = [
+    pr(1),
+    pr(2, { url: "javascript:alert(1)" }),
+    pr(3, { url: "not a URL" }),
+    pr(4, { url: "http://example.test/pull/4" }),
+  ];
+  assert.equal(validHttpUrl(records[0].url), records[0].url);
+  assert.equal(validHttpUrl(records[1].url), null);
+  assert.deepEqual(pullRequestUrlDetails(records), {
+    urls: [records[0].url, records[3].url],
+    value: `${records[0].url}\n${records[3].url}`,
+    validCount: 2,
+    invalidCount: 2,
+  });
+});
+
+test("CSV export is built from the records after every active filter", () => {
+  const project = {
+    github: { status: "available" },
+    observed_at: observedAt,
+    branch_rows: [{ pull_requests: [
+      pr(1, { source: "owner/repo:feature/a", merged_at: "2026-10-01T23:30:00-05:00" }),
+      pr(2, { source: "owner/repo:feature/b", merged_at: "2026-10-02T12:00:00Z" }),
+    ] }],
+  };
+  const model = buildPullRequestExplorerData(project, {
+    query: "",
+    target: "all",
+    source: "owner/repo:feature/a",
+    range: "custom",
+    startDate: "2026-10-02",
+    endDate: "2026-10-02",
+    sort: "newest",
+  });
+  assert.deepEqual(model.filtered.map((item) => item.number), [1]);
+  const csv = pullRequestsToCsv(model.filtered);
+  assert.match(csv, /pull\/1/);
+  assert.ok(!csv.includes("pull/2"));
+});
+
 test("explorer model exposes unavailable coverage instead of manufacturing empty success", () => {
-  const options = { query: "", target: "all", range: "all", sort: "newest" };
+  const options = { query: "", target: "all", source: "all", range: "all", startDate: null, endDate: null, sort: "newest" };
   const unknown = buildPullRequestExplorerData({ github: { status: "available" }, branch_rows: null, observed_at: observedAt }, options);
   assert.equal(unknown.coverage, "unknown");
   assert.equal(unknown.all.length, 0);
@@ -131,6 +210,11 @@ test("explorer model exposes unavailable coverage instead of manufacturing empty
 
 test("explorer model preserves chosen sort after filtering and deduplication", () => {
   const project = { github: { status: "available" }, observed_at: observedAt, branch_rows: [{ pull_requests: [pr(2), pr(9), pr(4)] }] };
-  const model = buildPullRequestExplorerData(project, { query: "", target: "all", range: "all", sort: "number" });
+  const model = buildPullRequestExplorerData(project, { query: "", target: "all", source: "all", range: "all", startDate: null, endDate: null, sort: "number" });
   assert.deepEqual(model.filtered.map((item) => item.number), [9, 4, 2]);
+});
+
+test("new PR filter parameters must be provided explicitly", () => {
+  assert.throws(() => filterPullRequests([pr(1)], { query: "", target: "all", range: "all", observedAt }), /provided explicitly/);
+  assert.throws(() => pullRequestDateRangeError(null, undefined), /provided explicitly/);
 });

@@ -7,6 +7,75 @@
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u;
+const PR_RANGES = new Set(["7", "30", "all", "custom"]);
+
+function isEmptyFilter(value) {
+  return value === null || value === "";
+}
+
+function assertExplicitFilterOptions(options) {
+  if (options === null || typeof options !== "object") {
+    throw new TypeError("PR filter options must be provided explicitly");
+  }
+  const required = ["query", "target", "source", "range", "startDate", "endDate", "observedAt"];
+  if (required.some((key) => options[key] === undefined)) {
+    throw new TypeError(`${required.join(", ")} must be provided explicitly; use null or an empty string for no filter`);
+  }
+}
+
+function daysInMonth(year, month) {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+/** Return the exact YYYY-MM-DD value when it is a real calendar date. */
+function parseCalendarDate(value) {
+  if (isEmptyFilter(value) || typeof value !== "string") return null;
+  const match = CALENDAR_DATE_PATTERN.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) return null;
+  return value;
+}
+
+/** Explain malformed or reversed inclusive calendar boundaries. */
+export function pullRequestDateRangeError(startDate, endDate) {
+  if (startDate === undefined || endDate === undefined) {
+    throw new TypeError("startDate and endDate must be provided explicitly; use null or an empty string for no filter");
+  }
+  const start = parseCalendarDate(startDate);
+  const end = parseCalendarDate(endDate);
+  if (!isEmptyFilter(startDate) && start === null) return "開始日は有効な日付（YYYY-MM-DD）で指定してください。";
+  if (!isEmptyFilter(endDate) && end === null) return "終了日は有効な日付（YYYY-MM-DD）で指定してください。";
+  if (start !== null && end !== null && start > end) return "開始日は終了日以前の日付にしてください。";
+  return null;
+}
+
+function pullRequestTimestamp(value) {
+  if (typeof value !== "string" || value.length === 0) return NaN;
+  // Date.parse silently normalizes some malformed calendar values. Validate the
+  // calendar component first so an unknown merge date stays unknown.
+  if (parseCalendarDate(value.slice(0, 10)) === null) return NaN;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : NaN;
+}
+
+/** Convert a merged-at instant to the browser's local inclusive calendar date. */
+export function localCalendarDate(value) {
+  const timestamp = pullRequestTimestamp(value);
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function normalizePullRequest(value) {
   return {
@@ -53,30 +122,44 @@ function queryText(record) {
     record.target,
     record.commit_hash,
     record.merged_at,
-  ].filter((value) => value !== null).join(" ").toLocaleLowerCase();
+  ].filter((value) => value !== null && value !== undefined).join(" ").toLocaleLowerCase();
 }
 
 function parsePrDate(value) {
-  if (value === null) return null;
-  const parsed = Date.parse(value);
+  const parsed = pullRequestTimestamp(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 /** Extract the branch portion of a backend target such as owner/repo:main. */
 export function targetBranchName(value) {
+  if (typeof value !== "string") return "";
   const separator = value.lastIndexOf(":");
   return separator >= 0 ? value.slice(separator + 1) : value;
 }
 
 /** Describe a date window anchored to the project snapshot's observed_at. */
-function pullRequestDateWindow(range, observedAt) {
-  if (range === "all") return { range, state: "all", start: null, end: null };
-  if (range !== "7" && range !== "30") return { range, state: "unknown", start: null, end: null };
+function pullRequestDateWindow(range, observedAt, startDate, endDate) {
+  const error = pullRequestDateRangeError(startDate, endDate);
+  if (error) {
+    return { range, state: "invalid", start: null, end: null, startDate, endDate, error };
+  }
+  if (!PR_RANGES.has(range)) {
+    return { range, state: "invalid", start: null, end: null, startDate, endDate, error: "期間の指定を認識できません。" };
+  }
+  if (range === "custom") {
+    const localStart = parseCalendarDate(startDate);
+    const localEnd = parseCalendarDate(endDate);
+    if (localStart === null && localEnd === null) {
+      return { range, state: "all", start: null, end: null, startDate: null, endDate: null, error: null };
+    }
+    return { range, state: "local_calendar", start: null, end: null, startDate: localStart, endDate: localEnd, error: null };
+  }
+  if (range === "all") return { range, state: "all", start: null, end: null, startDate: null, endDate: null, error: null };
   if (typeof observedAt !== "number" || !Number.isFinite(observedAt)) {
-    return { range, state: "unknown", start: null, end: null };
+    return { range, state: "unknown", start: null, end: null, startDate: null, endDate: null, error: null };
   }
   const end = observedAt * 1000;
-  return { range, state: "bounded", start: end - Number(range) * DAY_MS, end };
+  return { range, state: "bounded", start: end - Number(range) * DAY_MS, end, startDate: null, endDate: null, error: null };
 }
 
 /**
@@ -85,19 +168,33 @@ function pullRequestDateWindow(range, observedAt) {
  * a bounded window because their membership cannot be established.
  */
 export function filterPullRequests(records, options) {
-  const query = options.query.trim().toLocaleLowerCase();
-  const dateWindow = pullRequestDateWindow(options.range, options.observedAt);
+  assertExplicitFilterOptions(options);
+  const query = isEmptyFilter(options.query) ? "" : options.query.trim().toLocaleLowerCase();
+  const dateWindow = pullRequestDateWindow(options.range, options.observedAt, options.startDate, options.endDate);
+  const target = isEmptyFilter(options.target) ? "all" : options.target;
+  const source = isEmptyFilter(options.source) ? "all" : options.source;
   return records.filter((record) => {
     if (query && !queryText(record).includes(query)) return false;
-    if (options.target !== "all" && record.target !== options.target && targetBranchName(record.target) !== options.target) return false;
-    if (dateWindow.state !== "bounded") return true;
-    const mergedAt = parsePrDate(record.merged_at);
-    return mergedAt !== null && mergedAt >= dateWindow.start && mergedAt <= dateWindow.end;
+    if (target !== "all" && record.target !== target && targetBranchName(record.target) !== target) return false;
+    if (source !== "all" && record.source !== source) return false;
+    if (dateWindow.state === "invalid") return false;
+    if (dateWindow.state === "bounded") {
+      const mergedAt = parsePrDate(record.merged_at);
+      return mergedAt !== null && mergedAt >= dateWindow.start && mergedAt <= dateWindow.end;
+    }
+    if (dateWindow.state === "local_calendar") {
+      const mergedDate = localCalendarDate(record.merged_at);
+      if (mergedDate === null) return false;
+      if (dateWindow.startDate !== null && mergedDate < dateWindow.startDate) return false;
+      if (dateWindow.endDate !== null && mergedDate > dateWindow.endDate) return false;
+    }
+    return true;
   });
 }
 
 export function filterPullRequestDetails(records, options) {
-  const dateWindow = pullRequestDateWindow(options.range, options.observedAt);
+  assertExplicitFilterOptions(options);
+  const dateWindow = pullRequestDateWindow(options.range, options.observedAt, options.startDate, options.endDate);
   const unknownDates = records.filter((record) => parsePrDate(record.merged_at) === null).length;
   const filtered = filterPullRequests(records, options);
   return {
@@ -106,7 +203,7 @@ export function filterPullRequestDetails(records, options) {
     total: records.length,
     unknownDates,
     dateWindow,
-    finiteRangeUnknownDatesExcluded: dateWindow.state === "bounded" && options.range !== "all",
+    finiteRangeUnknownDatesExcluded: dateWindow.state === "bounded" || dateWindow.state === "local_calendar",
   };
 }
 
@@ -130,8 +227,40 @@ export function sortPullRequests(records, order) {
 }
 
 export function targetOptions(records) {
-  return [...new Set(records.map((record) => record.target))]
+  return [...new Set(records.map((record) => record.target).filter((value) => typeof value === "string" && value.length > 0))]
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+/** Return full source identities exactly as supplied by the backend. */
+export function sourceOptions(records) {
+  return [...new Set(records.map((record) => record.source).filter((value) => typeof value === "string" && value.length > 0))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+/** Validate a PR link without changing the backend value copied or displayed. */
+export function validHttpUrl(value) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Summarize links available for the currently filtered records. */
+export function pullRequestUrlDetails(records) {
+  const urls = [];
+  let invalidCount = 0;
+  for (const record of records) {
+    const url = validHttpUrl(record.url);
+    if (url === null) {
+      invalidCount += 1;
+    } else {
+      urls.push(url);
+    }
+  }
+  return { urls, value: urls.join("\n"), validCount: urls.length, invalidCount };
 }
 
 function csvValue(value) {
@@ -155,18 +284,28 @@ export function pullRequestsToCsv(records) {
 
 /** Build the complete pure model used by the React view. */
 export function buildPullRequestExplorerData(project, options) {
+  if (options === null || typeof options !== "object" || options.sort === undefined) {
+    throw new TypeError("query, target, source, range, startDate, endDate, and sort must be provided explicitly");
+  }
   const all = collectMergedPullRequests(project);
   const detail = filterPullRequestDetails(all, {
     query: options.query,
     target: options.target,
+    source: options.source,
     range: options.range,
+    startDate: options.startDate,
+    endDate: options.endDate,
     observedAt: project.observed_at,
   });
+  const filtered = sortPullRequests(detail.records, options.sort);
+  const urlDetails = pullRequestUrlDetails(filtered);
   return {
     ...detail,
     all,
-    filtered: sortPullRequests(detail.records, options.sort),
+    filtered,
     targetOptions: targetOptions(all),
+    sourceOptions: sourceOptions(all),
+    urlDetails,
     coverage: project.branch_rows === null ? "unknown" : project.github.status === "available" ? "attached" : "unavailable",
     githubStatus: project.github.status,
   };
