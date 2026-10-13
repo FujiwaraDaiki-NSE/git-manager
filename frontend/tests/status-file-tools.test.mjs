@@ -100,3 +100,18 @@ test("diff commands are absent when no visible tracked change matches a side", (
   assert.equal(result.staged, null);
   assert.equal(result.unstaged, null);
 });
+
+
+test("a directory named all does not collide with the all-directories option", () => {
+  const rows = [{xy: ".M", path: "all/file.ts"}, {xy: ".M", path: "other/file.ts"}];
+  assert.deepEqual(filterStatusFilesByDirectory(rows, "all"), [rows[0]]);
+  assert.deepEqual(filterStatusFilesByDirectory(rows, "/"), rows);
+});
+
+test("renames are excluded because their original paths are not published", () => {
+  const rows = [{xy: "R.", path: "renamed.ts"}, {xy: ".R", path: "other.ts"}, {xy: "C.", path: "copied.ts"}];
+  const result = buildStatusDiffCommands("/repo", rows);
+  assert.equal(result.staged, null);
+  assert.equal(result.unstaged, null);
+  assert.deepEqual(result.excluded.unsupported, rows);
+});

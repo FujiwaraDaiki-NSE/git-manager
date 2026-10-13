@@ -1,0 +1,21 @@
+import type { AgentStatus, ProjectLane, ProjectResponse } from "./types";
+
+export declare const UNKNOWN_LANE_AUTHOR_FILTER: string;
+export declare const LANE_AUTHOR_FILTER_PREFIX: string;
+export declare const LANE_UPSTREAM_FILTERS: readonly string[];
+export declare const LANE_UPSTREAM_LABELS: Readonly<Record<string, string>>;
+export type LaneUpstreamState = "synced" | "ahead" | "behind" | "diverged" | "untracked" | "unknown";
+export type LaneUpstreamFilter = "all" | LaneUpstreamState;
+export declare function laneLastCommitAuthor(lane: ProjectLane): string | null;
+export declare function laneAuthors(lanes: readonly ProjectLane[]): string[];
+export declare function hasUnknownLaneAuthor(lanes: readonly ProjectLane[]): boolean;
+export declare function encodeLaneAuthor(author: string): string;
+export declare function laneMatchesAuthor(lane: ProjectLane, authorFilter: string | null): boolean;
+export declare function laneUpstreamState(lane: ProjectLane): LaneUpstreamState;
+export declare function laneMatchesUpstream(lane: ProjectLane, upstreamFilter: LaneUpstreamFilter): boolean;
+export declare function laneAgentStatus(lane: ProjectLane): AgentStatus | null;
+export declare function laneAgentStatusValue(lane: ProjectLane): AgentStatus | "unknown";
+export declare const escapeLaneCsvCell: (value: unknown) => string;
+export declare const LANE_CSV_HEADERS: readonly string[];
+export declare function laneCsv(lanes: readonly ProjectLane[]): string;
+export declare function laneSummaryMarkdown(project: Pick<ProjectResponse, "name" | "main_path" | "default_branch">, lanes: readonly ProjectLane[]): string;

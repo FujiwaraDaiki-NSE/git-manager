@@ -6,7 +6,7 @@
 
 import { fileStatusGroups } from "./file-status.mjs";
 
-export const STATUS_FILE_DIRECTORY_ALL = "all";
+export const STATUS_FILE_DIRECTORY_ALL = "/";
 export const STATUS_FILE_DIRECTORY_ROOT = ".";
 export const STATUS_FILE_EXTENSION_ALL = "all";
 export const STATUS_FILE_EXTENSION_NONE = "none";
@@ -133,6 +133,8 @@ function entryKind(entry) {
     return "unsupported";
   }
   if (entry.xy === "??") return "untracked";
+  // The API omits the source path, so a rename cannot be represented fully.
+  if (/[RC]/.test(entry.xy)) return "unsupported";
   if (conflictCodes.has(entry.xy)) return "conflict";
   if (
     (entry.xy[0] === "." || changeCodes.has(entry.xy[0]))

@@ -152,7 +152,7 @@ function StatusPane({ repo }: { repo: Repo }) {
     [entries, repo.path, visible],
   );
   const excluded = diffCommands?.excluded;
-  const hasRenamedEntry = visible.some((entry) => entry.xy.includes("R"));
+  const hasRenamedEntry = visible.some((entry) => /[RC]/.test(entry.xy));
   const exclusionParts = excluded === undefined ? [] : [
     excluded.untracked.length > 0 ? `未追跡 ${excluded.untracked.length} 件` : null,
     excluded.conflicts.length > 0 ? `競合 ${excluded.conflicts.length} 件` : null,
@@ -214,7 +214,7 @@ function StatusPane({ repo }: { repo: Repo }) {
           <div className="status-file-diff-command"><code>{diffCommands?.staged ?? "ステージ済みの差分はありません。"}</code>{diffCommands?.staged && <CopyButton value={diffCommands.staged} label="ステージ済みの差分コマンドをコピー" />}</div>
           <div className="status-file-diff-command"><code>{diffCommands?.unstaged ?? "未ステージの差分はありません。"}</code>{diffCommands?.unstaged && <CopyButton value={diffCommands.unstaged} label="未ステージの差分コマンドをコピー" />}</div>
           {exclusionParts.length > 0 && <p className="status-file-diff-note" role="status">{exclusionParts.join("、")}は差分コマンドから除外しました。未追跡ファイルはGitの差分対象外で、競合と未対応の状態は安全に対象を確定できないためです。</p>}
-          {hasRenamedEntry && <p className="status-file-diff-note" role="status">名前変更はAPIが元のパスを提供しないため、公開された現在のパスだけを差分コマンドに含めています。</p>}
+          {hasRenamedEntry && <p className="status-file-diff-note" role="status">名前変更・コピーは元のパスが未取得のため、差分コマンドから除外しています。名前変更前後の差分はターミナルで確認してください。</p>}
         </div>}
         <details className="status-file-guide"><summary>ステージと状態記号の見方</summary><div className="status-flow" aria-label="作業ディレクトリからステージ、コミットへの流れ"><div className="status-flow-node"><strong>作業ディレクトリ</strong><span>未ステージ</span><code>git diff</code></div><div className="status-flow-arrow"><code>git add</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>ステージ（index）</strong><span>ステージ済み</span><code>git diff --cached</code></div><div className="status-flow-arrow"><code>git commit</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>コミット</strong><span>履歴に保存</span></div></div><p>ステージ済みは次のコミットに含める変更、未ステージは作業ディレクトリだけにある変更です。同じファイルに両方の変更がある場合は、それぞれの絞り込みに表示します。</p><p>記号は左がステージ、右が作業ディレクトリです。M: 変更、A: 追加、D: 削除、R: 名前変更、??: 未追跡。競合はファイルを確認して解消します。</p></details>
       </>}

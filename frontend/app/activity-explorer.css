@@ -1,0 +1,130 @@
+/* Controls and lossless actions for the project activity explorer. */
+.activity-explorer-toolbar {
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.activity-explorer-toolbar label {
+  display: grid;
+  align-items: stretch;
+  gap: 5px;
+  min-width: 150px;
+}
+
+.activity-explorer-toolbar label:first-child {
+  flex: 1 1 280px;
+}
+
+.activity-explorer-toolbar label:first-child input {
+  width: 100%;
+}
+
+.activity-explorer-toolbar select,
+.activity-explorer-toolbar input[type="date"] {
+  min-height: 44px;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--control-panel-soft);
+  color: var(--control-ink);
+  padding: 10px 12px;
+  font: 12px var(--control-sans);
+}
+
+.activity-explorer-toolbar select:focus-visible,
+.activity-explorer-toolbar input[type="date"]:focus-visible {
+  outline: 2px solid var(--control-blue);
+  outline-offset: 2px;
+}
+
+.activity-explorer-toolbar .copy-control {
+  align-self: end;
+}
+
+.activity-explorer-toolbar .copy-button,
+.activity-explorer-toolbar > .subtle-button {
+  min-height: 44px;
+}
+
+.activity-explorer-date-error,
+.activity-explorer-date-note {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border-radius: 7px;
+  font: 11px/1.6 var(--control-mono);
+}
+
+.activity-explorer-date-error {
+  border: 1px solid color-mix(in srgb, var(--control-red) 32%, var(--control-border));
+  background: var(--control-red-soft);
+  color: var(--control-red);
+}
+
+.activity-explorer-date-note {
+  border-left: 2px solid var(--control-amber);
+  background: var(--control-amber-soft);
+  color: var(--control-amber);
+}
+
+/* A lifecycle label can be much longer than a normal event source. Keep it
+   inside its grid track so it never covers the subject column. */
+.activity-section .activity-list li {
+  min-width: 0;
+}
+
+.activity-section .activity-source {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.45;
+}
+
+.activity-section .activity-content,
+.activity-section .activity-content strong,
+.activity-section .activity-content span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.activity-section .activity-content strong {
+  white-space: normal;
+}
+
+@media (min-width: 601px) {
+  .activity-section .activity-list li {
+    grid-template-columns: minmax(132px, 1.1fr) minmax(0, 1.25fr) minmax(0, 3fr) auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .activity-explorer-toolbar label {
+    flex: 1 1 180px;
+  }
+
+  .activity-explorer-toolbar label:first-child {
+    flex-basis: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .activity-explorer-toolbar {
+    align-items: stretch;
+  }
+
+  .activity-explorer-toolbar label,
+  .activity-explorer-toolbar label:first-child {
+    flex: 1 1 100%;
+  }
+
+  .activity-explorer-toolbar .copy-control,
+  .activity-explorer-toolbar .copy-button,
+  .activity-explorer-toolbar > .subtle-button {
+    width: 100%;
+  }
+
+  .activity-section .activity-list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "origin": "http://127.0.0.1:4412",
+  "passed": [
+    "Activity exact author/branch, inclusive local day, invalid range, complete Markdown/CSV export, source overlap fix",
+    "Lane exact latest author, authoritative upstream filter, filtered CSV and Markdown handoff",
+    "Real changed files directory/extension, ascending and descending order, filtered CSV and literal read-only diff command",
+    "Browser SSE fixture: root/dotfile, MM independently staged/unstaged, untracked/conflict/rename exclusions, CSV formula neutralization"
+  ],
+  "errors": []
+}

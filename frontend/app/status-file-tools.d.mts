@@ -1,6 +1,6 @@
 import type { Entry } from "./types";
 
-export declare const STATUS_FILE_DIRECTORY_ALL: "all";
+export declare const STATUS_FILE_DIRECTORY_ALL: "/";
 export declare const STATUS_FILE_DIRECTORY_ROOT: ".";
 export declare const STATUS_FILE_EXTENSION_ALL: "all";
 export declare const STATUS_FILE_EXTENSION_NONE: "none";

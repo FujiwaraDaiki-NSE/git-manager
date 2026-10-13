@@ -16,6 +16,8 @@ import { homeReturnHref } from "./home-overview.mjs";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import CopyButton from "./copy-button";
+import "./activity-explorer.css";
+import "./lane-explorer.css";
 import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
@@ -23,6 +25,21 @@ import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentReportKey, agentStateLabel, agentTaskState, isExplicitAgentStatus, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
 import { parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
+import {
+  activityAuthors,
+  activityBranches,
+  activityCsv,
+  activityDateRangeError,
+  activityMarkdown,
+  encodeActivityAuthor,
+  encodeActivityBranch,
+  filterActivityDetails,
+  hasUnknownAuthor,
+  hasUnknownBranch,
+  UNKNOWN_AUTHOR_FILTER,
+  UNKNOWN_BRANCH_FILTER,
+} from "./activity-explorer-tools.mjs";
+import { encodeLaneAuthor, hasUnknownLaneAuthor, laneCsv, laneAuthors, laneMatchesAuthor, laneMatchesUpstream, laneSummaryMarkdown, laneUpstreamState, LANE_UPSTREAM_FILTERS, LANE_UPSTREAM_LABELS, UNKNOWN_LANE_AUTHOR_FILTER } from "./lane-explorer-tools.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -275,7 +292,8 @@ function commitEventForBranch(project: ProjectResponse, hash: string, branch: st
 }
 
 function LaneSummary({ lane, defaultBranch }: { lane: ProjectLane; defaultBranch: string | null }) {
-  return <><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact branch={lane.branch} task={currentLaneAgent(lane)} /></>;
+  const upstreamState = laneUpstreamState(lane);
+  return <><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><span className={`lane-sync-state lane-sync-${upstreamState}`}>{LANE_UPSTREAM_LABELS[upstreamState]}</span><AgentFact branch={lane.branch} task={currentLaneAgent(lane)} /></>;
 }
 
 function WorkLanes({
@@ -295,7 +313,12 @@ function WorkLanes({
   showMerged: boolean;
   onShowMergedChange: (value: boolean) => void;
 }) {
+  type LaneUpstreamFilter = "all" | "synced" | "ahead" | "behind" | "diverged" | "untracked" | "unknown";
+  const [authorFilter, setAuthorFilter] = useState("");
+  const [upstreamFilter, setUpstreamFilter] = useState<LaneUpstreamFilter>("all");
+  const [exportStatus, setExportStatus] = useState("");
   const normalizedQuery = normalizedSearchQuery(searchQuery);
+  const upstreamFilters = useMemo(() => LANE_UPSTREAM_FILTERS.map((id) => ({ id: id as LaneUpstreamFilter, label: LANE_UPSTREAM_LABELS[id] })), []);
   const relationLaneIds = useMemo(() => new Set(project.merge_relations.flatMap((relation) => (
     [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
   ))), [project.merge_relations]);
@@ -304,9 +327,42 @@ function WorkLanes({
     [project.lanes, relationLaneIds, showMerged, project.default_branch],
   );
   const lanes = useMemo(
-    () => sortWorkLanes(visibleLanes.filter((lane) => laneMatchesSearch(lane, normalizedQuery) && laneMatchesFilter(lane, filter)), order),
-    [filter, order, normalizedQuery, visibleLanes],
+    () => sortWorkLanes(visibleLanes.filter((lane) => (
+      laneMatchesSearch(lane, normalizedQuery)
+      && laneMatchesFilter(lane, filter)
+      && laneMatchesAuthor(lane, authorFilter)
+      && laneMatchesUpstream(lane, upstreamFilter)
+    )), order),
+    [authorFilter, filter, order, normalizedQuery, upstreamFilter, visibleLanes],
   );
+  const authors = useMemo(() => laneAuthors(visibleLanes), [visibleLanes]);
+  const includesUnknownAuthor = useMemo(() => hasUnknownLaneAuthor(visibleLanes), [visibleLanes]);
+  const handoffSummary = useMemo(() => laneSummaryMarkdown(project, lanes), [lanes, project]);
+  const activeFilters = normalizedQuery.length > 0 || filter !== "all" || authorFilter !== "" || upstreamFilter !== "all";
+  useEffect(() => {
+    setAuthorFilter("");
+    setUpstreamFilter("all");
+    setExportStatus("");
+  }, [project.id, project.main_path]);
+  useEffect(() => {
+    setExportStatus("");
+  }, [authorFilter, filter, normalizedQuery, upstreamFilter]);
+  const exportCsv = useCallback(() => {
+    if (lanes.length === 0) return;
+    const url = URL.createObjectURL(new Blob([laneCsv(lanes)], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${project.name.replace(/[^A-Za-z0-9._-]+/g, "-") || "gitdash"}-lanes.csv`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setExportStatus(`${lanes.length}件のCSV保存を開始しました`);
+  }, [lanes, project.name]);
+  const resetFilters = useCallback(() => {
+    onSearch("");
+    onFilter("all");
+    setAuthorFilter("");
+    setUpstreamFilter("all");
+  }, [onFilter, onSearch]);
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
   return (
     <section className="lanes-section" aria-labelledby="lanes-title">
@@ -318,16 +374,23 @@ function WorkLanes({
         </div>
         {mergedCount > 0 && <button className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "統合済みを折り畳む" : `統合済み・完了を表示 (${mergedCount})`}</button>}
       </div>
-      <div className="project-search-toolbar" role="search" aria-label="作業レーンを検索">
+      <div className="project-search-toolbar lane-explorer-tools" role="search" aria-label="作業レーンを検索・絞り込み">
         <label>
           <span>検索</span>
           <input aria-label="作業レーンを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="ブランチ・パス・名前" />
         </label>
         <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>クリア</button>
-        <label>並び順<select aria-label="作業一覧の並び順" value={order} onChange={(event) => onOrder(event.target.value as LaneOrder)}><option value="name">名前</option><option value="attention">要確認順</option><option value="latest">最新コミット順</option></select></label>
-        <span role="status">{lanes.length} / {visibleLanes.length} 件</span>
+        <label><span>並び順</span><select aria-label="作業一覧の並び順" value={order} onChange={(event) => onOrder(event.target.value as LaneOrder)}><option value="name">名前</option><option value="attention">要確認順</option><option value="latest">最新コミット順</option></select></label>
+        <label className="lane-explorer-author-filter"><span>最終コミット作成者（完全一致）</span><select aria-label="最終コミット作成者で絞り込み" value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)}><option value="">すべて</option>{authors.map((author) => <option key={author} value={encodeLaneAuthor(author)}>{author}</option>)}{includesUnknownAuthor && <option value={UNKNOWN_LANE_AUTHOR_FILTER}>作成者未取得</option>}</select></label>
+        <div className="lane-explorer-actions">
+          <span className="lane-explorer-status" role="status">{lanes.length} / {visibleLanes.length} 件</span>
+          <button className="subtle-button" type="button" disabled={lanes.length === 0} onClick={exportCsv}>一致するレーンをCSV保存</button>
+          {lanes.length > 0 && <CopyButton value={handoffSummary} label="一致する作業レーンの概要をコピー" />}
+          {exportStatus && <span className="lane-explorer-status" role="status">{exportStatus}</span>}
+        </div>
       </div>
       <div className="lane-filters" role="group" aria-label="作業の状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{visibleLanes.filter((lane) => laneMatchesFilter(lane, item.id)).length}</span></button>)}</div>
+      <div className="lane-explorer-upstream-filters" role="group" aria-label="upstream の同期状態で絞り込み"><span>upstream</span>{upstreamFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={upstreamFilter === item.id} onClick={() => setUpstreamFilter(item.id)}>{item.label}<span>{item.id === "all" ? visibleLanes.length : visibleLanes.filter((lane) => laneMatchesUpstream(lane, item.id)).length}</span></button>)}</div>
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
@@ -347,6 +410,7 @@ function WorkLanes({
                 <td data-label="最終コミット">
                   <time dateTime={lane.last_commit?.date ?? undefined} title={exactDate(lane.last_commit?.date)}>{relativeTime(lane.last_commit?.date)}</time>
                   <span className="table-subvalue">{exactDate(lane.last_commit?.date)}</span>
+                  <span className="table-subvalue">{lane.last_commit?.author ?? "作成者未取得"}</span>
                 </td>
                 <td className="mono-cell" data-label="既定ブランチとの差">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
                 <td className="lane-message" data-label="最新メッセージ"><span title={lane.last_commit?.subject}>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "コミット未取得"}</span>{currentLaneAgent(lane)?.summary && <small>報告: {currentLaneAgent(lane)?.summary}</small>}</td>
@@ -358,7 +422,7 @@ function WorkLanes({
           </tbody>
         </table>
       </div>
-      {lanes.length === 0 && <div className="empty-flow">{normalizedQuery ? "検索に一致する作業レーンはありません。" : "この条件に一致する作業レーンはありません。"}{(normalizedQuery || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); }}>絞り込みを解除</button>}</div>}
+      {lanes.length === 0 && <div className="empty-flow">{normalizedQuery ? "検索に一致する作業レーンはありません。" : "この条件に一致する作業レーンはありません。"}{activeFilters && <button className="subtle-button" type="button" onClick={resetFilters}>絞り込みを解除</button>}</div>}
     </section>
   );
 }
@@ -389,7 +453,6 @@ function ActivityView({
   onFilter: (filter: ActivityFilter) => void;
   onSelect: (event: ProjectEvent) => void;
 }) {
-  const normalizedQuery = normalizedSearchQuery(searchQuery);
   const unifiedEvents = useMemo(() => project.events.map((event) => ({
     ...event,
     commit_hash: event.commit_hash ?? null,
@@ -402,6 +465,18 @@ function ActivityView({
     agent_phase: event.source === "agent" ? event.phase ?? null : null,
     attention: event.source === "agent" ? event.attention ?? null : null,
   })), [project.events]);
+  const projectIdentity = `${project.id}|${project.main_path}`;
+  type ActivityLocalFilters = { key: string; authorFilter: string; branchFilter: string; startDate: string | null; endDate: string | null };
+  const emptyLocalFilters = (key: string): ActivityLocalFilters => ({ key, authorFilter: "", branchFilter: "", startDate: null, endDate: null });
+  const [localFilters, setLocalFilters] = useState<ActivityLocalFilters>(() => emptyLocalFilters(projectIdentity));
+  const activeLocalFilters = localFilters.key === projectIdentity ? localFilters : emptyLocalFilters(projectIdentity);
+  useEffect(() => {
+    if (localFilters.key !== projectIdentity) setLocalFilters(emptyLocalFilters(projectIdentity));
+  }, [localFilters.key, projectIdentity]);
+  const updateLocalFilters = (changes: Partial<Omit<ActivityLocalFilters, "key">>) => {
+    setLocalFilters((current) => ({ ...(current.key === projectIdentity ? current : emptyLocalFilters(projectIdentity)), ...changes, key: projectIdentity }));
+  };
+  const normalizedQuery = normalizedSearchQuery(searchQuery);
   const filterEvents = useMemo(() => unifiedEvents.filter((event) => {
     if (filter === "all") return true;
     if (filter === "commit") return event.type === "commit";
@@ -410,10 +485,26 @@ function ActivityView({
     if (filter === "review") return event.status === "review_required" || event.status === "reviewing" || event.agent_state === "review_required" || event.agent_state === "reviewing";
     return event.status === "waiting_for_user" || event.agent_state === "waiting_for_user";
   }), [filter, unifiedEvents]);
-  const events = useMemo(() => [...filterEvents]
+  const dateRangeError = useMemo(() => activityDateRangeError(activeLocalFilters.startDate, activeLocalFilters.endDate), [activeLocalFilters.endDate, activeLocalFilters.startDate]);
+  const detail = useMemo(() => filterActivityDetails(filterEvents, {
+    authorFilter: activeLocalFilters.authorFilter,
+    branchFilter: activeLocalFilters.branchFilter,
+    startDate: activeLocalFilters.startDate,
+    endDate: activeLocalFilters.endDate,
+  }), [activeLocalFilters.authorFilter, activeLocalFilters.branchFilter, activeLocalFilters.endDate, activeLocalFilters.startDate, filterEvents]);
+  const events = useMemo(() => detail.records
     .filter((event) => activityMatchesSearch(event, normalizedQuery))
-    .sort((a, b) => compareActivityEvents(a, b, order)), [filterEvents, normalizedQuery, order]);
-  const viewKey = JSON.stringify([project.id, project.range, normalizedQuery, filter, order]);
+    .sort((a, b) => compareActivityEvents(a, b, order)), [detail.records, normalizedQuery, order]);
+  const authors = useMemo(() => activityAuthors(unifiedEvents), [unifiedEvents]);
+  const branches = useMemo(() => activityBranches(unifiedEvents), [unifiedEvents]);
+  const includesUnknownAuthor = useMemo(() => hasUnknownAuthor(unifiedEvents), [unifiedEvents]);
+  const includesUnknownBranch = useMemo(() => hasUnknownBranch(unifiedEvents), [unifiedEvents]);
+  const hasActiveFilters = Boolean(normalizedQuery || filter !== "all" || order !== "newest" || activeLocalFilters.authorFilter || activeLocalFilters.branchFilter || activeLocalFilters.startDate || activeLocalFilters.endDate);
+  const viewKey = JSON.stringify([
+    projectIdentity, project.range, normalizedQuery, filter, order,
+    activeLocalFilters.authorFilter, activeLocalFilters.branchFilter,
+    activeLocalFilters.startDate, activeLocalFilters.endDate,
+  ]);
   const [page, setPage] = useState({ key: viewKey, limit: 100 });
   useEffect(() => { setPage({ key: viewKey, limit: 100 }); }, [viewKey]);
   const limit = page.key === viewKey ? page.limit : 100;
@@ -431,17 +522,59 @@ function ActivityView({
     nextRowRef.current = shown.length;
     setPage({ key: viewKey, limit: nextLimit });
   };
+  const resetFilters = () => {
+    onSearch("");
+    onFilter("all");
+    onOrder("newest");
+    setLocalFilters(emptyLocalFilters(projectIdentity));
+    setPage({ key: viewKey, limit: 100 });
+  };
+  const downloadCsv = () => {
+    if (!events.length) return;
+    const blob = new Blob([activityCsv(events)], { type: "text/csv;charset=utf-8" });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const safeName = project.name.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").trim();
+    link.href = href;
+    link.download = `${safeName || "gitdash"}-activity.csv`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+  };
   return (
     <section className="activity-section" aria-labelledby="activity-title">
       <div className="section-heading-row">
         <div><h3 id="activity-title">アクティビティ</h3><p className="section-copy">このプロジェクトで起きたことを、見やすい順番で確認できます。</p></div>
       </div>
-      <div className="project-search-toolbar" role="search" aria-label="アクティビティを検索">
+      <div className="project-search-toolbar activity-explorer-toolbar" role="search" aria-label="アクティビティを絞り込む">
         <label>
           <span>検索</span>
           <input aria-label="アクティビティを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="件名・概要・担当者・ブランチ" />
         </label>
         <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>クリア</button>
+        <label>
+          <span>作成者（完全一致）</span>
+          <select aria-label="作成者で完全一致の絞り込み" value={activeLocalFilters.authorFilter} onChange={(event) => updateLocalFilters({ authorFilter: event.target.value })}>
+            <option value="">すべての作成者</option>
+            {authors.map((author) => <option key={author} value={encodeActivityAuthor(author)}>{author}</option>)}
+            {includesUnknownAuthor && <option value={UNKNOWN_AUTHOR_FILTER}>作成者未取得</option>}
+          </select>
+        </label>
+        <label>
+          <span>関連ブランチ（完全一致）</span>
+          <select aria-label="関連ブランチで完全一致の絞り込み" value={activeLocalFilters.branchFilter} onChange={(event) => updateLocalFilters({ branchFilter: event.target.value })}>
+            <option value="">すべての関連ブランチ</option>
+            {branches.map((branch) => <option key={branch} value={encodeActivityBranch(branch)}>{branch}</option>)}
+            {includesUnknownBranch && <option value={UNKNOWN_BRANCH_FILTER}>ブランチ未取得</option>}
+          </select>
+        </label>
+        <label>
+          <span>開始日（ローカル）</span>
+          <input aria-describedby={dateRangeError ? "activity-date-error" : undefined} aria-invalid={Boolean(dateRangeError)} aria-label="アクティビティの開始日" type="date" value={activeLocalFilters.startDate ?? ""} onChange={(event) => updateLocalFilters({ startDate: event.target.value || null })} />
+        </label>
+        <label>
+          <span>終了日（ローカル）</span>
+          <input aria-describedby={dateRangeError ? "activity-date-error" : undefined} aria-invalid={Boolean(dateRangeError)} aria-label="アクティビティの終了日" type="date" value={activeLocalFilters.endDate ?? ""} onChange={(event) => updateLocalFilters({ endDate: event.target.value || null })} />
+        </label>
         <label>
           <span>並び順</span>
           <select aria-label="アクティビティの並び順" value={order} onChange={(event) => onOrder(event.target.value as ActivityOrder)}>
@@ -449,8 +582,13 @@ function ActivityView({
             <option value="oldest">古い順</option>
           </select>
         </label>
+        <button className="subtle-button" type="button" onClick={resetFilters} disabled={!hasActiveFilters}>条件をすべて解除</button>
+        {events.length > 0 && <CopyButton value={activityMarkdown(events)} label={`一致する${events.length}件のアクティビティをMarkdownでコピー`} />}
+        <button className="subtle-button" type="button" onClick={downloadCsv} disabled={!events.length} title={events.length ? "一致するイベントをCSVで保存" : "保存するイベントがありません"}>一致するイベントをCSV保存</button>
         <span role="status">{events.length} / {filterEvents.length} 件一致{shown.length < events.length ? ` · ${shown.length}件を表示` : ""}</span>
       </div>
+      {dateRangeError && <p className="activity-explorer-date-error" id="activity-date-error" role="alert">期間を適用できません。{dateRangeError}</p>}
+      {detail.finiteRangeUnknownDatesExcluded && detail.unknownDates > 0 && <p className="activity-explorer-date-note" role="status">日付が未取得または不正な {detail.unknownDates} 件は、指定期間に含まれると判定できないため除外しています。</p>}
       <div className="activity-filters" role="toolbar" aria-label="イベント種別">
         {activityFilters.map((item) => (
           <button className="filter-button" aria-pressed={filter === item.id} type="button" key={item.id} onClick={() => onFilter(item.id)}>
@@ -459,7 +597,7 @@ function ActivityView({
         ))}
       </div>
       {events.length === 0 ? (
-        <div className="empty-activity">{normalizedQuery ? "検索に一致するイベントはありません。" : "この条件に一致するイベントはありません。"}{(normalizedQuery || filter !== "all") && <button className="subtle-button" type="button" onClick={() => { onSearch(""); onFilter("all"); }}>絞り込みを解除</button>}</div>
+        <div className="empty-activity">{dateRangeError ? "日付範囲が無効なため、イベントを表示できません。" : normalizedQuery ? "検索に一致するイベントはありません。" : "この条件に一致するイベントはありません。"}{hasActiveFilters && <button className="subtle-button" type="button" onClick={resetFilters}>絞り込みを解除</button>}</div>
       ) : (
         <ol className="activity-list" ref={listRef}>
           {shown.map((event) => (

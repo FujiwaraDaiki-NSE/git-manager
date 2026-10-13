@@ -1,0 +1,132 @@
+/* Project-control lane filters and handoff actions. */
+.lane-explorer-tools {
+  align-items: flex-end;
+}
+
+.lane-explorer-tools label {
+  min-width: 0;
+}
+
+.lane-explorer-tools label:not(:first-child) select {
+  min-width: 170px;
+}
+
+.lane-explorer-author-filter {
+  flex: 0 1 250px;
+}
+
+.lane-explorer-author-filter select {
+  max-width: 100%;
+}
+
+.lane-explorer-actions {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: end;
+}
+
+.lane-explorer-actions .copy-control {
+  max-width: 100%;
+}
+
+.lane-explorer-status {
+  color: var(--control-muted);
+  font: 11px/1.5 var(--control-mono);
+  min-height: 18px;
+}
+
+.lane-explorer-upstream-filters {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.lane-explorer-upstream-filters > span {
+  color: var(--control-muted);
+  font-size: 11px;
+  margin-right: 3px;
+}
+
+.lane-explorer-upstream-filters button {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+}
+
+.lane-explorer-upstream-filters button > span {
+  color: var(--control-muted);
+  font: 10px var(--control-mono);
+}
+
+.lane-explorer-copy-note {
+  color: var(--control-muted);
+  font-size: 11px;
+  margin: 8px 0 0;
+}
+
+.lane-sync-state {
+  color: var(--control-muted);
+  display: inline-flex;
+  font: 10px/1.5 var(--control-mono);
+  margin: 4px 0;
+}
+
+.lane-sync-ahead,
+.lane-sync-behind,
+.lane-sync-untracked {
+  color: var(--control-amber);
+}
+
+.lane-sync-diverged,
+.lane-sync-unknown {
+  color: var(--control-red);
+}
+
+.lane-sync-synced {
+  color: var(--control-green);
+}
+
+@media (max-width: 700px) {
+  .lane-explorer-tools {
+    align-items: stretch;
+  }
+
+  .lane-explorer-tools label:not(:first-child) select,
+  .lane-explorer-author-filter {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .lane-explorer-actions {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .lane-explorer-actions > * {
+    flex: 1 1 180px;
+  }
+
+  .lane-explorer-actions .copy-control,
+  .lane-explorer-actions .copy-control button,
+  .lane-explorer-actions > button {
+    width: 100%;
+  }
+
+  .lane-explorer-upstream-filters {
+    align-items: stretch;
+  }
+
+  .lane-explorer-upstream-filters > span {
+    flex-basis: 100%;
+  }
+
+  .lane-explorer-upstream-filters button {
+    flex: 1 0 auto;
+    justify-content: center;
+  }
+}
