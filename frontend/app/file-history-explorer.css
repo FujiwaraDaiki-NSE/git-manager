@@ -1,0 +1,236 @@
+.file-history-explorer {
+  margin-top: 20px;
+  border: 1px solid var(--line, #dbe3ed);
+  border-radius: 12px;
+  background: var(--panel, #fff);
+}
+
+.file-history-explorer > summary {
+  cursor: pointer;
+  padding: 14px 16px;
+  font-weight: 700;
+}
+
+.file-history-explorer > summary span {
+  margin-left: 8px;
+  color: var(--muted, #637083);
+  font-size: 0.84em;
+  font-weight: 500;
+}
+
+.file-history-explorer-body {
+  display: grid;
+  gap: 14px;
+  padding: 0 16px 16px;
+}
+
+.file-history-heading,
+.file-history-commit-heading,
+.file-history-coverage {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.file-history-heading h3,
+.file-history-commit-heading h4 {
+  margin: 0;
+}
+
+.file-history-heading p,
+.file-history-follow-note,
+.file-history-note {
+  margin: 5px 0 0;
+  color: var(--muted, #637083);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.file-history-repo {
+  max-width: min(52%, 560px);
+  overflow: hidden;
+  color: var(--muted, #637083);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-history-inputs,
+.file-history-tools {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.file-history-inputs label:not(.file-history-follow),
+.file-history-tools label {
+  display: grid;
+  min-width: min(100%, 230px);
+  gap: 4px;
+  color: var(--muted, #637083);
+  font-size: 0.8rem;
+}
+
+.file-history-inputs input[type="text"],
+.file-history-tools input,
+.file-history-tools select {
+  min-height: 36px;
+  border: 1px solid var(--line, #c8d2df);
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.file-history-follow {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  gap: 7px;
+  color: inherit;
+  font-size: 0.9rem;
+}
+
+.file-history-follow input {
+  width: 16px;
+  height: 16px;
+}
+
+.file-history-follow-note {
+  margin-top: -4px;
+}
+
+.file-history-error {
+  margin: 0;
+  border-left: 3px solid var(--danger, #b42318);
+  padding: 9px 11px;
+  background: color-mix(in srgb, var(--danger, #b42318) 8%, transparent);
+  color: var(--danger, #b42318);
+}
+
+.file-history-coverage {
+  flex-wrap: wrap;
+  color: var(--muted, #637083);
+  font-size: 0.84rem;
+}
+
+.file-history-table-wrap {
+  overflow: auto;
+  max-width: 100%;
+  border: 1px solid var(--line, #dbe3ed);
+  border-radius: 8px;
+}
+
+.file-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 820px;
+}
+
+.file-history-table th,
+.file-history-table td {
+  border-bottom: 1px solid var(--line, #e5eaf0);
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.file-history-table th {
+  background: var(--surface, #f7f9fc);
+  color: var(--muted, #637083);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.file-history-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.file-history-hash {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.file-history-path {
+  max-width: 300px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.file-history-empty {
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed var(--line, #c8d2df);
+  color: var(--muted, #637083);
+  text-align: center;
+}
+
+.file-history-more {
+  justify-self: center;
+  border: 1px solid var(--line, #c8d2df);
+  border-radius: 7px;
+  padding: 8px 13px;
+  background: var(--surface, #f7f9fc);
+  color: inherit;
+  cursor: pointer;
+}
+
+.file-history-more:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.file-history-commit {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line, #dbe3ed);
+  padding-top: 16px;
+}
+
+.file-history-commit-heading {
+  align-items: center;
+}
+
+.file-history-commit-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.file-history-commit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted, #637083);
+}
+
+.file-history-commit-meta strong {
+  flex-basis: 100%;
+  color: inherit;
+}
+
+@media (max-width: 720px) {
+  .file-history-heading,
+  .file-history-coverage {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .file-history-repo {
+    max-width: 100%;
+  }
+
+  .file-history-inputs label:not(.file-history-follow),
+  .file-history-tools label {
+    width: 100%;
+  }
+
+  .file-history-inputs .primary-action,
+  .file-history-tools .subtle-button {
+    width: 100%;
+  }
+}
+
