@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
 import PatchView from "./patch-view";
+import InvestigationPresets, { type ComparisonPresetValues } from "./investigation-presets";
 import type { Numstat } from "./types";
 import {
   buildComparisonFilesCsv,
@@ -110,6 +111,7 @@ export default function CommitCompare({ path }: CommitCompareProps) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [downloadStatus, setDownloadStatus] = useState("");
+  const [open, setOpen] = useState(false);
   const requestSequence = useRef(0);
 
   useEffect(() => {
@@ -124,6 +126,7 @@ export default function CommitCompare({ path }: CommitCompareProps) {
     setValidationError(null);
     setRetry(0);
     setDownloadStatus("");
+    setOpen(false);
   }, [path]);
 
   useEffect(() => {
@@ -173,6 +176,14 @@ export default function CommitCompare({ path }: CommitCompareProps) {
     setRetry((value) => value + 1);
   };
 
+  const applyPreset = (values: ComparisonPresetValues) => {
+    setBase(values.base);
+    setTarget(values.target);
+    setMode(values.mode);
+    setValidationError(null);
+    setOpen(true);
+  };
+
   const exportCsv = () => {
     if (data === null) return;
     try {
@@ -199,10 +210,16 @@ export default function CommitCompare({ path }: CommitCompareProps) {
 
   const resultIsCurrent = sameRequest({ base: base.trim(), target: target.trim(), mode }, loadedRequest);
   return (
-    <details className="commit-compare">
+    <details className="commit-compare" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary id={titleId}>2地点を比較する</summary>
       <div className="commit-compare-body">
         <p className="commit-compare-intro">base と target を明示して、読み取り専用のコミット差分を確認します。ブランチ名の推測や自動fetchは行いません。</p>
+        <InvestigationPresets
+          kind="compare"
+          repoPath={path}
+          values={{ base, target, mode }}
+          onApply={(values) => applyPreset(values as ComparisonPresetValues)}
+        />
         <form className="commit-compare-form" onSubmit={runComparison}>
           <label>
             <span>base（比較元）</span>

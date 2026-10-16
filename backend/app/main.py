@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app import compare, file_history, stashes
+from app import compare, file_history, stashes, tags, reflog
 from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
@@ -156,6 +156,22 @@ def _compare_sync(host_path: str, repo: str, base: str, target: str, mode: str) 
 def _file_history_sync(host_path: str, repo: str, revision: str, file: str, follow: bool, offset: int) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return file_history.get_file_history(repo, revision, file, follow, offset)
+
+
+
+def _tags_sync(host_path: str, repo: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return tags.get_tags(repo)
+
+
+def _tag_sync(host_path: str, repo: str, name: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return tags.get_tag(repo, name)
+
+
+def _reflog_sync(host_path: str, repo: str, ref: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return reflog.get_reflog(repo, ref)
 
 
 def _get_project_sync(
@@ -1240,6 +1256,41 @@ async def read_repo_file_history(path: str, revision: str, file: str, follow: bo
         raise HTTPException(status_code=422, detail=str(error)) from error
     if result is None:
         raise HTTPException(status_code=502, detail="ファイル履歴を取得できませんでした。参照先と接続状態を確認してください")
+    return result
+
+
+@app.get("/api/repo/tags")
+async def list_repo_tags(path: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    result = await asyncio.get_running_loop().run_in_executor(pool, _tags_sync, path, repo)
+    if result is None:
+        raise HTTPException(status_code=502, detail="タグ一覧を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/tag")
+async def read_repo_tag(path: str, name: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _tag_sync, path, repo, name)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="タグの内容を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/reflog")
+async def read_repo_reflog(path: str, ref: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _reflog_sync, path, repo, ref)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="参照の移動履歴を取得できませんでした")
     return result
 
 @app.get("/api/stream")

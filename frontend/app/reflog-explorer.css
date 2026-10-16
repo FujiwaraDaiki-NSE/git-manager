@@ -1,0 +1,244 @@
+.reflog-explorer {
+  margin-top: 18px;
+  border: 1px solid var(--control-border, var(--rule));
+  border-radius: var(--control-radius, 7px);
+  background: var(--control-panel, var(--panel));
+  box-shadow: var(--control-shadow, none);
+}
+
+.reflog-explorer > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  color: var(--control-ink, var(--ink));
+  font: 700 13px/1.4 var(--control-sans, var(--sans));
+}
+
+.reflog-explorer > summary span {
+  color: var(--control-muted, var(--muted));
+  font: 10px var(--control-mono, var(--mono));
+  font-weight: 400;
+}
+
+.reflog-explorer > summary::marker { color: var(--control-blue, var(--accent)); }
+
+.reflog-explorer-body {
+  border-top: 1px solid var(--control-border, var(--rule));
+  padding: 16px;
+}
+
+.reflog-explorer-heading,
+.reflog-explorer-commit-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.reflog-explorer-heading h3,
+.reflog-explorer-commit-heading h4 {
+  margin: 0;
+  color: var(--control-ink, var(--ink));
+  font: 700 14px/1.4 var(--control-sans, var(--sans));
+}
+
+.reflog-explorer-heading p {
+  margin: 5px 0 0;
+  color: var(--control-muted, var(--muted));
+  font: 11px/1.6 var(--control-mono, var(--mono));
+}
+
+.reflog-explorer-truncated,
+.reflog-explorer-state,
+.reflog-explorer-empty,
+.reflog-explorer-note,
+.reflog-explorer-error {
+  margin: 12px 0 0;
+  color: var(--control-muted, var(--muted));
+  font: 11px/1.6 var(--control-mono, var(--mono));
+}
+
+.reflog-explorer-truncated {
+  padding: 8px 10px;
+  border-left: 2px solid var(--control-amber, var(--c-behind));
+  background: var(--control-amber-soft, var(--hover));
+  color: var(--control-amber, var(--c-behind));
+}
+
+.reflog-explorer-run {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--control-border, var(--rule));
+  border-radius: 8px;
+  background: var(--control-panel-soft, var(--hover));
+}
+
+.reflog-explorer-run label,
+.reflog-explorer-tools label {
+  display: grid;
+  gap: 5px;
+  min-width: 150px;
+  color: var(--control-muted, var(--muted));
+  font: 10px var(--control-mono, var(--mono));
+}
+
+.reflog-explorer-run label { flex: 1 1 360px; }
+
+.reflog-explorer-run input,
+.reflog-explorer-tools input {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--control-border, var(--rule));
+  border-radius: 7px;
+  background: var(--control-panel, var(--panel));
+  color: var(--control-ink, var(--ink));
+  font: 12px var(--control-sans, var(--sans));
+}
+
+.reflog-explorer-run-button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--control-blue, var(--accent));
+  border-radius: 7px;
+  background: var(--control-blue, var(--accent));
+  color: #fff;
+  cursor: pointer;
+  font: 700 11px var(--control-sans, var(--sans));
+}
+
+.reflog-explorer-run-button:disabled { opacity: .55; cursor: not-allowed; }
+
+.reflog-explorer-tools {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--control-border, var(--rule));
+  border-radius: 8px;
+  background: var(--control-panel-soft, var(--hover));
+}
+
+.reflog-explorer-search { flex: 1 1 300px; }
+
+.reflog-explorer-tools input { min-width: 0; }
+
+.reflog-explorer-tools .subtle-button,
+.reflog-explorer-tools .copy-control { align-self: end; }
+
+.reflog-explorer-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--control-red, var(--c-conflict)) 32%, var(--control-border, var(--rule)));
+  border-radius: 7px;
+  background: var(--control-red-soft, var(--hover));
+  color: var(--control-red, var(--c-conflict));
+}
+
+.reflog-explorer-date-error {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--control-red, var(--c-conflict)) 32%, var(--control-border, var(--rule)));
+  border-radius: 7px;
+  background: var(--control-red-soft, var(--hover));
+  color: var(--control-red, var(--c-conflict));
+  font: 11px/1.6 var(--control-mono, var(--mono));
+}
+
+.reflog-explorer-coverage {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 10px 0;
+  color: var(--control-muted, var(--muted));
+  font: 10px var(--control-mono, var(--mono));
+}
+
+.reflog-explorer-coverage span:first-child { color: var(--control-ink, var(--ink)); font-weight: 700; }
+
+.reflog-explorer-table-wrap {
+  position: relative;
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--control-border, var(--rule));
+  border-radius: 8px;
+}
+
+.reflog-explorer-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font: 11px/1.45 var(--control-mono, var(--mono));
+}
+
+.reflog-explorer-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--control-border, var(--rule));
+  background: var(--control-panel-soft, var(--hover));
+  color: var(--control-muted, var(--muted));
+  font-size: 10px;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reflog-explorer-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--control-border, var(--rule));
+  color: var(--control-ink, var(--ink));
+  vertical-align: top;
+}
+
+.reflog-explorer-table tbody tr:last-child td { border-bottom: 0; }
+.reflog-explorer-table tbody tr:hover,
+.reflog-explorer-table tbody tr.is-selected { background: var(--control-blue-soft, var(--selected)); }
+.reflog-explorer-table td:first-child { color: var(--control-muted, var(--muted)); white-space: nowrap; }
+
+.reflog-explorer-message { max-width: 420px; overflow-wrap: anywhere; }
+.reflog-explorer-message strong,
+.reflog-explorer-message span { display: block; }
+.reflog-explorer-message strong { color: var(--control-blue, var(--accent)); font-weight: 700; }
+
+.reflog-explorer-hash { display: flex; align-items: flex-start; gap: 7px; min-width: 150px; }
+.reflog-explorer-hash code { padding-top: 6px; color: var(--control-blue, var(--accent)); }
+.reflog-explorer-hash .copy-button { position: relative; min-height: 27px; padding: 3px 6px; }
+.reflog-explorer-hash .copy-button > span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.reflog-explorer-commit {
+  margin-top: 14px;
+  border-top: 1px solid var(--control-border, var(--rule));
+  padding-top: 14px;
+}
+
+.reflog-explorer-commit-heading code { display: block; margin-top: 5px; overflow-wrap: anywhere; color: var(--control-blue, var(--accent)); }
+.reflog-explorer-commit-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0; color: var(--control-muted, var(--muted)); font: 11px var(--control-mono, var(--mono)); }
+.reflog-explorer-commit-meta strong { flex-basis: 100%; color: var(--control-ink, var(--ink)); overflow-wrap: anywhere; }
+.reflog-explorer-note { padding: 9px 12px; border-left: 2px solid var(--control-amber, var(--c-behind)); background: var(--control-amber-soft, var(--hover)); }
+
+@media (max-width: 760px) {
+  .reflog-explorer-heading,
+  .reflog-explorer-commit-heading { display: block; }
+  .reflog-explorer-truncated { margin-top: 10px; }
+  .reflog-explorer-run { align-items: stretch; }
+  .reflog-explorer-run label { flex-basis: 100%; }
+  .reflog-explorer-run-button { width: 100%; }
+  .reflog-explorer-tools { align-items: stretch; }
+  .reflog-explorer-tools label,
+  .reflog-explorer-tools .subtle-button,
+  .reflog-explorer-tools .copy-control { flex: 1 1 150px; }
+  .reflog-explorer-tools .reflog-explorer-search { flex-basis: 100%; }
+  .reflog-explorer-tools .copy-button { width: 100%; justify-content: center; }
+}

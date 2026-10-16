@@ -1,0 +1,10 @@
+{
+  "origin": "http://127.0.0.1:4412",
+  "fixture": "/home/solution2024/gitdash-ui-investigation-LvoPRm",
+  "passed": [
+    "Tag inventory, exact name search, lightweight/annotated filter, annotation and peeled commit, sorting, filtered CSV",
+    "Reflog explicit ref, search, inclusive local date/error, CSV and target commit detail",
+    "Named investigation save/reopen, JSON backup/restore and invalid import preservation, compare/history URL prefill without execution, invalid URL diagnostics"
+  ],
+  "errors": []
+}

@@ -54,3 +54,27 @@ def test_unknown_repository_and_required_parameters(investigation):
     assert client.get('/api/repo/stash', params={'path': path, 'hash': '--help'}).status_code == 422
     assert client.get('/api/repo/compare', params={'path': path, 'base': '--help', 'target': target, 'mode': 'direct'}).status_code == 422
     assert client.get('/api/repo/file-history', params={'path': path, 'revision': target, 'file': '../outside', 'follow': False, 'offset': 0}).status_code == 422
+
+
+def test_reference_investigation_endpoints_preserve_git_state(investigation):
+    client, path, base, target, stash, git = investigation
+    git('tag', 'v1', base)
+    git('tag', '-a', 'v2', '-m', 'Release notes', target)
+    before = (git('status', '--porcelain=v2'), git('show-ref'), git('reflog', '--format=%H:%gs'))
+    response = client.get('/api/repo/tags', params={'path': path})
+    assert response.status_code == 200
+    assert 'v1' in response.text and 'v2' in response.text
+    response = client.get('/api/repo/tag', params={'path': path, 'name': 'v2'})
+    assert response.status_code == 200
+    assert 'Release notes' in response.text
+    response = client.get('/api/repo/reflog', params={'path': path, 'ref': 'HEAD'})
+    assert response.status_code == 200
+    assert 'second' in response.text
+    assert (git('status', '--porcelain=v2'), git('show-ref'), git('reflog', '--format=%H:%gs')) == before
+    for endpoint, params in [('tags', {}), ('tag', {'name': 'v2'}), ('reflog', {'ref': 'HEAD'})]:
+        assert client.get(f'/api/repo/{endpoint}', params={'path': '/unregistered', **params}).status_code == 404
+        if params:
+            assert client.get(f'/api/repo/{endpoint}', params={'path': path}).status_code == 422
+    assert client.get('/api/repo/tag', params={'path': path, 'name': '--help'}).status_code == 404
+    assert client.get('/api/repo/tag', params={'path': path, 'name': '../bad'}).status_code == 422
+    assert client.get('/api/repo/reflog', params={'path': path, 'ref': '--all'}).status_code == 422

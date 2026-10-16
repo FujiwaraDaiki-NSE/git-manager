@@ -2,6 +2,8 @@
 
 import PatchView from "./patch-view";
 import StashExplorer from "./stash-explorer";
+import TagExplorer from "./tag-explorer";
+import ReflogExplorer from "./reflog-explorer";
 import CommitCompare from "./commit-compare";
 import FileHistoryExplorer from "./file-history-explorer";
 import WorktreeExplorer from "./worktree-explorer";
@@ -644,7 +646,7 @@ function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectRes
         <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
       <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">ブランチ状態不明（報告未取得）</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
-      <div className="info-subsection"><h4>Gitの変更を調べる</h4><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
+      <div className="info-subsection"><h4>Gitの変更を調べる</h4><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
       <WorktreeExplorer project={project} onOpenGit={onOpenGit} onSelectLane={onSelectLane} />
       <PrExplorer project={project} />
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>

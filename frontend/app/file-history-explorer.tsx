@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
 import PatchView from "./patch-view";
+import InvestigationPresets, { type FileHistoryPresetValues } from "./investigation-presets";
 import {
   encodeFileHistoryAuthor,
   fileHistoryAuthors,
@@ -183,6 +184,7 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
     setError(null);
     setExportStatus("");
     setSelectedHash(null);
+    setOpen(false);
   }, [path]);
 
   // Editing the investigation inputs also invalidates the current page. This
@@ -280,6 +282,15 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
     setExportStatus("");
   };
 
+  const applyPreset = (values: FileHistoryPresetValues) => {
+    setRevision(values.revision);
+    setFile(values.file);
+    setFollow(values.follow);
+    setQuery("");
+    setAuthorFilter("");
+    setOpen(true);
+  };
+
   const hasFilters = query.trim() !== "" || authorFilter !== "";
   const canRun = revision.trim() !== "" && file.trim() !== "" && state !== "loading";
 
@@ -293,6 +304,13 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
           </div>
           <code className="file-history-repo" title={path}>{path}</code>
         </div>
+
+        <InvestigationPresets
+          kind="file-history"
+          repoPath={path}
+          values={{ revision, file, follow }}
+          onApply={(values) => applyPreset(values as FileHistoryPresetValues)}
+        />
 
         <div className="file-history-inputs" role="group" aria-label="ファイル履歴の対象">
           <label><span>リビジョン（必須）</span><input type="text" value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="HEAD、ブランチ名、完全ハッシュ" aria-label="ファイル履歴のリビジョン" /></label>
