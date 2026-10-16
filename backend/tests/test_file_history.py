@@ -1,8 +1,9 @@
 import subprocess
 
 import pytest
+from fastapi.testclient import TestClient
 
-from app import file_history
+from app import file_history, main
 
 
 def git(repo, *args):
@@ -102,6 +103,67 @@ def test_pagination_is_bounded_and_uses_pinned_hash(tmp_path):
     assert second["has_more"] is False
     assert second["next_offset"] is None
     assert {row["hash"] for row in first["commits"]}.isdisjoint(row["hash"] for row in second["commits"])
+
+
+def test_pagination_limit_is_explicit_through_api(tmp_path, monkeypatch):
+    configure(tmp_path)
+    path = "bounded.txt"
+    for index in range(5):
+        commit_file(tmp_path, path, f"{index}\n", f"commit {index}")
+    head = git(tmp_path, "rev-parse", "HEAD")
+    monkeypatch.setattr(file_history, "PAGE_SIZE", 2)
+    monkeypatch.setattr(file_history, "MAX_OFFSET", 2)
+
+    direct = file_history.get_file_history(str(tmp_path), head, path, False, 2)
+    assert direct is not None
+    assert len(direct["commits"]) == 2
+    assert direct["has_more"] is True
+    assert direct["next_offset"] is None
+    assert direct["limit_reached"] is True
+
+    monkeypatch.setattr(main, "STATE", {str(tmp_path): {}})
+    monkeypatch.setattr(main.paths, "to_container", lambda value: value)
+    response = TestClient(main.app).get(
+        "/api/repo/file-history",
+        params={"path": str(tmp_path), "revision": head, "file": path, "follow": False, "offset": 2},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["has_more"] is True
+    assert body["next_offset"] is None
+    assert body["limit_reached"] is True
+
+
+def test_follow_pagination_keeps_history_across_multiple_renames(tmp_path):
+    configure(tmp_path)
+    current = "name-0.txt"
+    commit_file(tmp_path, current, "base\n0\n", "commit 0")
+    for index in range(1, 221):
+        if index in {60, 160}:
+            renamed = f"name-{index}.txt"
+            git(tmp_path, "mv", "--", current, renamed)
+            current = renamed
+        target = tmp_path / current
+        target.write_text(f"base\n{index}\n", encoding="utf-8")
+        git(tmp_path, "add", "--", current)
+        git(tmp_path, "commit", "-qm", f"commit {index}")
+    head = git(tmp_path, "rev-parse", "HEAD")
+
+    pages = []
+    offset = 0
+    while True:
+        page = file_history.get_file_history(str(tmp_path), head, current, True, offset)
+        assert page is not None
+        pages.extend(page["commits"])
+        if not page["has_more"]:
+            break
+        offset = page["next_offset"]
+    assert len(pages) == 221
+    assert len({row["hash"] for row in pages}) == 221
+    assert pages[60]["old_path"] == "name-60.txt"
+    assert pages[61]["path"] == "name-60.txt"
+    assert pages[160]["old_path"] == "name-0.txt"
+    assert pages[161]["path"] == "name-0.txt"
 
 
 def test_paths_and_revisions_cannot_be_used_as_git_options(tmp_path):

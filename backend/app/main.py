@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app import compare, file_history, stashes
 from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
@@ -134,6 +135,27 @@ def _get_branch_history_sync(host_path: str, repo: str, heads: list[str], offset
 def _get_branches_sync(host_path: str, repo: str) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return detail.get_branches(repo)
+
+
+
+def _read_stashes_sync(host_path: str, repo: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return stashes.get_stashes(repo)
+
+
+def _read_stash_sync(host_path: str, repo: str, commit_hash: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return stashes.get_stash(repo, commit_hash)
+
+
+def _compare_sync(host_path: str, repo: str, base: str, target: str, mode: str) -> dict[str, Any]:
+    with _repo_lock(host_path):
+        return compare.get_comparison(repo, base, target, mode)
+
+
+def _file_history_sync(host_path: str, repo: str, revision: str, file: str, follow: bool, offset: int) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return file_history.get_file_history(repo, revision, file, follow, offset)
 
 
 def _get_project_sync(
@@ -1174,6 +1196,51 @@ async def get_repo_branches(path: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail="ブランチ一覧を取得できませんでした")
     return result
 
+
+
+@app.get("/api/repo/stashes")
+async def list_repo_stashes(path: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    result = await asyncio.get_running_loop().run_in_executor(pool, _read_stashes_sync, path, repo)
+    if result is None:
+        raise HTTPException(status_code=502, detail="stash一覧を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/stash")
+async def read_repo_stash(path: str, hash: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    if not stashes.valid_hash(hash):
+        raise HTTPException(status_code=422, detail="stashは完全なコミットハッシュで指定してください")
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _read_stash_sync, path, repo, hash)
+    except stashes.StashNotFound as error:
+        raise HTTPException(status_code=404, detail="stashが見つかりません。一覧を更新してください") from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="stashの内容を取得できませんでした。一覧を更新して確認してください")
+    return result
+
+
+@app.get("/api/repo/compare")
+async def compare_repo_commits(path: str, base: str, target: str, mode: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        return await asyncio.get_running_loop().run_in_executor(pool, _compare_sync, path, repo, base, target, mode)
+    except compare.ComparisonError as error:
+        status = 502 if error.code == "git_unavailable" else 422 if error.code.startswith("invalid_") else 409
+        raise HTTPException(status_code=status, detail=str(error)) from error
+
+
+@app.get("/api/repo/file-history")
+async def read_repo_file_history(path: str, revision: str, file: str, follow: bool, offset: int = Query(..., ge=0)) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _file_history_sync, path, repo, revision, file, follow, offset)
+    except file_history.FileHistoryInputError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="ファイル履歴を取得できませんでした。参照先と接続状態を確認してください")
+    return result
 
 @app.get("/api/stream")
 async def stream() -> StreamingResponse:

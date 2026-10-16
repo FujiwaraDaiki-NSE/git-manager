@@ -14,6 +14,7 @@ from typing import Any
 from app import gitinfo
 
 PAGE_SIZE = 100
+MAX_OFFSET = 10_000
 _HASH_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
@@ -152,8 +153,8 @@ def get_file_history(
     validate_file_path(file)
     if not isinstance(follow, bool):
         raise FileHistoryInputError("follow は true または false で指定してください")
-    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
-        raise FileHistoryInputError("offset は 0 以上の整数で指定してください")
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0 or offset > MAX_OFFSET:
+        raise FileHistoryInputError(f"offset は 0 以上 {MAX_OFFSET} 以下の整数で指定してください")
 
     pinned_hash = _resolve_revision(repo, revision)
     if pinned_hash is None:
@@ -169,11 +170,15 @@ def get_file_history(
         "--name-status",
         "-z",
         f"--format={format_spec}",
-        f"--skip={offset}",
-        f"--max-count={PAGE_SIZE + 1}",
     ]
     if follow:
+        # ``--skip`` counts before Git's rename traversal has recovered the
+        # earlier path, so a page after a rename can appear empty.  Read the
+        # bounded prefix from the pinned tip and slice it locally instead.
+        args.append(f"--max-count={offset + PAGE_SIZE + 1}")
         args.append("--follow")
+    else:
+        args.extend([f"--skip={offset}", f"--max-count={PAGE_SIZE + 1}"])
     # ``--`` ends revisions, while ``--literal-pathspecs`` also disables
     # pathspec magic and globbing.  Keep both guarantees: a filename such as
     # ``:(glob)*`` or ``[abc].txt`` must remain one literal path.
@@ -184,8 +189,14 @@ def get_file_history(
     commits = _parse_log(raw)
     if commits is None:
         return None
-    has_more = len(commits) > PAGE_SIZE
-    commits = commits[:PAGE_SIZE]
+    if follow:
+        has_more = len(commits) > offset + PAGE_SIZE
+        commits = commits[offset:offset + PAGE_SIZE]
+    else:
+        has_more = len(commits) > PAGE_SIZE
+        commits = commits[:PAGE_SIZE]
+    limit_reached = has_more and offset + PAGE_SIZE > MAX_OFFSET
+    next_offset = None if limit_reached else offset + PAGE_SIZE if has_more else None
     return {
         "commits": commits,
         "file": file,
@@ -194,7 +205,8 @@ def get_file_history(
         "follow": follow,
         "offset": offset,
         "has_more": has_more,
-        "next_offset": offset + PAGE_SIZE if has_more else None,
+        "next_offset": next_offset,
+        "limit_reached": limit_reached,
     }
 
 

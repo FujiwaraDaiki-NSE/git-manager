@@ -39,6 +39,7 @@ type FileHistoryPage = {
   offset: number;
   has_more: boolean;
   next_offset: number | null;
+  limit_reached: boolean;
 };
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -153,6 +154,7 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [pinnedHash, setPinnedHash] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [limitReached, setLimitReached] = useState(false);
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState("");
@@ -176,6 +178,7 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
     setNextOffset(null);
     setPinnedHash(null);
     setHasMore(false);
+    setLimitReached(false);
     setState("idle");
     setError(null);
     setExportStatus("");
@@ -193,6 +196,7 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
     setNextOffset(null);
     setPinnedHash(null);
     setHasMore(false);
+    setLimitReached(false);
     setState("idle");
     setError(null);
     setExportStatus("");
@@ -207,6 +211,16 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
   const load = async (offset: number, initial: boolean) => {
     if (state === "loading" && initial === false) return;
     if (!revision || !file) return;
+    let selectedRevision: string;
+    if (initial) {
+      selectedRevision = revision;
+    } else if (pinnedHash === null) {
+      setError("次のページを取得する固定リビジョンがありません。最初から履歴を取得してください。");
+      setState("error");
+      return;
+    } else {
+      selectedRevision = pinnedHash;
+    }
     const requestKey = activeKey;
     if (requestKey === null) return;
     requestControllerRef.current?.abort();
@@ -220,9 +234,9 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
       setNextOffset(null);
       setPinnedHash(null);
       setHasMore(false);
+      setLimitReached(false);
       setSelectedHash(null);
     }
-    const selectedRevision = initial ? revision : pinnedHash || revision;
     const params = fileHistoryQuery(path, selectedRevision, file, follow, offset);
     try {
       const response = await fetch(`/api/repo/file-history?${params}`, { cache: "no-store", signal: controller.signal });
@@ -237,6 +251,7 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
       setPinnedHash(page.pinned_hash);
       setNextOffset(page.next_offset);
       setHasMore(page.has_more);
+      setLimitReached(page.limit_reached);
       setState("ready");
     } catch (caught: unknown) {
       if (controller.signal.aborted || requestKeyRef.current !== requestKey) return;
@@ -296,7 +311,7 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
             <button type="button" className="subtle-button" disabled={filtered.length === 0} onClick={() => downloadCsv(filtered, setExportStatus)}>一致する履歴をCSV保存</button>
             {filtered.length > 0 && <CopyButton value={fileHistoryHashList(filtered)} label="一致するコミットのハッシュをコピー" />}
           </div>
-          <div className="file-history-coverage" role="status"><span>{filtered.length} / {records.length} 件を表示</span><span>{follow ? "名前変更を追跡中" : "入力パスのみ"}</span><span>{hasMore ? "追加ページあり" : "すべて取得済み"}</span>{exportStatus && <span>{exportStatus}</span>}</div>
+          <div className="file-history-coverage" role="status"><span>{filtered.length} / {records.length} 件を表示</span><span>{follow ? "名前変更を追跡中" : "入力パスのみ"}</span><span>{limitReached ? "取得上限に達しました。残りの履歴はターミナルで確認してください。" : hasMore ? "追加ページあり" : "すべて取得済み"}</span>{exportStatus && <span>{exportStatus}</span>}</div>
           {filtered.length === 0 ? <p className="file-history-empty" role="status">{records.length === 0 ? "一致するコミットはありません。" : "条件に一致する取得済み履歴はありません。"}</p> : <div className="file-history-table-wrap" role="region" aria-label="ファイル履歴" tabIndex={0}><table className="file-history-table"><thead><tr><th>ハッシュ</th><th>件名</th><th>作成者</th><th>日時</th><th>変更</th><th>パス</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{filtered.map((record, index) => <tr key={recordKey(record, index)}><td className="file-history-hash"><code title={record.hash}>{shortHash(record.hash)}</code><CopyButton value={record.hash} label={`${shortHash(record.hash)} をコピー`} /></td><td>{record.subject || "件名未取得"}</td><td>{record.author || "作成者未取得"}</td><td><time dateTime={record.date || undefined}>{exactDate(record.date)}</time></td><td>{statusLabel(record.status)}</td><td className="file-history-path" title={displayedPath(record)}>{displayedPath(record)}</td><td><button type="button" className="table-action" onClick={() => setSelectedHash(record.hash)}>コミットを表示</button></td></tr>)}</tbody></table></div>}
           {hasMore && nextOffset !== null && <button type="button" className="file-history-more" onClick={loadMore} disabled={state === "loading"}>{state === "loading" ? "追加履歴を取得中…" : "さらに履歴を取得"}</button>}
           {selectedHash && <CommitDetailPane key={selectedHash} path={path} hash={selectedHash} />}

@@ -1,0 +1,10 @@
+{
+  "origin": "http://127.0.0.1:4412",
+  "fixture": "/home/solution2024/gitdash-ui-oct16-amkc948t",
+  "passed": [
+    "Stash inventory, subject/hash search, tracked and untracked inspection, immutable read-only command copy",
+    "Direct comparison, reverse direction, unique merge-base mode, immutable command, CSV and raw patch download, explicit invalid-ref error",
+    "Path history, follow renames across old name, exact author filter, CSV export, commit detail and responsive dark view"
+  ],
+  "errors": []
+}

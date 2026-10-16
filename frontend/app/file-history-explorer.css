@@ -1,8 +1,8 @@
 .file-history-explorer {
   margin-top: 20px;
-  border: 1px solid var(--line, #dbe3ed);
+  border: 1px solid var(--control-border);
   border-radius: 12px;
-  background: var(--panel, #fff);
+  background: var(--control-panel);
 }
 
 .file-history-explorer > summary {
@@ -13,7 +13,7 @@
 
 .file-history-explorer > summary span {
   margin-left: 8px;
-  color: var(--muted, #637083);
+  color: var(--control-muted);
   font-size: 0.84em;
   font-weight: 500;
 }
@@ -42,7 +42,7 @@
 .file-history-follow-note,
 .file-history-note {
   margin: 5px 0 0;
-  color: var(--muted, #637083);
+  color: var(--control-muted);
   font-size: 0.9rem;
   line-height: 1.55;
 }
@@ -50,7 +50,7 @@
 .file-history-repo {
   max-width: min(52%, 560px);
   overflow: hidden;
-  color: var(--muted, #637083);
+  color: var(--control-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -68,7 +68,7 @@
   display: grid;
   min-width: min(100%, 230px);
   gap: 4px;
-  color: var(--muted, #637083);
+  color: var(--control-muted);
   font-size: 0.8rem;
 }
 
@@ -76,10 +76,10 @@
 .file-history-tools input,
 .file-history-tools select {
   min-height: 36px;
-  border: 1px solid var(--line, #c8d2df);
+  border: 1px solid var(--control-border);
   border-radius: 7px;
   padding: 7px 9px;
-  background: var(--surface, #fff);
+  background: var(--control-panel-soft);
   color: inherit;
   font: inherit;
 }
@@ -104,22 +104,22 @@
 
 .file-history-error {
   margin: 0;
-  border-left: 3px solid var(--danger, #b42318);
+  border-left: 3px solid var(--control-red);
   padding: 9px 11px;
-  background: color-mix(in srgb, var(--danger, #b42318) 8%, transparent);
-  color: var(--danger, #b42318);
+  background: color-mix(in srgb, var(--control-red) 8%, transparent);
+  color: var(--control-red);
 }
 
 .file-history-coverage {
   flex-wrap: wrap;
-  color: var(--muted, #637083);
+  color: var(--control-muted);
   font-size: 0.84rem;
 }
 
 .file-history-table-wrap {
   overflow: auto;
   max-width: 100%;
-  border: 1px solid var(--line, #dbe3ed);
+  border: 1px solid var(--control-border);
   border-radius: 8px;
 }
 
@@ -131,15 +131,15 @@
 
 .file-history-table th,
 .file-history-table td {
-  border-bottom: 1px solid var(--line, #e5eaf0);
+  border-bottom: 1px solid var(--control-border);
   padding: 9px 10px;
   text-align: left;
   vertical-align: top;
 }
 
 .file-history-table th {
-  background: var(--surface, #f7f9fc);
-  color: var(--muted, #637083);
+  background: var(--control-panel-soft);
+  color: var(--control-muted);
   font-size: 0.8rem;
   white-space: nowrap;
 }
@@ -164,17 +164,17 @@
 .file-history-empty {
   margin: 0;
   padding: 18px;
-  border: 1px dashed var(--line, #c8d2df);
-  color: var(--muted, #637083);
+  border: 1px dashed var(--control-border);
+  color: var(--control-muted);
   text-align: center;
 }
 
 .file-history-more {
   justify-self: center;
-  border: 1px solid var(--line, #c8d2df);
+  border: 1px solid var(--control-border);
   border-radius: 7px;
   padding: 8px 13px;
-  background: var(--surface, #f7f9fc);
+  background: var(--control-panel-soft);
   color: inherit;
   cursor: pointer;
 }
@@ -187,7 +187,7 @@
 .file-history-commit {
   display: grid;
   gap: 10px;
-  border-top: 1px solid var(--line, #dbe3ed);
+  border-top: 1px solid var(--control-border);
   padding-top: 16px;
 }
 
@@ -204,7 +204,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  color: var(--muted, #637083);
+  color: var(--control-muted);
 }
 
 .file-history-commit-meta strong {
@@ -234,3 +234,8 @@
   }
 }
 
+
+.file-history-explorer-body, .file-history-commit { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.file-history-explorer-body > *, .file-history-commit > * { min-width: 0; }
+.file-history-table-wrap { position: relative; }
+.file-history-inputs input[type="text"], .file-history-tools input, .file-history-tools select { min-width: 0; max-width: 100%; }

@@ -1,0 +1,52 @@
+// Explicit env: PLAYWRIGHT_MODULE, GITDASH_TEST_ORIGIN, GITDASH_TEST_OUTPUT, GITDASH_TEST_FIXTURE.
+const assert=require('node:assert/strict'),fs=require('node:fs/promises');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE);
+(async()=>{
+ const fixture=JSON.parse(await fs.readFile(process.env.GITDASH_TEST_FIXTURE,'utf8'));
+ const origin=process.env.GITDASH_TEST_ORIGIN,output=process.env.GITDASH_TEST_OUTPUT;assert.ok(origin&&output);
+ const browser=await chromium.launch({headless:true});const ctx=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write'],timezoneId:'Asia/Tokyo'});
+ const page=await ctx.newPage();page.setDefaultTimeout(20000);const errors=[],passed=[];page.on('pageerror',e=>errors.push(e.message));
+ const clip=()=>page.evaluate(()=>navigator.clipboard.readText());
+ const download=async(scope,name)=>{const promise=page.waitForEvent('download');await scope.getByRole('button',{name,exact:true}).click();return fs.readFile(await(await promise).path(),'utf8');};
+ const shot=async(scope,name)=>{await scope.locator('summary').first().scrollIntoViewIfNeeded();await page.screenshot({path:`${output}/${name}.png`});await page.setViewportSize({width:390,height:844});await scope.locator('summary').first().scrollIntoViewIfNeeded();await page.screenshot({path:`${output}/${name}-mobile.png`});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),name+' overflow '+await page.evaluate(()=>document.documentElement.scrollWidth));await page.setViewportSize({width:1440,height:1000});};
+ await fs.mkdir(output,{recursive:true});
+ try{
+  await page.goto(`${origin}/project?path=${encodeURIComponent(fixture.path)}&tab=info&range=current`);
+  const stash=page.locator('.stash-explorer');await stash.locator('summary').first().click();await stash.locator('tbody tr').first().waitFor();
+  assert.equal(await stash.locator('tbody tr').count(),1);
+  await stash.getByRole('searchbox').fill('no-such-stash');assert.equal(await stash.locator('tbody tr').count(),0);
+  await stash.getByRole('searchbox').fill(fixture.stash.slice(0,12));await stash.locator('.stash-explorer-select').click();
+  await stash.locator('.stash-explorer-detail').waitFor();
+  await stash.locator('#stash-untracked-title').waitFor();
+  assert.ok((await stash.locator('.stash-explorer-detail').innerText()).includes('untracked [file].txt'));
+  assert.ok((await stash.locator('.stash-explorer-detail').innerText()).includes('stashed tracked'));
+  await stash.getByRole('button',{name:'追跡済みの変更の確認コマンドをコピー',exact:true}).click();const cmd=await clip();assert.ok(cmd.includes(fixture.path)&&cmd.includes(fixture.stash)&&cmd.includes('diff'));
+  await shot(stash,'stash');await stash.locator('summary').first().click();
+  passed.push('Stash inventory, subject/hash search, tracked and untracked inspection, immutable read-only command copy');
+  const compare=page.locator('.commit-compare');await compare.locator('summary').first().click();
+  const base=compare.getByLabel('比較元 base のコミットハッシュまたはGit ref'), target=compare.getByLabel('比較先 target のコミットハッシュまたはGit ref');
+  await base.fill('main');await target.fill('feature');await compare.getByRole('button',{name:'この2地点を比較',exact:true}).click();await compare.locator('.commit-compare-result').waitFor();
+  let csv=await download(compare,'ファイル一覧をCSV保存');assert.ok(csv.includes('main.txt')&&csv.includes('renamed.txt'));
+  const patch=await download(compare,'生パッチを保存');assert.ok(patch.includes('diff --git')&&patch.includes('main only'));
+  await compare.getByRole('button',{name:'比較の再現コマンドをコピー',exact:true}).click();assert.ok((await clip()).includes(fixture.main)&&(await clip()).includes(fixture.target));
+  await compare.getByRole('button',{name:'base と target を入れ替える',exact:true}).click();assert.equal(await base.inputValue(),'feature');assert.equal(await target.inputValue(),'main');await compare.locator('.commit-compare-stale').waitFor();
+  await compare.getByRole('button',{name:'この2地点を比較',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.commit-compare-stale')&&document.querySelector('.commit-compare-result'));
+  const reverse=await download(compare,'生パッチを保存');assert.ok(reverse.includes('+main only'));
+  await base.fill('main');await target.fill('feature');await compare.getByLabel('コミット比較の方法').selectOption('merge-base');await compare.getByRole('button',{name:'この2地点を比較',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.commit-compare-stale')&&document.querySelector('.commit-compare-result'));
+  csv=await download(compare,'ファイル一覧をCSV保存');assert.ok(!csv.includes('main.txt')&&csv.includes('renamed.txt'));
+  await shot(compare,'comparison');
+  await base.fill('--help');await compare.getByRole('button',{name:'この2地点を比較',exact:true}).click();await compare.getByRole('alert').waitFor();assert.equal(await base.inputValue(),'--help');await compare.locator('summary').first().click();
+  passed.push('Direct comparison, reverse direction, unique merge-base mode, immutable command, CSV and raw patch download, explicit invalid-ref error');
+  const history=page.locator('.file-history-explorer');await history.locator('summary').first().click();
+  await history.getByLabel('ファイル履歴のリビジョン').fill('feature');await history.getByLabel('ファイル履歴のファイル相対パス').fill('renamed.txt');
+  await history.getByRole('checkbox',{name:'名前変更を追跡'}).uncheck();await history.getByRole('button',{name:'履歴を取得',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.file-history-table tbody tr').length===2);
+  await history.getByRole('checkbox',{name:'名前変更を追跡'}).check();await history.getByRole('button',{name:'履歴を取得',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.file-history-table tbody tr').length===3);
+  await history.getByLabel('取得済みファイル履歴を作成者で絞り込み').selectOption({label:'UI Fixture'});assert.equal(await history.locator('tbody tr').count(),3);
+  const historyCsv=await download(history,'一致する履歴をCSV保存');assert.ok(historyCsv.includes('Create original file')&&historyCsv.includes('old name.txt'));
+  await history.getByRole('button',{name:'コミットを表示',exact:true}).first().click();await history.locator('.file-history-commit .patch-view').count().then(async count=>{if(!count) await history.locator('.file-history-commit').waitFor();});
+  await shot(history,'history');
+  await page.getByRole('combobox',{name:'表示テーマ'}).selectOption('dark');await shot(history,'history-dark');
+  passed.push('Path history, follow renames across old name, exact author filter, CSV export, commit detail and responsive dark view');
+  assert.deepEqual(errors,[]);await fs.writeFile(`${output}/result.json`,JSON.stringify({origin,fixture:fixture.path,passed,errors},null,2));console.log({passed,errors});
+ }catch(e){console.error(e);await page.screenshot({path:`${output}/failure.png`});console.error((await page.locator('body').innerText()).slice(-2200));process.exitCode=1;}finally{await browser.close();}
+})();

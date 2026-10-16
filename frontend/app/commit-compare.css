@@ -1,0 +1,142 @@
+.commit-compare {
+  margin-top: 16px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.commit-compare > summary {
+  padding: 12px 14px;
+  cursor: pointer;
+  color: var(--ink);
+  font: 700 13px/1.4 var(--sans);
+}
+
+.commit-compare > summary::marker { color: var(--accent); }
+.commit-compare > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.commit-compare-body { border-top: 1px solid var(--rule); }
+.commit-compare-intro { margin: 0; padding: 12px 14px; color: var(--muted); font: 11px/1.6 var(--sans); }
+
+.commit-compare-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(180px, 0.8fr) auto;
+  gap: 9px;
+  align-items: end;
+  padding: 12px 14px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.commit-compare-form label { display: grid; gap: 4px; min-width: 0; color: var(--muted); font: 11px var(--sans); }
+.commit-compare-form input,
+.commit-compare-form select {
+  width: 100%;
+  min-height: 35px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 12px var(--mono);
+  padding: 7px 9px;
+}
+
+.commit-compare-form select { font-family: var(--sans); }
+.commit-compare-swap,
+.commit-compare-run,
+.commit-compare-actions button,
+.commit-compare-error button {
+  min-height: 35px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  font: 11px var(--sans);
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.commit-compare-swap:hover,
+.commit-compare-actions button:hover,
+.commit-compare-error button:hover { border-color: var(--accent); background: var(--selected); }
+.commit-compare-run { border-color: var(--accent); background: var(--accent); color: var(--paper); font-weight: 700; }
+.commit-compare-run:hover { filter: brightness(1.08); }
+.commit-compare-run:disabled { cursor: wait; opacity: .65; }
+
+.commit-compare-validation,
+.commit-compare-loading,
+.commit-compare-stale,
+.commit-compare-truncated,
+.commit-compare-download-status { margin: 0; padding: 9px 14px; font: 11px/1.5 var(--sans); }
+.commit-compare-validation { color: var(--c-conflict); background: color-mix(in srgb, var(--c-conflict) 7%, var(--panel)); }
+.commit-compare-loading { color: var(--accent); }
+
+.commit-compare-error {
+  display: grid;
+  gap: 7px;
+  margin: 0 14px 12px;
+  padding: 10px;
+  border: 1px solid var(--c-conflict);
+  border-radius: 6px;
+  color: var(--c-conflict);
+  font: 11px/1.5 var(--sans);
+}
+
+.commit-compare-error button { justify-self: start; color: var(--ink); }
+.commit-compare-error small { color: var(--muted); }
+.commit-compare-error code { overflow-wrap: anywhere; }
+
+.commit-compare-result { margin: 0 14px 16px; }
+.commit-compare-result.is-stale { opacity: .92; }
+.commit-compare-result-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: start; justify-content: space-between; padding: 12px 0 8px; }
+.commit-compare-result-head h3 { margin: 0; font: 700 13px/1.4 var(--sans); }
+.commit-compare-label { display: flex; flex-wrap: wrap; gap: 5px 8px; margin: 4px 0 0; color: var(--muted); font: 11px/1.5 var(--sans); }
+.commit-compare-label code { color: var(--ink); overflow-wrap: anywhere; }
+.commit-compare-stale { margin: 8px 0 0; padding: 0; color: var(--c-behind); }
+.commit-compare-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.commit-compare-actions button { border-color: var(--accent); color: var(--accent); }
+
+.commit-compare-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--paper); }
+.commit-compare-stats > div { display: grid; gap: 2px; min-width: 0; padding: 8px 10px; border-right: 1px solid var(--rule); }
+.commit-compare-stats > div:last-child { border-right: 0; }
+.commit-compare-stats span { color: var(--muted); font: 10px var(--sans); }
+.commit-compare-stats strong { font: 700 16px var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.commit-compare-command { display: flex; align-items: end; justify-content: space-between; gap: 10px; margin-top: 10px; padding: 9px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); }
+.commit-compare-command > div { display: grid; gap: 4px; min-width: 0; }
+.commit-compare-command span { color: var(--muted); font: 10px var(--sans); }
+.commit-compare-command code { overflow-wrap: anywhere; color: var(--ink); font: 11px/1.5 var(--mono); }
+.commit-compare-command .copy-control { flex: 0 0 auto; }
+.commit-compare-download-status { padding: 8px 0 0; color: var(--c-index); }
+.commit-compare-truncated { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--c-behind); border-radius: 6px; color: var(--c-behind); }
+
+@media (max-width: 980px) {
+  .commit-compare-form { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .commit-compare-mode { grid-column: 1 / 3; }
+  .commit-compare-run { grid-column: 3; }
+  .commit-compare-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .commit-compare-stats > div:nth-child(3) { border-right: 0; }
+  .commit-compare-stats > div:nth-last-child(-n+2) { border-top: 1px solid var(--rule); }
+}
+
+@media (max-width: 620px) {
+  .commit-compare-form { grid-template-columns: 1fr; align-items: stretch; }
+  .commit-compare-swap,
+  .commit-compare-mode,
+  .commit-compare-run { grid-column: auto; }
+  .commit-compare-swap { justify-self: start; }
+  .commit-compare-run { width: 100%; }
+  .commit-compare-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .commit-compare-stats > div:nth-child(3) { border-right: 1px solid var(--rule); }
+  .commit-compare-stats > div:nth-child(2n) { border-right: 0; }
+  .commit-compare-stats > div:nth-child(3) { border-top: 1px solid var(--rule); }
+  .commit-compare-stats > div:nth-child(4) { border-top: 1px solid var(--rule); }
+  .commit-compare-stats > div:nth-child(5) { border-top: 1px solid var(--rule); }
+  .commit-compare-command { align-items: stretch; flex-direction: column; }
+  .commit-compare-command .copy-control,
+  .commit-compare-command .copy-button { width: 100%; }
+  .commit-compare-actions { width: 100%; }
+  .commit-compare-actions button { flex: 1 1 160px; }
+}
