@@ -1,4 +1,4 @@
-const CONTROL_TABS = new Set(["flow", "lanes", "activity", "info"]);
+const CONTROL_TABS = new Set(["flow", "lanes", "activity", "files", "info"]);
 const TIME_RANGES = new Set(["current", "24h", "7d", "all"]);
 
 /**

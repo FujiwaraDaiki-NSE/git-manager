@@ -78,3 +78,42 @@ def test_reference_investigation_endpoints_preserve_git_state(investigation):
     assert client.get('/api/repo/tag', params={'path': path, 'name': '--help'}).status_code == 404
     assert client.get('/api/repo/tag', params={'path': path, 'name': '../bad'}).status_code == 422
     assert client.get('/api/repo/reflog', params={'path': path, 'ref': '--all'}).status_code == 422
+
+
+def test_file_and_line_investigations_are_pinned_and_read_only(investigation):
+    import base64
+    client, path, base, target, stash, git = investigation
+    from pathlib import Path
+    source = Path(path) / 'file.txt'
+    source.write_text('staged\ntwo\n')
+    git('add', 'file.txt')
+    source.write_text('staged\nworking\n')
+    before = (git('status', '--porcelain=v2'), git('show-ref'), git('diff', '--cached'), git('diff'))
+    response = client.get('/api/repo/files', params={'path': path, 'revision': target})
+    assert response.status_code == 200
+    assert response.json()['pinned_hash'] == target
+    assert 'file.txt' in response.text
+    response = client.get('/api/repo/file', params={'path': path, 'revision': target, 'file': 'file.txt'})
+    assert response.status_code == 200
+    assert base64.b64decode(response.json()['content_base64']) == b'one\ntwo\n'
+    response = client.get('/api/repo/blame', params={'path': path, 'revision': target, 'file': 'file.txt', 'start': 1, 'end': 2})
+    assert response.status_code == 200
+    assert 'API Test' in response.text
+    for stage, expected, excluded in [('staged', '+staged', '+working'), ('unstaged', '+working', '+staged')]:
+        response = client.get('/api/repo/worktree-diff', params={'path': path, 'stage': stage, 'file': 'file.txt', 'ignoreWhitespace': False})
+        assert response.status_code == 200
+        assert expected in response.json()['patch']
+        assert excluded not in response.json()['patch']
+    assert (git('status', '--porcelain=v2'), git('show-ref'), git('diff', '--cached'), git('diff')) == before
+
+
+def test_file_endpoints_reject_missing_unsafe_and_unknown_inputs(investigation):
+    client, path, base, target, stash, git = investigation
+    endpoints = [('files', {'revision': target}), ('file', {'revision': target, 'file': 'file.txt'}), ('blame', {'revision': target, 'file': 'file.txt', 'start': 1, 'end': 1}), ('worktree-diff', {'stage': 'staged', 'file': '', 'ignoreWhitespace': False})]
+    for endpoint, params in endpoints:
+        assert client.get(f'/api/repo/{endpoint}', params={'path': '/unregistered', **params}).status_code == 404
+        for field in params:
+            missing = {key: value for key, value in params.items() if key != field}
+            assert client.get(f'/api/repo/{endpoint}', params={'path': path, **missing}).status_code == 422
+        if 'file' in params:
+            assert client.get(f'/api/repo/{endpoint}', params={'path': path, **params, 'file': '../outside'}).status_code == 422

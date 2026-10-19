@@ -1,0 +1,10 @@
+{
+  "origin": "http://127.0.0.1:4412",
+  "fixture": "/home/solution2024/gitdash-ui-investigation-57HLrb",
+  "passed": [
+    "Pinned revision tree/breadcrumbs, global path search, text and binary blob preview/download, immutable file-history handoff without execution",
+    "Line attribution, exact author/commit filters, inclusive range and invalid-range error, source commit, annotated CSV",
+    "Staged/unstaged snapshots and patches, per-status-file scope, rename pair preservation, ignore-whitespace control"
+  ],
+  "errors": []
+}

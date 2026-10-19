@@ -92,9 +92,100 @@
   background: var(--paper);
 }
 
+.status-file-diff-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.status-file-diff-heading h4 {
+  margin: 0;
+}
+
+.status-file-show-all,
+.status-file-diff-button {
+  min-height: 30px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--ink);
+  background: var(--panel);
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.status-file-show-all:hover,
+.status-file-diff-button:hover,
+.status-file-show-all[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--selected);
+}
+
+.status-file-diff-button {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.status-file-diff-excluded {
+  justify-self: end;
+  color: var(--muted);
+  font: 10px var(--sans);
+  white-space: nowrap;
+}
+
+.status-file-stage-switch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-file-stage-switch button {
+  min-height: 30px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--muted);
+  background: var(--panel);
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.status-file-stage-switch button:hover,
+.status-file-stage-switch button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--selected);
+}
+
+.status-file-stage-switch span {
+  color: var(--muted);
+  font: 11px var(--sans);
+  overflow-wrap: anywhere;
+}
+
+.status-file-stage-switch code {
+  color: var(--ink);
+}
+
 .status-file-diff-tools h4 {
   margin: 0;
   font-size: 12px;
+}
+
+.status-file-command-copy {
+  display: grid;
+  gap: 7px;
+  padding-top: 4px;
+  border-top: 1px solid var(--rule);
+}
+
+.status-file-command-copy h5 {
+  margin: 0;
+  color: var(--ink);
+  font: 700 11px var(--sans);
 }
 
 .status-file-diff-command {
@@ -138,5 +229,18 @@
   .status-file-diff-command .copy-control,
   .status-file-diff-command .copy-button {
     width: 100%;
+  }
+
+  .status-file-diff-heading {
+    display: grid;
+  }
+
+  .status-file-show-all {
+    justify-self: start;
+  }
+
+  .status-file-diff-button,
+  .status-file-diff-excluded {
+    justify-self: start;
   }
 }

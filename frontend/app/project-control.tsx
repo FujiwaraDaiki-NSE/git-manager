@@ -3,6 +3,8 @@
 import PatchView from "./patch-view";
 import StashExplorer from "./stash-explorer";
 import TagExplorer from "./tag-explorer";
+import RepositoryFiles from "./repository-files";
+import BlameExplorer from "./blame-explorer";
 import ReflogExplorer from "./reflog-explorer";
 import CommitCompare from "./commit-compare";
 import FileHistoryExplorer from "./file-history-explorer";
@@ -56,7 +58,7 @@ import type {
   AgentTask,
 } from "./types";
 
-type ControlTab = "flow" | "lanes" | "activity" | "info";
+type ControlTab = "flow" | "lanes" | "activity" | "files" | "info";
 type TimeRange = "current" | "24h" | "7d" | "all";
 type ActivityFilter = "all" | "commit" | "edit" | "test" | "review" | "input";
 type ActivityOrder = "newest" | "oldest";
@@ -70,6 +72,7 @@ const tabs: { id: ControlTab; label: string; short: string }[] = [
   { id: "flow", label: "ブランチ", short: "BRANCHES" },
   { id: "lanes", label: "作業一覧", short: "LANES" },
   { id: "activity", label: "アクティビティ", short: "ACTIVITY" },
+  { id: "files", label: "ファイル", short: "FILES" },
   { id: "info", label: "プロジェクト情報", short: "INFO" },
 ];
 
@@ -1167,6 +1170,7 @@ export default function ProjectControl() {
           {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} relationRef={urlState.relationRef} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /><BranchHistoryExplorer key={project.main_path} project={project} onSelect={selectEvent} /></>}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
+          {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルと変更元</h3><p className="section-copy">調べる版を指定して、ファイルの内容と各行が変更されたコミットを確認できます。</p></div></div><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /></section>}
           {urlState.tab === "info" && <ProjectInfo project={project} onOpenGit={openGit} onSelectLane={selectLane} />}
         </section>
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}

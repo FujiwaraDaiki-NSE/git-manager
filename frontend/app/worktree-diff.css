@@ -1,0 +1,260 @@
+.worktree-diff {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.worktree-diff.is-stale {
+  border-color: var(--c-behind);
+}
+
+.worktree-diff-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.worktree-diff-heading h3 {
+  margin: 0;
+  font: 700 14px/1.35 var(--sans);
+}
+
+.worktree-diff-heading p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font: 11px/1.5 var(--sans);
+}
+
+.worktree-diff-heading code,
+.worktree-diff-snapshot code,
+.worktree-diff-command code {
+  overflow-wrap: anywhere;
+}
+
+.worktree-diff-readonly {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 2px 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.worktree-diff-ignore {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: fit-content;
+  color: var(--ink);
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.worktree-diff-ignore input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.worktree-diff-ignore small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.worktree-diff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.worktree-diff-actions button,
+.worktree-diff-error button {
+  min-height: 32px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 6px 9px;
+  color: var(--ink);
+  background: var(--panel);
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.worktree-diff-actions button:hover,
+.worktree-diff-error button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.worktree-diff-actions button:disabled {
+  cursor: progress;
+  opacity: .55;
+}
+
+.worktree-diff-loading,
+.worktree-diff-error,
+.worktree-diff-exclusion,
+.worktree-diff-truncated,
+.worktree-diff-download-status {
+  margin: 0;
+  font: 11px/1.65 var(--sans);
+}
+
+.worktree-diff-loading {
+  color: var(--muted);
+}
+
+.worktree-diff-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  color: var(--control-red);
+}
+
+.worktree-diff-snapshot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--muted);
+  font: 11px/1.5 var(--sans);
+}
+
+.worktree-diff-snapshot strong {
+  color: var(--ink);
+}
+
+.worktree-diff-snapshot > span:not(.worktree-diff-stale)::before {
+  content: "·";
+  margin-right: 7px;
+  color: var(--muted);
+}
+
+.worktree-diff-snapshot > span:first-child::before {
+  content: "";
+  margin: 0;
+}
+
+.worktree-diff-stale {
+  color: var(--c-behind);
+}
+
+.worktree-diff-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.worktree-diff-stats > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+}
+
+.worktree-diff-stats span {
+  color: var(--muted);
+  font: 10px var(--sans);
+}
+
+.worktree-diff-stats strong {
+  color: var(--ink);
+  font: 700 14px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.worktree-diff-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+}
+
+.worktree-diff-command > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.worktree-diff-command span {
+  color: var(--muted);
+  font: 10px var(--sans);
+}
+
+.worktree-diff-command code {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.worktree-diff-download-status {
+  color: var(--control-green);
+}
+
+.worktree-diff-exclusion {
+  color: var(--control-ink);
+}
+
+.worktree-diff-truncated {
+  color: var(--c-behind);
+}
+
+.worktree-diff > .commit-files,
+.worktree-diff > .patch-view {
+  margin-top: 2px;
+}
+
+@media (max-width: 760px) {
+  .worktree-diff-heading {
+    display: grid;
+  }
+
+  .worktree-diff-actions {
+    justify-content: flex-start;
+  }
+
+  .worktree-diff-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .worktree-diff-stats > div:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 520px) {
+  .worktree-diff {
+    padding: 10px;
+  }
+
+  .worktree-diff-actions,
+  .worktree-diff-actions button {
+    width: 100%;
+  }
+
+  .worktree-diff-command {
+    grid-template-columns: 1fr;
+  }
+
+  .worktree-diff-command .copy-control,
+  .worktree-diff-command .copy-button {
+    width: 100%;
+  }
+}

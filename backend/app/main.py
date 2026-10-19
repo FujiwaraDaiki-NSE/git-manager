@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app import compare, file_history, stashes, tags, reflog
+from app import compare, file_history, stashes, tags, reflog, repository_files, blame, worktree_diff
 from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
@@ -172,6 +172,27 @@ def _tag_sync(host_path: str, repo: str, name: str) -> dict[str, Any] | None:
 def _reflog_sync(host_path: str, repo: str, ref: str) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return reflog.get_reflog(repo, ref)
+
+
+
+def _repository_files_sync(host_path: str, repo: str, revision: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return repository_files.list_files(repo, revision)
+
+
+def _repository_file_sync(host_path: str, repo: str, revision: str, file: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return repository_files.get_file(repo, revision, file)
+
+
+def _blame_sync(host_path: str, repo: str, revision: str, file: str, start: int, end: int) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return blame.get_blame(repo, revision, file, start, end)
+
+
+def _worktree_diff_sync(host_path: str, repo: str, stage: str, file: str | None, ignore_whitespace: bool) -> dict[str, Any]:
+    with _repo_lock(host_path):
+        return worktree_diff.get_worktree_diff(repo, stage, file, ignore_whitespace)
 
 
 def _get_project_sync(
@@ -1292,6 +1313,58 @@ async def read_repo_reflog(path: str, ref: str) -> dict[str, Any]:
     if result is None:
         raise HTTPException(status_code=502, detail="参照の移動履歴を取得できませんでした")
     return result
+
+
+@app.get("/api/repo/files")
+async def list_repo_files(path: str, revision: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _repository_files_sync, path, repo, revision)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="ファイル一覧を取得できませんでした。版と接続状態を確認してください")
+    return result
+
+
+@app.get("/api/repo/file")
+async def read_repo_file(path: str, revision: str, file: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _repository_file_sync, path, repo, revision, file)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="ファイル内容を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/blame")
+async def read_repo_blame(path: str, revision: str, file: str, start: int, end: int) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _blame_sync, path, repo, revision, file, start, end)
+    except blame.BlameGitError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="行ごとの変更元を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/worktree-diff")
+async def read_repo_worktree_diff(path: str, stage: str, file: str, ignore_whitespace: bool = Query(..., alias="ignoreWhitespace")) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        return await asyncio.get_running_loop().run_in_executor(pool, _worktree_diff_sync, path, repo, stage, None if file == "" else file, ignore_whitespace)
+    except worktree_diff.WorktreeDiffError as error:
+        status = 422 if error.code.startswith("invalid_") else 502
+        raise HTTPException(status_code=status, detail=str(error)) from error
 
 @app.get("/api/stream")
 async def stream() -> StreamingResponse:

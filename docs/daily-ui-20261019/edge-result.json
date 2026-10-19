@@ -1,0 +1,11 @@
+{
+  "origin": "http://127.0.0.1:4412",
+  "fixture": "/home/solution2024/gitdash-ui-conflict-jh6f7lzr",
+  "passed": [
+    "Conflict paths explicitly excluded while ordinary unstaged changes remain available",
+    "Staged metadata and bounded patch remain available with conflicts",
+    "Partial patch warning, partial filename and <=200000-byte download",
+    "390px mobile layout without page overflow"
+  ],
+  "errors": []
+}

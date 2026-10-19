@@ -24,6 +24,7 @@ import {
   sortStatusFiles,
   statusFilesCsv,
 } from "./status-file-tools.mjs";
+import WorktreeDiff, { type WorktreeDiffStage } from "./worktree-diff";
 import "./repo-tools.css";
 import "./status-file-tools.css";
 
@@ -125,6 +126,8 @@ function StatusPane({ repo }: { repo: Repo }) {
   const [directory, setDirectory] = useState<string>(STATUS_FILE_DIRECTORY_ALL);
   const [extension, setExtension] = useState<string>(STATUS_FILE_EXTENSION_ALL);
   const [order, setOrder] = useState<StatusFileOrder>("asc");
+  const [diffStage, setDiffStage] = useState<WorktreeDiffStage>("unstaged");
+  const [selectedDiffFile, setSelectedDiffFile] = useState<string | null>(null);
   const [downloadStatus, setDownloadStatus] = useState<"idle" | "success" | "error">("idle");
   const filters: { key: StatusFileFilter; label: string }[] = [
     { key: "all", label: "すべて" }, { key: "staged", label: "ステージ済み" },
@@ -205,16 +208,44 @@ function StatusPane({ repo }: { repo: Repo }) {
         </div>
         <div className="status-file-filters" role="group" aria-label="変更ファイルの状態で絞り込み">{filters.map(({ key, label }) => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}<span>{entries.filter((entry) => fileStatusGroups(entry.xy)[key]).length}</span></button>)}</div>
         <div className="status-file-list">
-          {visible.map((entry) => <div className="status-file-row" key={entry.xy + entry.path}><code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code><code className="status-file-path">{entry.path}</code><span className="status-file-description">{fileStatusDescription(entry.xy)}</span><span className="status-file-copy"><CopyButton value={entry.path} label={`${entry.path} のパスをコピー`} /></span></div>)}
+          {visible.map((entry) => {
+            const groups = fileStatusGroups(entry.xy);
+            const rowStage: WorktreeDiffStage | null = groups.staged ? "staged" : groups.unstaged ? "unstaged" : null;
+            return <div className="status-file-row" key={entry.xy + entry.path}>
+              <code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code>
+              <code className="status-file-path">{entry.path}</code>
+              <span className="status-file-description">{fileStatusDescription(entry.xy)}</span>
+              <span className="status-file-copy"><CopyButton value={entry.path} label={`${entry.path} のパスをコピー`} /></span>
+              {rowStage
+                ? <button className="status-file-diff-button" type="button" onClick={() => { setDiffStage(rowStage); setSelectedDiffFile(entry.path); }}>差分を表示</button>
+                : <span className="status-file-diff-excluded">差分対象外</span>}
+            </div>;
+          })}
           {visible.length === 0 && <div className="status-file-empty">{entries.length === 0 ? "未コミットの変更はありません。" : "条件に一致する変更ファイルはありません。"}{hasFilters && <button className="subtle-button" type="button" onClick={clearFilters}>絞り込みを解除</button>}</div>}
         </div>
         {entries.length > 0 && <div className="status-file-diff-tools" aria-labelledby="status-file-diff-title">
-          <h4 id="status-file-diff-title">表示中の追跡ファイルの差分コマンド</h4>
-          <p className="status-file-diff-empty">コマンドはコピー専用です。この画面では実行しません。</p>
-          <div className="status-file-diff-command"><code>{diffCommands?.staged ?? "ステージ済みの差分はありません。"}</code>{diffCommands?.staged && <CopyButton value={diffCommands.staged} label="ステージ済みの差分コマンドをコピー" />}</div>
-          <div className="status-file-diff-command"><code>{diffCommands?.unstaged ?? "未ステージの差分はありません。"}</code>{diffCommands?.unstaged && <CopyButton value={diffCommands.unstaged} label="未ステージの差分コマンドをコピー" />}</div>
-          {exclusionParts.length > 0 && <p className="status-file-diff-note" role="status">{exclusionParts.join("、")}は差分コマンドから除外しました。未追跡ファイルはGitの差分対象外で、競合と未対応の状態は安全に対象を確定できないためです。</p>}
-          {hasRenamedEntry && <p className="status-file-diff-note" role="status">名前変更・コピーは元のパスが未取得のため、差分コマンドから除外しています。名前変更前後の差分はターミナルで確認してください。</p>}
+          <div className="status-file-diff-heading">
+            <div>
+              <h4 id="status-file-diff-title">追跡ファイルの差分を確認</h4>
+              <p className="status-file-diff-empty">Gitの状態を変更せず、ステージと作業ツリーを別々に表示します。</p>
+            </div>
+            <button className="status-file-show-all" type="button" onClick={() => setSelectedDiffFile(null)} aria-pressed={selectedDiffFile === null}>全体の差分を表示</button>
+          </div>
+          <div className="status-file-stage-switch" role="group" aria-label="差分の段階">
+            <button type="button" aria-pressed={diffStage === "staged"} onClick={() => setDiffStage("staged")}>ステージ済み</button>
+            <button type="button" aria-pressed={diffStage === "unstaged"} onClick={() => setDiffStage("unstaged")}>未ステージ</button>
+            <span>{selectedDiffFile === null ? "表示範囲: 全体" : <>表示範囲: <code>{selectedDiffFile}</code></>}</span>
+          </div>
+          <p className="status-file-diff-note" role="note">未追跡ファイルはGitの差分対象外です。この画面のファイル別表示では競合を扱いません。各行の「差分を表示」からファイル単位を開けます。名前変更・コピーは元と先のパスをまとめて表示します。</p>
+          <div className="status-file-command-copy">
+            <h5>表示中の追跡ファイルの差分コマンド</h5>
+            <p className="status-file-diff-empty">コマンドはコピー専用です。この画面では実行しません。</p>
+            <div className="status-file-diff-command"><code>{diffCommands?.staged ?? "ステージ済みの差分はありません。"}</code>{diffCommands?.staged && <CopyButton value={diffCommands.staged} label="ステージ済みの差分コマンドをコピー" />}</div>
+            <div className="status-file-diff-command"><code>{diffCommands?.unstaged ?? "未ステージの差分はありません。"}</code>{diffCommands?.unstaged && <CopyButton value={diffCommands.unstaged} label="未ステージの差分コマンドをコピー" />}</div>
+            {exclusionParts.length > 0 && <p className="status-file-diff-note" role="status">{exclusionParts.join("、")}は差分コマンドから除外しました。未追跡ファイルはGitの差分対象外で、競合と未対応の状態は安全に対象を確定できないためです。</p>}
+            {hasRenamedEntry && <p className="status-file-diff-note" role="status">名前変更・コピーは元のパスが未取得のため、差分コマンドから除外しています。名前変更前後の差分はターミナルで確認してください。</p>}
+          </div>
+          <WorktreeDiff path={repo.path} file={selectedDiffFile} stage={diffStage} />
         </div>}
         <details className="status-file-guide"><summary>ステージと状態記号の見方</summary><div className="status-flow" aria-label="作業ディレクトリからステージ、コミットへの流れ"><div className="status-flow-node"><strong>作業ディレクトリ</strong><span>未ステージ</span><code>git diff</code></div><div className="status-flow-arrow"><code>git add</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>ステージ（index）</strong><span>ステージ済み</span><code>git diff --cached</code></div><div className="status-flow-arrow"><code>git commit</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>コミット</strong><span>履歴に保存</span></div></div><p>ステージ済みは次のコミットに含める変更、未ステージは作業ディレクトリだけにある変更です。同じファイルに両方の変更がある場合は、それぞれの絞り込みに表示します。</p><p>記号は左がステージ、右が作業ディレクトリです。M: 変更、A: 追加、D: 削除、R: 名前変更、??: 未追跡。競合はファイルを確認して解消します。</p></details>
       </>}

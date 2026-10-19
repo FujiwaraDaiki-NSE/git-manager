@@ -72,3 +72,12 @@ test("branch commit context chooses only an exact unique local HEAD", () => {
   assert.equal(uniqueLocalForCommit([localAhead, localBehind], "ahead-head"), localAhead);
   assert.equal(uniqueLocalForCommit([localAhead, { id: "lane-ahead-copy", head: "ahead-head" }], "ahead-head"), null);
 });
+
+
+test("file investigations are directly addressable without changing project identity", () => {
+  const state = parseProjectUrl("?path=%2Fworkspace%2Frepo&tab=files&range=current");
+  assert.equal(state.tab, "files");
+  assert.equal(state.path, "/workspace/repo");
+  assert.deepEqual(state.invalidParams, []);
+  assert.equal(updateProjectUrl("/project?path=%2Fworkspace%2Frepo&tab=files", {tab: "info"}), "/project?path=%2Fworkspace%2Frepo&tab=info");
+});

@@ -96,7 +96,7 @@
 }
 
 .status-file-row {
-  grid-template-columns: 3ch minmax(0, 1fr) auto auto;
+  grid-template-columns: 3ch minmax(0, 1fr) auto auto auto;
 }
 
 .status-file-copy {
@@ -170,6 +170,12 @@
   }
 
   .status-file-copy {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .status-file-diff-button,
+  .status-file-diff-excluded {
     grid-column: 2 / -1;
     justify-self: start;
   }
