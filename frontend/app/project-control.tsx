@@ -833,14 +833,7 @@ function SelectionPane({
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const [modal, setModal] = useState(false);
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 1199px)");
-    const sync = () => setModal(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
+  const modal = false; // Details remain in-flow beside the persistent workspace timeline.
   useDialogKeyboard(panelRef, closeRef, onClose, modal);
   useEffect(() => {
     // Keep the original trigger across responsive changes between a side panel
