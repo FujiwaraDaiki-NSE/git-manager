@@ -48,6 +48,15 @@ agent APIは認証不要。GitHub PR情報にはホスト環境変数GH_TOKEN / 
 - 原因不明の問題は、再現・ログ・API・保存状態・実効設定・稼働環境から調べる。
 - 変更時はソース・テスト・Compose・コンテナへの反映を一つの作業として扱う。
 - 詳細な仕様・設定・コンテナを使わない開発起動は `README.md` を参照する。
-- 現在のホストのagent連携は `~/.codex/hooks.json` のユーザー共通command hooksで行う。MCPの追加・有効化は不要。
+- 現在のホストのagent連携は `~/.codex/hooks.json` のユーザー共通command hooksで行う。開始・終了の履歴はhooks、作業状態はユーザー共通MCP `gitdash` から報告する。
 - 共通送信スクリプトは `~/.codex/hooks/git_manager_agent_event.py`、共通設定は `~/.config/gitdash/agent.env`（権限 `600`）。全プロジェクトに適用し、gitdashが認識するGitリポジトリ／worktreeのイベントを保存する。
 - 共通hooksとリポジトリ内hooksの同じ送信処理を重複して有効化しない。認証情報はコミットしない。
+
+## gitdashへの作業状況の報告
+
+- `gitdash` の `report_agent_status` が利用可能な場合、Gitリポジトリでの作業開始時、工程変更時、ユーザーの確認が必要になった時、最終回答前に実際の状態を報告する。同じ状態・説明の繰り返し送信は不要。
+- `worktree` は実際に作業するGitルートの絶対パス、`status` は明示的な状態、`summary` は短い説明（不要なら `null`）。worktreeへ移動した後は、そのworktreeを指定する。
+- 調査は `investigating`、実装は `implementing`、テストは `testing`、レビューは `reviewing`。回答・判断を待つ場合は `waiting_for_user`、作業を進められない場合は `blocked` とし、何を確認・解決すべきか説明する。
+- レビュー依頼は `review_required`、必要な確認が済んでマージ判断を待つ場合は `merge_ready`、依頼を完了した場合は `completed`、作業を中断する場合は `stopped`。最終回答するという理由だけで、レビュー待ち・入力待ちを完了に置き換えない。
+- 同じブランチを分担するサブエージェントの報告は親がまとめる。別ブランチで作業する場合は各担当がそのブランチを報告する。
+- hooksは開始・終了などの履歴を記録するだけで、判断状態の報告を代行しない。未接続や未登録worktreeなどで送信に失敗した場合は成功と扱わず、作業を続けて最後に未送信を伝える。パスの推測やRESTへの自動切り替えはしない。

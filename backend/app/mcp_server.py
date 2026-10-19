@@ -56,7 +56,7 @@ def report_agent_status(
     status: Annotated[agent_events.Status, Field(description="現在の作業状態")],
     summary: Annotated[str | None, Field(description="短い説明。不要ならnull")],
 ) -> str:
-    """ブランチの作業状況が変わったときに報告する。worktreeには作業中のGitルートの絶対パス、statusには現在の状態、summaryには短い説明（不要ならnull）を指定する。"""
+    """作業開始時、工程変更時、ユーザーの確認待ちになった時、最終回答前にブランチの現在の作業状況を報告する。worktreeには実際に作業中のGitルートの絶対パス、statusには現在の状態、summaryには作業内容や必要な確認の短い説明（不要ならnull）を指定する。hooksは判断状態を報告しない。レビュー待ち・入力待ちは完了に置き換えない。"""
     state = _state_provider()
     project_id, branch = _current_branch(worktree, state)
     fields = agent_events.status_fields(status)

@@ -129,6 +129,7 @@ export type AgentTask = {
   worktree: string | null;
   branch: string | null;
   kind?: AgentEventKind | null;
+  action?: string | null;
   status?: AgentStatus | null;
   run_state: AgentRunState | null;
   phase: string | null;

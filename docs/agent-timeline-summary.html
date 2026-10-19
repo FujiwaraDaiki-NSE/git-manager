@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>全プロジェクトの作業タイムライン</title>
+<style>body{font-family:system-ui,sans-serif;line-height:1.8;max-width:960px;margin:40px auto;padding:0 24px;color:#17212c}h1,h2{line-height:1.4}code{background:#eef2f6;padding:2px 5px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #cbd5df;padding:10px;text-align:left}</style>
+<h1>全プロジェクトの作業タイムライン</h1><p>2026年10月19日。プロジェクト詳細を開いたまま、他のブランチの進行状況と判断待ちを確認できる常設表示。</p>
+<h2>調査で確認したこと</h2><p>開始時点の保存履歴327件のうち、271件がlifecycle、56件が明示的なstatus報告。MCPは接続・保存ともに動作していたが、ユーザー共通の指示に報告タイミングがなく、READMEにはMCP不要という古い説明が残っていた。98プロジェクト中、明示的な報告があったのは2プロジェクトだった。</p>
+<h2>表示と状態の責任</h2><table><tr><th>表示</th><th>根拠</th></tr><tr><td>現在のブランチ状況・確認待ち</td><td>backendが返す各ブランチの最新の明示的報告</td></tr><tr><td>時系列の履歴</td><td>保存されたagentイベント。hooksと判断状態を区別する</td></tr><tr><td>接続状態・読み込み失敗</td><td>ブラウザのSSE接続と履歴取得の結果</td></tr></table><p>最後の報告を表示するため、現在のプロセス稼働を保証しない。過去の入力待ちや終了hooksから現在の判断状態を推測しない。</p>
+<h2>報告漏れへの対応</h2><p>ユーザー共通の <code>~/.codex/AGENTS.md</code> とリポジトリの指示、MCPツール説明に、開始・工程変更・確認待ち・最終回答前の報告を追加。既存のセッションは指示を読み直すまで反映されない。hooksによる開始・終了の記録は維持する。MCP登録だけで自動発火を保証するものではない。</p>
+<h2>稼働環境への反映</h2><p>mainを直接編集せず、<code>codex/agent-timeline</code> worktreeをビルド対象に指定するCompose overrideを使用。ユーザー共通の <code>gitdash-compose</code> を通して既存コンテナへ反映し、既存データボリュームと認証情報の渡し方を維持する。通常のmain向け再ビルドはmainの内容に戻るため、PRをマージ後に通常起動を行う。</p>
+<h2>確認結果</h2><p id="validation">backend: 248テスト成功。frontend: 204テスト成功、本番ビルド成功。実MCPの送信・保存・SSEによるテスト中へのライブ更新を確認。一覧からブランチ詳細への遷移中もタイムラインが残り、独立スクロール位置も保持。390×844の狭幅で固定表示と詳細の非重複、横はみ出しなしを確認。GUIで再読込後の保存履歴を確認。ブラウザのエラーログなし。P1レビューで発見した古い詳細データによる状態の上書きは共有providerで修正し、再取得と遅延到着の回帰テストを追加した。</p>
+</html>
