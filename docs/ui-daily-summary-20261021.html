@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>gitdash UI改善 2026-10-21</title><style>body{max-width:1100px;margin:40px auto;padding:0 24px;font-family:system-ui;line-height:1.8;background:#f5f7fb;color:#18324d}table{border-collapse:collapse;background:white;width:100%}th,td{padding:10px;border:1px solid #d5deeb;text-align:left}img{max-width:100%;border:1px solid #d5deeb;border-radius:8px}.score{font-size:2rem;font-weight:800}a{color:#065fc5}</style>
+<h1>競合・コミットの含有・ファイル容量を調べる</h1><p>2026年10月21日。「ファイル」から競合の各段階と版ごとの容量を確認し、「プロジェクト情報」からコミットを含む参照を調べられるようにしました。</p><p class="score">30 + 14 × 5 = 100点</p><p>指定の加点基準による点数です。客観的な品質保証とは区別します。</p><table><tr><th>領域</th><th>追加機能と価値</th><th>加点</th></tr>
+<tr><td>競合調査</td><td>未解決INDEXのファイル一覧と各stageの存在・型・hash・サイズを確認する</td><td>+5</td></tr>
+<tr><td>競合調査</td><td>BASE・OURS・THEIRSを独立して選び、各段階の内容を確認する</td><td>+5</td></tr>
+<tr><td>競合調査</td><td>検証済みのOURSとTHEIRSの差分を読み取り専用で比較する</td><td>+5</td></tr>
+<tr><td>競合調査</td><td>完全に取得できた通常blobを元のバイト列のまま保存する</td><td>+5</td></tr>
+<tr><td>競合調査</td><td>競合ファイルと各stageの情報をCSV保存する</td><td>+5</td></tr>
+<tr><td>含有参照</td><td>任意のコミットを含むローカル・リモート追跡・タグ参照を調べる</td><td>+5</td></tr>
+<tr><td>含有参照</td><td>取得済み参照を名前と種類で絞り込む</td><td>+5</td></tr>
+<tr><td>含有参照</td><td>選択した参照の固定先コミット詳細を確認する</td><td>+5</td></tr>
+<tr><td>含有参照</td><td>調査コミットと固定先を既存比較画面の入力へ引き継ぐ</td><td>+5</td></tr>
+<tr><td>含有参照</td><td>一致する参照と固定hashをCSV保存する</td><td>+5</td></tr>
+<tr><td>容量調査</td><td>指定した版のパス別Gitオブジェクトサイズと最大ファイルを確認する</td><td>+5</td></tr>
+<tr><td>容量調査</td><td>ディレクトリ別集計から範囲を掘り下げ、パンくずで戻る</td><td>+5</td></tr>
+<tr><td>容量調査</td><td>取得済みパスを種類・最小バイト数・パスで絞り込み並び替える</td><td>+5</td></tr>
+<tr><td>容量調査</td><td>絞り込んだファイル容量一覧をCSV保存する</td><td>+5</td></tr>
+</table><h2>検証</h2><p>Frontend233件・Backend300件成功。本番ビルド成功。未解決P1なし。実Git/APIとブラウザーで各操作、保存内容、比較の未自動実行、入力変更後の遅延応答破棄を確認しました。1440px・390pxでページ横はみ出しとpage errorなし。</p><h2>稼働と制限</h2><p>mainへコミット・GitHubへpushし、既存Compose wrapperで反映・再起動。<a href="http://localhost:4412">アプリを開く</a>。</p><p>競合を解消する操作は行いません。blob完全保存は1MiBまで。含有参照は取得時点のローカル情報です。容量はパス単位のGitオブジェクトサイズで、ディスクや圧縮サイズではありません。未知のサイズと部分取得を明示します。</p><p><a href="daily-ui-20261021.md">詳細と再現手順</a> / <a href="daily-ui-20261021/result.json">GUI結果</a></p>
+<h2>BASE・OURS・THEIRSの内容と比較</h2><img src="daily-ui-20261021/conflict-inspector.png" alt="BASE・OURS・THEIRSの内容と比較"><p><a href="daily-ui-20261021/conflict-inspector-mobile.png">390pxでの画面</a></p>
+<h2>コミットを含む参照</h2><img src="daily-ui-20261021/commit-containment.png" alt="コミットを含む参照"><p><a href="daily-ui-20261021/commit-containment-mobile.png">390pxでの画面</a></p>
+<h2>版ごとの容量とディレクトリ集計</h2><img src="daily-ui-20261021/tree-sizes.png" alt="版ごとの容量とディレクトリ集計"><p><a href="daily-ui-20261021/tree-sizes-mobile.png">390pxでの画面</a></p>
+</html>

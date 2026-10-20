@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from app import compare, file_history, stashes, tags, reflog, repository_files, blame, worktree_diff
 from app import content_search, ignore_inspector, file_attributes
+from app import conflict_inspector, commit_containment, tree_sizes
 from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
@@ -219,6 +220,31 @@ def _eol_sync(host_path: str, repo: str) -> dict[str, Any] | None:
 def _attributes_sync(host_path: str, repo: str, candidates: list[str], mode: str) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return file_attributes.inspect_attributes(repo, candidates, mode)
+
+
+def _conflicts_sync(host_path: str, repo: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return conflict_inspector.get_conflicts(repo)
+
+
+def _conflict_stage_sync(host_path: str, repo: str, file: str, stage: int, expected_hash: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return conflict_inspector.get_conflict_stage(repo, file, stage, expected_hash)
+
+
+def _conflict_comparison_sync(host_path: str, repo: str, file: str, ours_hash: str, theirs_hash: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return conflict_inspector.get_conflict_comparison(repo, file, ours_hash, theirs_hash)
+
+
+def _containment_sync(host_path: str, repo: str, revision: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return commit_containment.get_containment(repo, revision)
+
+
+def _tree_sizes_sync(host_path: str, repo: str, revision: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return tree_sizes.get_tree_sizes(repo, revision)
 
 
 def _get_project_sync(
@@ -1458,6 +1484,67 @@ async def inspect_repo_attributes(request: AttributesRequest) -> dict[str, Any]:
         raise HTTPException(status_code=status, detail=str(error)) from error
     if result is None:
         raise HTTPException(status_code=502, detail="Git属性を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/conflicts")
+async def list_repo_conflicts(path: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    result = await asyncio.get_running_loop().run_in_executor(pool, _conflicts_sync, path, repo)
+    if result is None:
+        raise HTTPException(status_code=502, detail="競合ファイルを取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/conflict-stage")
+async def read_repo_conflict_stage(path: str, file: str, stage: int, expected_hash: str = Query(..., alias="expectedHash")) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _conflict_stage_sync, path, repo, file, stage, expected_hash)
+    except conflict_inspector.ConflictChangedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="競合ステージの内容を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/conflict-comparison")
+async def compare_repo_conflict(path: str, file: str, ours_hash: str = Query(..., alias="oursHash"), theirs_hash: str = Query(..., alias="theirsHash")) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _conflict_comparison_sync, path, repo, file, ours_hash, theirs_hash)
+    except conflict_inspector.ConflictChangedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="競合する内容を比較できませんでした")
+    return result
+
+
+@app.get("/api/repo/containment")
+async def read_repo_containment(path: str, revision: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _containment_sync, path, repo, revision)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="コミットを含む参照を取得できませんでした")
+    return result
+
+
+@app.get("/api/repo/tree-sizes")
+async def read_repo_tree_sizes(path: str, revision: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _tree_sizes_sync, path, repo, revision)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="版のファイル容量を取得できませんでした")
     return result
 
 

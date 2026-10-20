@@ -1,0 +1,11 @@
+{
+  "origin": "http://127.0.0.1:4412",
+  "fixture": "/home/solution2024/gitdash-object-tools-BgR9UC",
+  "passed": [
+    "Pinned per-path Git object sizes including duplicate blobs, unknown gitlink sizes, directory totals/drilldown, minimum/type filters and invalid minimum, filtered CSV",
+    "Containing local/remote/tag refs, exact type/name filtering, pinned target commit detail, pinned comparison prefill without execution, matching CSV",
+    "Unmerged index inventory, BASE/OURS/THEIRS independent previews and exact-byte downloads, read-only variant comparison, inventory CSV",
+    "Delayed tree-size results discarded after revision edit and delayed conflict-stage results discarded after inventory refresh"
+  ],
+  "errors": []
+}

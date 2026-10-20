@@ -1,0 +1,236 @@
+.commit-containment-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.commit-containment-heading,
+.commit-containment-detail-heading,
+.commit-containment-coverage,
+.commit-containment-tools,
+.commit-containment-run {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.commit-containment-heading > div:first-child,
+.commit-containment-detail-heading > div:first-child {
+  min-width: 0;
+  flex: 1 1 360px;
+}
+
+.commit-containment-heading h3,
+.commit-containment-detail-heading h4 {
+  margin: 0;
+}
+
+.commit-containment-heading p,
+.commit-containment-detail-heading p,
+.commit-containment-empty,
+.commit-containment-state,
+.commit-containment-error,
+.commit-containment-note {
+  margin: 4px 0 0;
+}
+
+.commit-containment-truncated,
+.commit-containment-error {
+  color: var(--c-worktree);
+}
+
+.commit-containment-run {
+  align-items: flex-end;
+}
+
+.commit-containment-run label {
+  display: grid;
+  flex: 1 1 360px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.commit-containment-run input,
+.commit-containment-tools input,
+.commit-containment-tools select {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 7px 8px;
+  font: inherit;
+}
+
+.commit-containment-run-button,
+.commit-containment-tools .subtle-button,
+.commit-containment-detail .subtle-button {
+  min-height: 34px;
+}
+
+.commit-containment-tools {
+  align-items: flex-end;
+}
+
+.commit-containment-tools label {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  max-width: 100%;
+}
+
+.commit-containment-tools .commit-containment-search {
+  flex: 1 1 260px;
+}
+
+.commit-containment-coverage {
+  color: var(--muted);
+  font: 11px var(--sans);
+}
+
+.commit-containment-coverage span,
+.commit-containment-coverage time {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.commit-containment-table-wrap {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.commit-containment-table {
+  position: relative;
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.commit-containment-table th,
+.commit-containment-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.commit-containment-table th:nth-child(1) { width: 78px; }
+.commit-containment-table th:nth-child(2) { width: 30%; }
+.commit-containment-table th:nth-child(3),
+.commit-containment-table th:nth-child(4) { width: 16%; }
+.commit-containment-table th:nth-child(5) { width: 190px; }
+
+.commit-containment-table tbody tr:last-child td { border-bottom: 0; }
+.commit-containment-table tbody tr.is-selected { background: var(--selected); }
+
+.commit-containment-ref,
+.commit-containment-hash {
+  min-width: 0;
+}
+
+.commit-containment-ref strong,
+.commit-containment-ref code,
+.commit-containment-hash code {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.commit-containment-ref code {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.commit-containment-hash code { white-space: nowrap; }
+
+.commit-containment-type {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font: 10px var(--sans);
+  text-transform: lowercase;
+}
+
+.commit-containment-type-local {
+  color: var(--c-index);
+  background: color-mix(in srgb, var(--c-index) 12%, var(--panel));
+}
+
+.commit-containment-type-remote {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.commit-containment-type-tag {
+  color: var(--c-worktree);
+  background: color-mix(in srgb, var(--c-worktree) 12%, var(--panel));
+}
+
+.commit-containment-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.commit-containment-actions .table-action {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.commit-containment-detail {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.commit-containment-detail-heading p code {
+  overflow-wrap: anywhere;
+}
+
+.commit-containment-detail-meta {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.commit-containment-detail-meta strong {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.commit-containment-error button {
+  margin-left: 8px;
+}
+
+@media (max-width: 720px) {
+  .commit-containment-heading,
+  .commit-containment-detail-heading,
+  .commit-containment-tools,
+  .commit-containment-run {
+    align-items: stretch;
+  }
+
+  .commit-containment-run > *,
+  .commit-containment-tools > * {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .commit-containment-table-wrap {
+    margin-inline: -4px;
+  }
+}

@@ -164,3 +164,35 @@ def test_file_rule_git_failures_do_not_become_empty_results(investigation, monke
         assert client.get('/api/repo/' + endpoint, params=params).status_code == 502
     for endpoint, body in [('check-ignore', {'path': path, 'paths': ['file.txt']}), ('attributes', {'path': path, 'paths': ['file.txt'], 'mode': 'worktree'})]:
         assert client.post('/api/repo/' + endpoint, json=body).status_code == 502
+
+
+def test_object_investigations_verify_snapshots_and_preserve_conflicts(investigation):
+    from pathlib import Path
+    client, path, base, target, _, git = investigation
+    git('checkout', '-b', 'conflict-feature', base)
+    (Path(path) / 'file.txt').write_text('theirs\n')
+    git('commit', '-am', 'conflicting change')
+    git('checkout', 'main')
+    result = subprocess.run(['git', '-C', path, 'merge', 'conflict-feature'], capture_output=True)
+    assert result.returncode == 1
+    before = (git('status', '--porcelain=v2'), git('show-ref'), git('diff'), git('diff', '--cached'))
+    ours, theirs = git('rev-parse', ':2:file.txt'), git('rev-parse', ':3:file.txt')
+    requests = [('conflicts', {'path': path}), ('conflict-stage', {'path': path, 'file': 'file.txt', 'stage': 2, 'expectedHash': ours}), ('conflict-comparison', {'path': path, 'file': 'file.txt', 'oursHash': ours, 'theirsHash': theirs}), ('containment', {'path': path, 'revision': base}), ('tree-sizes', {'path': path, 'revision': target})]
+    for endpoint, params in requests:
+        response = client.get('/api/repo/' + endpoint, params=params)
+        assert response.status_code == 200, (endpoint, response.text)
+        assert ('file.txt' if endpoint != 'containment' else base) in response.text
+        assert client.get('/api/repo/' + endpoint, params={**params, 'path': '/unregistered'}).status_code == 404
+        for field in params:
+            assert client.get('/api/repo/' + endpoint, params={k: v for k, v in params.items() if k != field}).status_code == 422
+    assert client.get('/api/repo/conflict-stage', params={'path': path, 'file': 'file.txt', 'stage': 2, 'expectedHash': '0' * 40}).status_code == 409
+    assert client.get('/api/repo/conflict-stage', params={'path': path, 'file': '../outside', 'stage': 2, 'expectedHash': ours}).status_code == 422
+    assert (git('status', '--porcelain=v2'), git('show-ref'), git('diff'), git('diff', '--cached')) == before
+
+
+def test_object_investigation_git_faults_remain_errors(investigation, monkeypatch):
+    client, path, base, _, _, _ = investigation
+    for module, method in [(main.conflict_inspector, 'get_conflicts'), (main.conflict_inspector, 'get_conflict_stage'), (main.conflict_inspector, 'get_conflict_comparison'), (main.commit_containment, 'get_containment'), (main.tree_sizes, 'get_tree_sizes')]:
+        monkeypatch.setattr(module, method, lambda *args: None)
+    for endpoint, params in [('conflicts', {'path': path}), ('conflict-stage', {'path': path, 'file': 'file.txt', 'stage': 2, 'expectedHash': base}), ('conflict-comparison', {'path': path, 'file': 'file.txt', 'oursHash': base, 'theirsHash': base}), ('containment', {'path': path, 'revision': base}), ('tree-sizes', {'path': path, 'revision': base})]:
+        assert client.get('/api/repo/' + endpoint, params=params).status_code == 502
