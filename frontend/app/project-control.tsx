@@ -5,6 +5,9 @@ import StashExplorer from "./stash-explorer";
 import TagExplorer from "./tag-explorer";
 import RepositoryFiles from "./repository-files";
 import BlameExplorer from "./blame-explorer";
+import ContentSearch from "./content-search";
+import IgnoreInspector from "./ignore-inspector";
+import FileAttributes from "./file-attributes";
 import ReflogExplorer from "./reflog-explorer";
 import CommitCompare from "./commit-compare";
 import FileHistoryExplorer from "./file-history-explorer";
@@ -1163,7 +1166,7 @@ export default function ProjectControl() {
           {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} relationRef={urlState.relationRef} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /><BranchHistoryExplorer key={project.main_path} project={project} onSelect={selectEvent} /></>}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
-          {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルと変更元</h3><p className="section-copy">調べる版を指定して、ファイルの内容と各行が変更されたコミットを確認できます。</p></div></div><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /></section>}
+          {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルを調べる</h3><p className="section-copy">指定した版の内容や変更元を確認し、無視ルール・改行・Git属性の扱いを調べられます。</p></div></div><ContentSearch key={`content:${project.main_path}`} path={project.main_path} /><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /><IgnoreInspector key={`ignore:${project.main_path}`} path={project.main_path} /><FileAttributes key={`attributes:${project.main_path}`} path={project.main_path} /></section>}
           {urlState.tab === "info" && <ProjectInfo project={project} onOpenGit={openGit} onSelectLane={selectLane} />}
         </section>
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}

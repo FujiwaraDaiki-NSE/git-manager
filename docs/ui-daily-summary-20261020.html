@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>gitdash UI改善 2026-10-20</title>
+<style>body{max-width:1100px;margin:40px auto;padding:0 24px;font-family:system-ui;line-height:1.8;background:#f5f7fb;color:#19334e}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #d4dfed;text-align:left}img{max-width:100%;border:1px solid #d4dfed;border-radius:8px}.score{font-size:2rem;font-weight:800}a{color:#0864c4}</style>
+<h1>ファイルを探し、Gitの扱いを理解する</h1><p>2026年10月20日。「ファイル」タブへ版固定の内容検索、無視ルール診断、改行・Git属性確認を追加しました。</p>
+<p class="score">30 + 14 × 5 = 100点</p><p>指定の加点基準による点数です。客観的な品質保証ではありません。</p><table><tr><th>領域</th><th>追加機能と価値</th><th>加点</th></tr>
+<tr><td>内容検索</td><td>指定した版のコミット済みテキストを文字列検索し、大小文字の扱いを選ぶ</td><td>+5</td></tr>
+<tr><td>内容検索</td><td>リポジトリ内のディレクトリを明示して検索範囲を限定する</td><td>+5</td></tr>
+<tr><td>内容検索</td><td>一致行を選び、同じ固定コミットの前後の内容を表示する</td><td>+5</td></tr>
+<tr><td>内容検索</td><td>検索で見つけたファイルを固定コミット・パス付きで履歴調査へ引き継ぐ</td><td>+5</td></tr>
+<tr><td>内容検索</td><td>一致行と行番号・パスをCSV保存する</td><td>+5</td></tr>
+<tr><td>無視ルール</td><td>Gitが無視している未追跡ファイルを一覧する</td><td>+5</td></tr>
+<tr><td>無視ルール</td><td>候補パスを一括診断し、適用元・行・否定ルール・追跡済みを区別する</td><td>+5</td></tr>
+<tr><td>無視ルール</td><td>取得済みの無視ファイルをパス・ルール・ディレクトリで絞り込む</td><td>+5</td></tr>
+<tr><td>無視ルール</td><td>無視ファイル一覧・候補の診断結果をCSV保存する</td><td>+5</td></tr>
+<tr><td>改行・属性</td><td>追跡ファイルのindexと作業ツリーの改行状態を一覧する</td><td>+5</td></tr>
+<tr><td>改行・属性</td><td>改行の差異・混在・不明やディレクトリで一覧を絞り込む</td><td>+5</td></tr>
+<tr><td>改行・属性</td><td>選択ファイルの有効属性を作業ツリーまたはindexの設定で一括評価する</td><td>+5</td></tr>
+<tr><td>改行・属性</td><td>2つのパスの属性を比較し、値の違いと未指定を確認する</td><td>+5</td></tr>
+<tr><td>改行・属性</td><td>改行一覧と取得済み属性をCSV保存する</td><td>+5</td></tr>
+</table><h2>検証結果</h2><p>Frontend 217件、Backend 269件成功。Next.js本番ビルド成功。独立レビューの未解決P1なし。実Git/APIとChromiumで検索、診断、属性比較、CSV、入力変更後の遅延応答破棄、空結果と失敗の区別を確認しました。PC1440pxとモバイル390pxでページ横はみ出しとpage errorなし。</p>
+<h2>稼働</h2><p>mainへコミットしGitHubへpush。既存Compose wrapperで再ビルド・再起動し、<a href="http://localhost:4412">アプリ</a>の稼働を確認しました。</p><p>検索は1000行・4MiB、無視一覧と改行一覧は1000件・1MiB、候補・属性診断は100パスまで。上限や取得失敗を明示し、Gitの状態・設定は変更しません。</p>
+<p><a href="daily-ui-20261020.md">詳細と再現手順</a> / <a href="daily-ui-20261020/result.json">GUI結果</a></p>
+<h2>検索で見つけた行の前後</h2><img src="daily-ui-20261020/content-context.png" alt="固定版の一致行と前後表示">
+<h2>パスごとの属性の違い</h2><img src="daily-ui-20261020/attributes-comparison.png" alt="2つのパスの属性比較">
+<h2>内容検索</h2><img src="daily-ui-20261020/content-search.png" alt="内容検索の画面"><p><a href="daily-ui-20261020/content-search-mobile.png">390pxの画面</a></p>
+<h2>無視ルール</h2><img src="daily-ui-20261020/ignore-inspector.png" alt="無視ルールの画面"><p><a href="daily-ui-20261020/ignore-inspector-mobile.png">390pxの画面</a></p>
+<h2>改行・Git属性</h2><img src="daily-ui-20261020/file-attributes.png" alt="改行・Git属性の画面"><p><a href="daily-ui-20261020/file-attributes-mobile.png">390pxの画面</a></p>
+</html>

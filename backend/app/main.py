@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import compare, file_history, stashes, tags, reflog, repository_files, blame, worktree_diff
+from app import content_search, ignore_inspector, file_attributes
 from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
@@ -193,6 +194,31 @@ def _blame_sync(host_path: str, repo: str, revision: str, file: str, start: int,
 def _worktree_diff_sync(host_path: str, repo: str, stage: str, file: str | None, ignore_whitespace: bool) -> dict[str, Any]:
     with _repo_lock(host_path):
         return worktree_diff.get_worktree_diff(repo, stage, file, ignore_whitespace)
+
+
+def _content_search_sync(host_path: str, repo: str, revision: str, query: str, case_sensitive: bool, directory: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return content_search.get_content_search(repo, revision, query, case_sensitive, directory)
+
+
+def _ignored_sync(host_path: str, repo: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return ignore_inspector.inventory_ignored(repo)
+
+
+def _check_ignore_sync(host_path: str, repo: str, candidates: list[str]) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return ignore_inspector.check_ignore(repo, candidates)
+
+
+def _eol_sync(host_path: str, repo: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return file_attributes.get_eol_inventory(repo)
+
+
+def _attributes_sync(host_path: str, repo: str, candidates: list[str], mode: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return file_attributes.inspect_attributes(repo, candidates, mode)
 
 
 def _get_project_sync(
@@ -1365,6 +1391,75 @@ async def read_repo_worktree_diff(path: str, stage: str, file: str, ignore_white
     except worktree_diff.WorktreeDiffError as error:
         status = 422 if error.code.startswith("invalid_") else 502
         raise HTTPException(status_code=status, detail=str(error)) from error
+
+class IgnoreCheckRequest(BaseModel):
+    path: str
+    paths: list[str]
+
+
+class AttributesRequest(BaseModel):
+    path: str
+    paths: list[str]
+    mode: str
+
+
+@app.get("/api/repo/content-search")
+async def search_repo_content(path: str, revision: str, query: str, directory: str, case_sensitive: bool = Query(..., alias="caseSensitive")) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _content_search_sync, path, repo, revision, query, case_sensitive, directory)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="内容を検索できませんでした。版と接続状態を確認してください")
+    return result
+
+
+@app.get("/api/repo/ignored")
+async def list_repo_ignored(path: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    result = await asyncio.get_running_loop().run_in_executor(pool, _ignored_sync, path, repo)
+    if result is None:
+        raise HTTPException(status_code=502, detail="無視されたファイルを取得できませんでした")
+    return result
+
+
+@app.post("/api/repo/check-ignore")
+async def check_repo_ignore(request: IgnoreCheckRequest) -> dict[str, Any]:
+    repo = _known_repo(request.path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _check_ignore_sync, request.path, repo, request.paths)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="無視ルールを診断できませんでした")
+    return result
+
+
+@app.get("/api/repo/eol")
+async def list_repo_eol(path: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _eol_sync, path, repo)
+    except file_attributes.FileAttributesError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="改行の状態を取得できませんでした")
+    return result
+
+
+@app.post("/api/repo/attributes")
+async def inspect_repo_attributes(request: AttributesRequest) -> dict[str, Any]:
+    repo = _known_repo(request.path)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(pool, _attributes_sync, request.path, repo, request.paths, request.mode)
+    except file_attributes.FileAttributesError as error:
+        status = 502 if error.code == "attributes_output_too_large" else 422
+        raise HTTPException(status_code=status, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=502, detail="Git属性を取得できませんでした")
+    return result
+
 
 @app.get("/api/stream")
 async def stream() -> StreamingResponse:

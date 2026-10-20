@@ -1,0 +1,11 @@
+{
+  "origin": "http://127.0.0.1:4412",
+  "fixture": "/home/solution2024/gitdash-file-rules-hqTP7a",
+  "passed": [
+    "Pinned literal content search, case mode, directory scope, matching-line context, immutable history handoff without execution, CSV bytes",
+    "Ignored untracked inventory, directory/search filtering, exact rule source and negation, tracked-rule distinction, inventory/diagnosis CSV",
+    "Index/worktree EOL inventory, mixed and directory filters, selected effective attributes in explicit worktree/index modes, two-path comparison, CSV",
+    "Delayed attribute result discarded after mode change; successful empty content search distinct from invalid-revision failure"
+  ],
+  "errors": []
+}

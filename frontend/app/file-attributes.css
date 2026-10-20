@@ -1,0 +1,406 @@
+.file-attributes {
+  margin-top: 18px;
+  border-top: 1px solid var(--rule);
+  padding-top: 12px;
+  min-width: 0;
+}
+
+.file-attributes > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: var(--fs-section);
+  font-weight: 700;
+}
+
+.file-attributes > section {
+  min-width: 0;
+  margin-top: 12px;
+}
+
+.file-attributes-heading,
+.file-attributes-inspection-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.file-attributes-heading h3,
+.file-attributes-inspection-heading h4,
+.file-attributes-compare h5 {
+  margin: 0;
+  font-family: var(--sans);
+}
+
+.file-attributes-heading p,
+.file-attributes-inspection-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+
+.file-attributes-refresh,
+.file-attributes-summary button,
+.file-attributes-inspection-controls button,
+.file-attributes-error button {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.file-attributes-refresh:hover:not(:disabled),
+.file-attributes-summary button:hover:not(:disabled),
+.file-attributes-inspection-controls button:hover:not(:disabled),
+.file-attributes-error button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.file-attributes-refresh:disabled,
+.file-attributes-summary button:disabled,
+.file-attributes-inspection-controls button:disabled,
+.file-attributes-error button:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.file-attributes-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) minmax(130px, 1fr) minmax(130px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin-top: 14px;
+  min-width: 0;
+}
+
+.file-attributes-controls label,
+.file-attributes-inspection-controls label,
+.file-attributes-compare-controls label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+
+.file-attributes-controls input,
+.file-attributes-controls select,
+.file-attributes-inspection-controls select,
+.file-attributes-compare-controls select {
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  padding: 6px 7px;
+}
+
+.file-attributes-search {
+  min-width: 0;
+}
+
+.file-attributes-order {
+  min-height: 32px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.file-attributes-order:hover {
+  background: var(--hover);
+}
+
+.file-attributes-summary,
+.file-attributes-inspection-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+
+.file-attributes-summary button {
+  padding: 4px 7px;
+}
+
+.file-attributes-summary > span:last-child {
+  color: var(--accent);
+}
+
+.file-attributes-note,
+.file-attributes-status,
+.file-attributes-error {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--muted-on-paper);
+  font-size: var(--fs-aux);
+}
+
+.file-attributes-error {
+  border-color: color-mix(in srgb, var(--c-conflict) 45%, var(--rule));
+  color: var(--c-conflict);
+}
+
+.file-attributes-error button {
+  margin-left: 8px;
+  padding: 3px 7px;
+}
+
+.file-attributes-table-wrap {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.file-attributes-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: var(--fs-aux);
+}
+
+.file-attributes-table th,
+.file-attributes-table td {
+  border-bottom: 1px solid var(--rule);
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.file-attributes-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.file-attributes-table tbody tr:last-child th,
+.file-attributes-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.file-attributes-table tbody th {
+  max-width: 320px;
+  font-weight: 400;
+}
+
+.file-attributes-table code,
+.file-attributes-inspection-meta code,
+.file-attributes-attribute-card > code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.file-attributes-observation,
+.file-attributes-flags {
+  display: block;
+  white-space: nowrap;
+}
+
+.file-attributes-observation {
+  color: var(--ink);
+}
+
+.observation-different,
+.observation-mixed {
+  color: var(--c-behind);
+}
+
+.observation-unknown {
+  color: var(--c-conflict);
+}
+
+.file-attributes-flags {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.file-attributes-empty {
+  color: var(--muted);
+  text-align: center !important;
+}
+
+.file-attributes-inspection {
+  margin-top: 18px;
+  border-top: 1px solid var(--rule);
+  padding-top: 14px;
+  min-width: 0;
+}
+
+.file-attributes-inspection-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-attributes-inspection-controls label {
+  min-width: 160px;
+}
+
+.file-attributes-inspection-controls button {
+  min-height: 32px;
+}
+
+.file-attributes-attribute-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-attributes-attribute-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  padding: 8px;
+}
+
+.file-attributes-attribute-card > span {
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+
+.file-attributes-attribute-card dl {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.file-attributes-attribute-card dl > div {
+  display: grid;
+  grid-template-columns: minmax(80px, max-content) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-attributes-attribute-card dt {
+  color: var(--muted);
+}
+
+.file-attributes-attribute-card dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.file-attributes-compare {
+  margin-top: 14px;
+  min-width: 0;
+}
+
+.file-attributes-compare-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+  min-width: 0;
+}
+
+.file-attributes-compare-result {
+  max-width: 100%;
+  overflow-x: auto;
+  position: relative;
+}
+
+.file-attributes-compare-result p {
+  color: var(--muted);
+  font-size: var(--fs-aux);
+}
+
+.file-attributes-compare-result table {
+  width: 100%;
+  min-width: 460px;
+  border-collapse: collapse;
+  font-size: var(--fs-aux);
+}
+
+.file-attributes-compare-result th,
+.file-attributes-compare-result td {
+  border-bottom: 1px solid var(--rule);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.file-attributes-compare-result tr.is-different {
+  background: color-mix(in srgb, var(--c-behind) 8%, transparent);
+}
+
+.file-attributes-compare-result tr.is-same {
+  color: var(--muted);
+}
+
+@media (max-width: 760px) {
+  .file-attributes-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .file-attributes-search {
+    grid-column: 1 / -1;
+  }
+
+  .file-attributes-order {
+    min-width: 0;
+  }
+
+  .file-attributes-heading,
+  .file-attributes-inspection-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .file-attributes-heading,
+  .file-attributes-inspection-heading {
+    display: block;
+  }
+
+  .file-attributes-refresh {
+    margin-top: 8px;
+  }
+
+  .file-attributes-inspection-controls {
+    justify-content: stretch;
+    margin-top: 10px;
+  }
+
+  .file-attributes-inspection-controls label,
+  .file-attributes-inspection-controls button {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .file-attributes-compare-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

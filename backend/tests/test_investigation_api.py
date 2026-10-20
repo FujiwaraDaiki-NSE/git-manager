@@ -117,3 +117,50 @@ def test_file_endpoints_reject_missing_unsafe_and_unknown_inputs(investigation):
             assert client.get(f'/api/repo/{endpoint}', params={'path': path, **missing}).status_code == 422
         if 'file' in params:
             assert client.get(f'/api/repo/{endpoint}', params={'path': path, **params, 'file': '../outside'}).status_code == 422
+
+
+def test_content_and_file_rules_endpoints_are_explicit_and_read_only(investigation):
+    from pathlib import Path
+    client, path, _, _, _, git = investigation
+    root = Path(path)
+    (root / '.gitignore').write_text('*.log\n!keep.log\n')
+    (root / '.gitattributes').write_text('*.txt text eol=lf\n')
+    git('add', '.gitignore', '.gitattributes')
+    git('commit', '-m', 'Add explicit file rules')
+    revision = git('rev-parse', 'HEAD')
+    (root / 'debug.log').write_text('ignored\n')
+    (root / 'keep.log').write_text('not ignored\n')
+    before = (git('status', '--porcelain=v2'), git('show-ref'), git('diff'), git('diff', '--cached'))
+    search = {'path': path, 'revision': revision, 'query': 'two', 'caseSensitive': True, 'directory': ''}
+    response = client.get('/api/repo/content-search', params=search)
+    assert response.status_code == 200
+    assert revision in response.text and 'file.txt' in response.text and 'two' in response.text
+    for endpoint in ('ignored', 'eol'):
+        response = client.get('/api/repo/' + endpoint, params={'path': path})
+        assert response.status_code == 200
+        assert ('debug.log' if endpoint == 'ignored' else 'file.txt') in response.text
+    response = client.post('/api/repo/check-ignore', json={'path': path, 'paths': ['debug.log', 'keep.log', 'file.txt']})
+    assert response.status_code == 200
+    assert '*.log' in response.text and '!keep.log' in response.text
+    response = client.post('/api/repo/attributes', json={'path': path, 'paths': ['file.txt'], 'mode': 'worktree'})
+    assert response.status_code == 200
+    assert 'eol' in response.text and 'lf' in response.text
+    assert (git('status', '--porcelain=v2'), git('show-ref'), git('diff'), git('diff', '--cached')) == before
+    assert client.get('/api/repo/content-search', params={**search, 'path': '/unregistered'}).status_code == 404
+    for field in search:
+        assert client.get('/api/repo/content-search', params={k: v for k, v in search.items() if k != field}).status_code == 422
+    for endpoint, body in [('check-ignore', {'path': path, 'paths': ['file.txt']}), ('attributes', {'path': path, 'paths': ['file.txt'], 'mode': 'worktree'})]:
+        assert client.post('/api/repo/' + endpoint, json={**body, 'path': '/unregistered'}).status_code == 404
+        assert client.post('/api/repo/' + endpoint, json={**body, 'paths': ['../outside']}).status_code == 422
+        for field in body:
+            assert client.post('/api/repo/' + endpoint, json={k: v for k, v in body.items() if k != field}).status_code == 422
+
+
+def test_file_rule_git_failures_do_not_become_empty_results(investigation, monkeypatch):
+    client, path, _, revision, _, _ = investigation
+    for module, function in [(main.content_search, 'get_content_search'), (main.ignore_inspector, 'inventory_ignored'), (main.ignore_inspector, 'check_ignore'), (main.file_attributes, 'get_eol_inventory'), (main.file_attributes, 'inspect_attributes')]:
+        monkeypatch.setattr(module, function, lambda *args: None)
+    for endpoint, params in [('content-search', {'path': path, 'revision': revision, 'query': 'x', 'directory': '', 'caseSensitive': True}), ('ignored', {'path': path}), ('eol', {'path': path})]:
+        assert client.get('/api/repo/' + endpoint, params=params).status_code == 502
+    for endpoint, body in [('check-ignore', {'path': path, 'paths': ['file.txt']}), ('attributes', {'path': path, 'paths': ['file.txt'], 'mode': 'worktree'})]:
+        assert client.post('/api/repo/' + endpoint, json=body).status_code == 502
