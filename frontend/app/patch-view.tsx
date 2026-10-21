@@ -4,6 +4,13 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import CopyButton from "./copy-button";
 import { parsePatch } from "./parse-patch.mjs";
 import { findPatchMatches, selectPatchRows, splitPatchByFile, summarizePatchSection } from "./patch-tools.mjs";
+import {
+  buildVisiblePatch,
+  classifyPatchSection,
+  filterPatchReviewEntries,
+  patchReviewProgress,
+  sortPatchReviewEntries,
+} from "./patch-review-tools.mjs";
 import "./patch-tools.css";
 
 const PATCH_PAGE_LINES = 300;
@@ -16,6 +23,11 @@ type PatchMatch = {
   length: number;
   id: string;
 };
+type PatchFileKind = "all" | "text" | "binary";
+type PatchFileSort = "original" | "path" | "changes";
+type PatchReviewEntry = { section: PatchSection; index: number };
+
+const EMPTY_REVIEWED = new Set<number>();
 
 function PatchText({ text, matches, activeMatchId }: { text: string; matches: PatchMatch[]; activeMatchId: string | null }) {
   if (matches.length === 0) return <>{text}</>;
@@ -99,7 +111,8 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId }: { se
 
 function FileSummary({ section }: { section: PatchSection }) {
   const summary = summarizePatchSection(section);
-  if (summary.binary) return <span className="patch-file-summary patch-file-summary-empty" aria-label="バイナリ差分（テキスト行なし）"><span className="patch-file-stat patch-file-stat-binary">バイナリ</span><span>テキスト行なし</span></span>;
+  const kind = classifyPatchSection(section);
+  if (kind === "binary") return <span className="patch-file-summary patch-file-summary-empty" aria-label="バイナリ差分（テキスト行なし）"><span className="patch-file-stat patch-file-stat-binary">バイナリ</span><span>テキスト行なし</span></span>;
   if (!summary.hasTextLines || (summary.additions === 0 && summary.deletions === 0)) return <span className="patch-file-summary patch-file-summary-empty" aria-label="テキスト差分なし"><span className="patch-file-stat">テキスト差分なし</span></span>;
   return <span className="patch-file-summary" aria-label={`追加 ${summary.additions} 行、削除 ${summary.deletions} 行`}>
     <span className="patch-file-stat patch-file-stat-addition"><strong aria-hidden="true">＋</strong>{summary.additions.toLocaleString()}</span>
@@ -110,20 +123,32 @@ function FileSummary({ section }: { section: PatchSection }) {
 export default function PatchView({ patch }: { patch: string }) {
   const sections = useMemo(() => parsePatch(patch), [patch]);
   const sectionPatches = useMemo(() => splitPatchByFile(patch), [patch]);
+  const indexedSections = useMemo<PatchReviewEntry[]>(() => sections.map((section, index) => ({ section, index })), [sections]);
   const [wrap, setWrap] = useState(false);
   const [changedOnly, setChangedOnly] = useState(false);
   const [fileQuery, setFileQuery] = useState("");
+  const [fileKind, setFileKind] = useState<PatchFileKind>("all");
+  const [fileSort, setFileSort] = useState<PatchFileSort>("original");
+  const [hideReviewed, setHideReviewed] = useState(false);
+  const [reviewState, setReviewState] = useState<{ patch: string; indexes: Set<number> }>({ patch, indexes: new Set() });
   const [contentQuery, setContentQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState("");
   const fileSearchRef = useRef<HTMLInputElement>(null);
   const contentSearchRef = useRef<HTMLInputElement>(null);
   const patchResultsId = `patch-results-${useId().replaceAll(":", "")}`;
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set([0]));
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
 
+  const reviewedIndexes = reviewState.patch === patch ? reviewState.indexes : EMPTY_REVIEWED;
   const normalizedFileQuery = fileQuery.trim().toLocaleLowerCase();
-  const visible = useMemo(() => sections.map((section, index) => ({ section, index })).filter(({ section }) => section.title.toLocaleLowerCase().includes(normalizedFileQuery)), [normalizedFileQuery, sections]);
+  const visible = useMemo(() => {
+    const filteredByKind = filterPatchReviewEntries(indexedSections, fileKind);
+    const filteredByName = filteredByKind.filter(({ section }) => section.title.toLocaleLowerCase().includes(normalizedFileQuery));
+    const filteredByReview = hideReviewed ? filteredByName.filter(({ index }) => !reviewedIndexes.has(index)) : filteredByName;
+    return sortPatchReviewEntries(filteredByReview, fileSort);
+  }, [fileKind, fileSort, hideReviewed, indexedSections, normalizedFileQuery, reviewedIndexes]);
   const visibleIndexes = useMemo(() => visible.map(({ index }) => index), [visible]);
   const matches = useMemo(() => findPatchMatches(sections, contentQuery, { changedOnly, sectionIndexes: visibleIndexes, caseSensitive, wholeWord }), [changedOnly, contentQuery, sections, visibleIndexes, caseSensitive, wholeWord]);
   const matchesBySection = useMemo(() => {
@@ -153,6 +178,36 @@ export default function PatchView({ patch }: { patch: string }) {
     if (sections.length === 0) return;
     setExpanded((current) => current.size > 0 && [...current].every((index) => index < sections.length) ? current : new Set([0]));
   }, [sections]);
+
+  useEffect(() => {
+    setReviewState({ patch, indexes: new Set() });
+    setDownloadStatus("");
+  }, [patch]);
+
+  const reviewProgress = useMemo(() => patchReviewProgress(sections.length, reviewedIndexes), [reviewedIndexes, sections.length]);
+
+  const toggleReviewed = (index: number) => {
+    setReviewState((current) => {
+      const indexes = current.patch === patch ? new Set(current.indexes) : new Set<number>();
+      if (indexes.has(index)) indexes.delete(index); else indexes.add(index);
+      return { patch, indexes };
+    });
+  };
+
+  const downloadVisiblePatch = () => {
+    const value = buildVisiblePatch(sectionPatches, visible);
+    if (value === "") {
+      setDownloadStatus("表示中のファイルがありません。");
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([value], { type: "text/x-patch;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "gitdash-visible.patch";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setDownloadStatus(`${visible.length.toLocaleString()} ファイルのパッチ保存を開始しました。表示順に関係なく元のパッチ順を保持しています。`);
+  };
 
   const goToMatch = (direction: 1 | -1) => {
     if (matches.length === 0) return;
@@ -190,6 +245,19 @@ export default function PatchView({ patch }: { patch: string }) {
       <span className="patch-legend"><span>＋ 追加</span><span>− 削除</span></span>
       <button type="button" aria-pressed={changedOnly} onClick={() => setChangedOnly((value) => !value)}>{changedOnly ? "すべての行を表示" : "変更行のみ"}</button>
       <button type="button" aria-pressed={wrap} onClick={() => setWrap((value) => !value)}>行を折り返す</button>
+      {sections.length > 1 && <div className="patch-review-controls" aria-label="差分ファイルの表示設定">
+        <label>内容<select value={fileKind} onChange={(event) => setFileKind(event.target.value as PatchFileKind)}>
+          <option value="all">すべて</option>
+          <option value="text">テキスト変更</option>
+          <option value="binary">バイナリ</option>
+        </select></label>
+        <label>並び順<select value={fileSort} onChange={(event) => setFileSort(event.target.value as PatchFileSort)}>
+          <option value="original">元の順序</option>
+          <option value="path">パス順</option>
+          <option value="changes">変更行数の多い順</option>
+        </select></label>
+        <label className="patch-review-checkbox"><input type="checkbox" checked={hideReviewed} onChange={(event) => setHideReviewed(event.target.checked)} />レビュー済みを隠す</label>
+      </div>}
       {sections.length > 1 && <button type="button" disabled={!visible.length} onClick={() => setExpanded((current) => {
         const collapse = visible.every(({ index }) => current.has(index));
         const next = new Set(current);
@@ -197,9 +265,12 @@ export default function PatchView({ patch }: { patch: string }) {
         return next;
       })}>{visible.length > 0 && visible.every(({ index }) => expanded.has(index)) ? "表示中を折りたたむ" : "表示中を展開"}</button>}
       <CopyButton value={patch} label="差分全体をコピー" />
-      {changedOnly && <span className="patch-view-note" role="status">コンテキスト行を非表示中。hunkヘッダーと変更行、行番号は表示しています。</span>}
+      <button className="patch-export-button" type="button" disabled={!visible.length} onClick={downloadVisiblePatch}>表示中のファイルをパッチ保存</button>
+      <span className="patch-review-progress" role="status" aria-live="polite">レビュー済み {reviewProgress.reviewed.toLocaleString()} / {reviewProgress.total.toLocaleString()} ファイル</span>
+      {downloadStatus && <span className="patch-download-status" role="status" aria-live="polite">{downloadStatus}</span>}
+      <span className="patch-view-note" role="status">レビュー済みの印はこの画面だけの表示状態です。Gitの状態は変更しません。{changedOnly ? " コンテキスト行を非表示中。hunkヘッダーと変更行、行番号は表示しています。" : ""}</span>
     </div>
-    {visible.length === 0 && <p className="patch-empty">一致する差分ファイルがありません。ファイル名検索を変更するかクリアしてください。</p>}
+    {visible.length === 0 && <p className="patch-empty">表示条件に一致する差分ファイルがありません。検索・内容フィルター・レビュー済みを隠す設定を確認してください。</p>}
     <div id={patchResultsId}>
       {visible.map(({ section, index }) => {
         const sectionMatches = matchesBySection.get(index) ?? [];
@@ -216,6 +287,9 @@ export default function PatchView({ patch }: { patch: string }) {
           <summary title={section.title}>
             <span className="patch-file-title">{section.title}</span>
             <FileSummary section={section} />
+            <button className={`patch-review-toggle${reviewedIndexes.has(index) ? " is-reviewed" : ""}`} type="button" aria-pressed={reviewedIndexes.has(index)} aria-label={`${section.title}を${reviewedIndexes.has(index) ? "未レビューに戻す" : "レビュー済みにする"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); toggleReviewed(index); }}>
+              {reviewedIndexes.has(index) ? "レビュー済み" : "未レビュー"}
+            </button>
             <span className="patch-file-copy" onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={(event) => event.stopPropagation()}><CopyButton value={rawSection} label={`${section.title} の差分をコピー`} /></span>
           </summary>
           {expanded.has(index) && <PatchLines section={section} wrap={wrap} changedOnly={changedOnly} matches={sectionMatches} activeMatchId={activeMatchId} />}

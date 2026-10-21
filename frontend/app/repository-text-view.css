@@ -1,0 +1,285 @@
+.repository-text-view {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.repository-text-search,
+.repository-text-controls,
+.repository-text-line-jump,
+.repository-text-range-copy,
+.repository-text-display-controls,
+.repository-text-pagination {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.repository-text-search,
+.repository-text-controls {
+  min-width: 0;
+}
+
+.repository-text-search {
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.repository-text-search label,
+.repository-text-line-jump label,
+.repository-text-range-copy label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted-on-paper);
+  font: 11px var(--sans);
+}
+
+.repository-text-search label {
+  min-width: min(280px, 100%);
+  flex: 1 1 280px;
+}
+
+.repository-text-line-jump label,
+.repository-text-range-copy label {
+  min-width: 86px;
+}
+
+.repository-text-search input,
+.repository-text-line-jump input,
+.repository-text-range-copy input {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 12px var(--mono);
+}
+
+.repository-text-search input:focus,
+.repository-text-line-jump input:focus,
+.repository-text-range-copy input:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
+.repository-text-search button,
+.repository-text-controls button,
+.repository-text-pagination button {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--accent);
+  cursor: pointer;
+  font: 11px var(--sans);
+}
+
+.repository-text-search button:hover,
+.repository-text-controls button:hover,
+.repository-text-pagination button:hover {
+  border-color: var(--accent);
+  background: var(--control-blue-soft, var(--paper));
+}
+
+.repository-text-search button:disabled,
+.repository-text-controls button:disabled,
+.repository-text-pagination button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+.repository-text-search button[aria-pressed="true"],
+.repository-text-controls button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--ink);
+}
+
+.repository-text-search-status,
+.repository-text-control-status,
+.repository-text-pagination {
+  color: var(--muted-on-paper);
+  font: 11px var(--sans);
+}
+
+.repository-text-search-status {
+  white-space: nowrap;
+}
+
+.repository-text-controls {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.repository-text-line-jump,
+.repository-text-range-copy,
+.repository-text-display-controls {
+  align-items: flex-end;
+}
+
+.repository-text-range-copy > span[aria-hidden="true"] {
+  align-self: center;
+  color: var(--muted-on-paper);
+  font: 13px var(--mono);
+}
+
+.repository-text-display-controls {
+  margin-left: auto;
+}
+
+.repository-text-range-copy .copy-control,
+.repository-text-display-controls .copy-control {
+  align-self: flex-end;
+}
+
+.repository-text-range-copy .copy-button,
+.repository-text-display-controls .copy-button {
+  min-height: 32px;
+}
+
+.repository-text-range-copy > .copy-button {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted-on-paper);
+  cursor: default;
+  font: 11px var(--sans);
+  opacity: .55;
+}
+
+.repository-text-code {
+  max-height: 480px;
+  overflow: auto;
+  min-width: 0;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  font: 12px/1.55 var(--mono);
+  tab-size: 4;
+}
+
+.repository-text-code:focus-visible,
+.repository-text-line:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.repository-text-line {
+  display: grid;
+  grid-template-columns: minmax(4ch, max-content) minmax(max-content, 1fr);
+  min-width: max-content;
+}
+
+.repository-text-code.is-wrapped .repository-text-line {
+  min-width: 0;
+  grid-template-columns: minmax(4ch, max-content) minmax(0, 1fr);
+}
+
+.repository-text-number {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: block;
+  padding: 0 9px;
+  border-right: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--muted-on-paper);
+  text-align: right;
+  user-select: none;
+}
+
+.repository-text-content {
+  display: block;
+  min-width: max-content;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.repository-text-code.is-wrapped .repository-text-content {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.repository-text-match {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 25%, var(--panel));
+  color: inherit;
+  outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.repository-text-match.is-active {
+  background: color-mix(in srgb, var(--c-behind, #d68500) 34%, var(--panel));
+  outline-color: var(--c-behind, #d68500);
+}
+
+.repository-text-space,
+.repository-text-tab {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.repository-text-tab {
+  display: inline-block;
+  min-width: 1ch;
+  color: var(--accent);
+}
+
+.repository-text-pagination {
+  align-items: center;
+  padding-top: 2px;
+}
+
+.repository-text-pagination button {
+  margin-left: 2px;
+}
+
+.repository-text-empty,
+.repository-text-truncated {
+  margin: 0;
+  color: var(--muted-on-paper);
+  font-size: 11px;
+}
+
+.repository-text-truncated {
+  color: var(--c-behind, var(--muted-on-paper));
+}
+
+@media (max-width: 700px) {
+  .repository-text-search,
+  .repository-text-controls {
+    align-items: stretch;
+  }
+
+  .repository-text-search label,
+  .repository-text-search input,
+  .repository-text-line-jump,
+  .repository-text-range-copy,
+  .repository-text-display-controls {
+    width: 100%;
+  }
+
+  .repository-text-search button,
+  .repository-text-controls button {
+    flex: 1 1 auto;
+  }
+
+  .repository-text-display-controls {
+    margin-left: 0;
+  }
+
+  .repository-text-control-status {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .repository-text-view * { scroll-behavior: auto; }
+}

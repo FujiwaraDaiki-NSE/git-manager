@@ -305,3 +305,16 @@
 @media (prefers-reduced-motion: reduce) {
   .repository-files * { scroll-behavior: auto; }
 }
+
+.repository-files-tools select {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 12px var(--sans);
+}
+.repository-files-tools select:focus-visible { outline: 2px solid var(--accent); }
+.repository-files-export { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font: 11px var(--sans); }
+.repository-files-table tr:has(button:focus-visible) { background: var(--selected); }

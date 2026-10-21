@@ -4,15 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   REPOSITORY_FILES_MAX_BLOB_BYTES,
   REPOSITORY_FILES_MAX_PREVIEW_BYTES,
-  boundedRepositoryText,
   buildRepositoryFileHistoryHref,
   filterRepositoryFileEntries,
-  listRepositoryDirectoryEntries,
   repositoryBase64ToBytes,
   repositoryFileName,
   repositoryFileQuery,
   repositoryFilesQuery,
 } from "./repository-files-tools.mjs";
+import CopyButton from "./copy-button";
+import RepositoryTextView from "./repository-text-view";
+import { organizeInventory, inventoryPathList, inventoryCsv, adjacentInventoryFiles } from "./repository-inventory-tools.mjs";
 import "./repository-files.css";
 
 type RepositoryFileEntry = {
@@ -61,7 +62,7 @@ function isInventory(value: unknown): value is RepositoryFilesInventory {
     && Array.isArray(item.entries)
     && typeof item.truncated === "boolean"
     && Number.isInteger(item.limit)
-    && item.entries.every((entry) => entry && typeof entry === "object" && isString(entry.path) && isString(entry.mode) && isString(entry.type));
+    && item.entries.every((entry) => entry && typeof entry === "object" && isString(entry.path) && isString(entry.mode) && isString(entry.type) && (entry.hash === null || isString(entry.hash)));
 }
 
 function isFilePayload(value: unknown): value is RepositoryFilePayload {
@@ -128,6 +129,9 @@ export default function RepositoryFiles({ path }: { path: string }) {
   const [revision, setRevision] = useState("");
   const [directory, setDirectory] = useState("");
   const [query, setQuery] = useState("");
+  const [kind, setKind] = useState("all");
+  const [order, setOrder] = useState("path");
+  const [exportStatus, setExportStatus] = useState("");
   const [inventory, setInventory] = useState<RepositoryFilesInventory | null>(null);
   const [inventoryState, setInventoryState] = useState<LoadState>("idle");
   const [inventoryError, setInventoryError] = useState<string | null>(null);
@@ -150,6 +154,9 @@ export default function RepositoryFiles({ path }: { path: string }) {
     inventoryKeyRef.current = null;
     fileKeyRef.current = null;
     setRevision("");
+    setKind("all");
+    setOrder("path");
+    setExportStatus("");
     setDirectory("");
     setQuery("");
     setInventory(null);
@@ -182,10 +189,11 @@ export default function RepositoryFiles({ path }: { path: string }) {
     setDownloadStatus("");
   }, [revision]);
 
-  const visibleEntries = useMemo(() => {
+  const visibleEntries = useMemo<RepositoryFileEntry[]>(() => {
     if (!inventory) return [];
-    return filterRepositoryFileEntries(inventory.entries, directory, query);
-  }, [directory, inventory, query]);
+    return organizeInventory(filterRepositoryFileEntries(inventory.entries, directory, query), kind, order);
+  }, [directory, inventory, query, kind, order]);
+  const adjacent = adjacentInventoryFiles(visibleEntries, selectedFile);
 
   const breadcrumbs = useMemo(() => breadcrumbParts(directory), [directory]);
   const searching = query.trim() !== "";
@@ -275,6 +283,19 @@ export default function RepositoryFiles({ path }: { path: string }) {
     });
   };
 
+  const exportInventory = () => {
+    if (!inventory || !visibleEntries.length) return;
+    try {
+      const url = URL.createObjectURL(new Blob(["\uFEFF", inventoryCsv(visibleEntries, inventory.pinned_hash)], { type: "text/csv;charset=utf-8" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "gitdash-revision-files.csv";
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportStatus(`${visibleEntries.length}件のCSV保存を開始しました。`);
+    } catch { setExportStatus("CSVの保存を開始できませんでした。"); }
+  };
+
   const download = () => {
     if (!file || file.downloadable !== true || file.truncated || file.size > REPOSITORY_FILES_MAX_BLOB_BYTES) return;
     try {
@@ -305,7 +326,6 @@ export default function RepositoryFiles({ path }: { path: string }) {
       historyHref = null;
     }
   }
-  const previewText = file?.text === null || file?.text === undefined ? null : boundedRepositoryText(file.text, REPOSITORY_FILES_MAX_PREVIEW_BYTES);
   const binaryPreview = file?.binary && file.content_base64 ? file.content_base64.slice(0, Math.floor(REPOSITORY_FILES_MAX_PREVIEW_BYTES / 3) * 4) : "";
   const canDownload = file?.downloadable === true && file.truncated === false && file.size <= REPOSITORY_FILES_MAX_BLOB_BYTES;
 
@@ -337,7 +357,15 @@ export default function RepositoryFiles({ path }: { path: string }) {
             </div>
             <div className="repository-files-tools" role="group" aria-label="取得済みファイルの検索と移動">
               <label><span>ファイルパス検索</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="取得済みの全パスを検索" aria-label="取得済みrevisionのファイルパスを検索" /></label>
+              <label><span>ファイル種別</span><select aria-label="版のファイル種別" value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">すべて</option><option value="directory">ディレクトリ</option><option value="file">通常ファイル</option><option value="symlink">symlink</option><option value="gitlink">gitlink</option></select></label>
+              <label><span>並び順</span><select aria-label="版のファイルの並び順" value={order} onChange={(event) => setOrder(event.target.value)}><option value="path">パス昇順</option><option value="path-desc">パス降順</option><option value="kind">種別順</option></select></label>
               <div className="repository-files-breadcrumbs" aria-label="ディレクトリ階層"><button type="button" className={directory === "" ? "is-current" : ""} onClick={() => { setDirectory(""); setQuery(""); }}>ルート</button>{breadcrumbs.map((crumb) => <span key={crumb.path}><span aria-hidden="true">/</span><button type="button" className={directory === crumb.path ? "is-current" : ""} onClick={() => { setDirectory(crumb.path); setQuery(""); }}>{crumb.name}</button></span>)}</div>
+            </div>
+            <div className="repository-files-export" role="group" aria-label="表示中の版のファイルを書き出す">
+              <span role="status">表示 {visibleEntries.length}件</span>
+              {visibleEntries.length > 0 && <CopyButton value={inventoryPathList(visibleEntries)} label="表示パスをコピー（JSON文字列・1行1件）" />}
+              <button type="button" className="subtle-button" disabled={!visibleEntries.length} onClick={exportInventory}>表示一覧をCSV保存</button>
+              {exportStatus && <span role="status">{exportStatus}</span>}
             </div>
             {inventory.truncated && <p className="repository-files-truncated" role="status">ファイル一覧は{inventory.limit.toLocaleString()}件で切り詰められています。検索対象も取得済みのパスに限られます。</p>}
             {visibleEntries.length === 0 ? <p className="repository-files-empty" role="status">{searching ? "検索に一致する取得済みパスはありません。" : "このディレクトリにファイルはありません。"}</p> : <div className="repository-files-table-wrap" role="region" aria-label="revisionのファイル一覧" tabIndex={0}><table className="repository-files-table"><thead><tr><th>種別</th><th>パス</th><th>object</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{visibleEntries.map((entry) => <tr key={`${entry.type}:${entry.path}`}><td><span className={`repository-files-kind repository-files-kind-${entry.type === "tree" ? "tree" : "file"}`}>{entryKind(entry)}</span></td><td className="repository-files-path"><code title={entry.path}>{entry.path}</code></td><td>{entry.hash ? <code title={entry.hash}>{shortHash(entry.hash)}</code> : "—"}</td><td><button type="button" className="table-action" onClick={() => loadFile(entry)}>{entry.type === "tree" ? "開く" : "表示"}</button></td></tr>)}</tbody></table></div>}
@@ -351,13 +379,16 @@ export default function RepositoryFiles({ path }: { path: string }) {
             <div className="repository-files-viewer-heading">
               <div><h4 id="repository-files-viewer-title">{file.path}</h4><p><span>{entryKind({ path: file.path, mode: file.mode, type: file.type, hash: file.hash })}</span> · {formatBytes(file.size)} · <code>{shortHash(file.hash)}</code></p></div>
               <div className="repository-files-actions">
+                <button type="button" className="subtle-button" disabled={adjacent.previous === null} onClick={() => { if (adjacent.previous) loadFile(adjacent.previous); }}>前のファイル</button>
+                <span role="status">{adjacent.index < 0 ? "選択ファイルは現在の一覧外" : `${adjacent.index + 1} / ${adjacent.count} ファイル`}</span>
+                <button type="button" className="subtle-button" disabled={adjacent.next === null} onClick={() => { if (adjacent.next) loadFile(adjacent.next); }}>次のファイル</button>
                 {historyHref && <a className="subtle-button" href={historyHref}>ファイル履歴を調べる</a>}
                 <button type="button" className="subtle-button" disabled={!canDownload} onClick={download}>完全なblobを保存</button>
               </div>
             </div>
             {file.kind === "symlink" && <p className="repository-files-note" role="note">symlinkのリンク先は追跡しません。Gitに保存されたリンク文字列だけを表示しています。</p>}
             {file.kind === "gitlink" && <p className="repository-files-note" role="note">gitlinkはサブモジュールの参照です。別リポジトリの内容は読み取りません。</p>}
-            {file.binary ? <div className="repository-files-binary" role="status"><strong>バイナリblob</strong><p>UTF-8テキストとして表示できないため、保存可能な完全blobかどうかだけを明示します。</p>{binaryPreview && <pre aria-label="バイナリblobのbase64プレビュー">{binaryPreview}</pre>}</div> : file.text !== null && file.text !== undefined ? <pre className="repository-files-text" aria-label="バージョン付きファイルのテキスト">{previewText}</pre> : <p className="repository-files-empty" role="status">表示できる本文はありません。</p>}
+            {file.binary ? <div className="repository-files-binary" role="status"><strong>バイナリblob</strong><p>UTF-8テキストとして表示できないため、保存可能な完全blobかどうかだけを明示します。</p>{binaryPreview && <pre aria-label="バイナリblobのbase64プレビュー">{binaryPreview}</pre>}</div> : file.text !== null && file.text !== undefined ? <RepositoryTextView key={`${file.pinned_hash}:${file.path}`} text={file.text} /> : <p className="repository-files-empty" role="status">表示できる本文はありません。</p>}
             {file.truncated && <p className="repository-files-truncated" role="status">blobが{formatBytes(file.download_limit)}を超えるため、先頭のプレビューだけを表示しています。完全な保存はできません。</p>}
             {!file.truncated && !canDownload && file.kind !== "gitlink" && <p className="repository-files-note" role="status">このblobはダウンロード対象外です。</p>}
             {downloadStatus && <p className="repository-files-status" role="status" aria-live="polite">{downloadStatus}</p>}
