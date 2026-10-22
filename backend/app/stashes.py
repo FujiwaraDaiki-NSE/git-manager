@@ -37,9 +37,9 @@ def valid_hash(value: str) -> bool:
 def _parse_inventory(raw: str) -> list[dict[str, str]] | None:
     """Parse the NUL-delimited stash-list format without touching paths.
 
-    ``git stash list`` adds a line ending after the final format record.  The
-    format itself ends in NUL, so only a final standalone newline is removed;
-    a newline inside a field would remain part of that field.
+    ``git stash list`` adds a line ending after each format record. The format
+    itself ends in NUL, so separators occur before the next hash and after
+    the final record. Newlines inside subject fields remain untouched.
     """
 
     if raw == "":
@@ -53,6 +53,10 @@ def _parse_inventory(raw: str) -> list[dict[str, str]] | None:
     entries: list[dict[str, str]] = []
     for offset in range(0, len(fields), 4):
         commit_hash, selector, subject, date = fields[offset:offset + 4]
+        # Git inserts one record separator after each trailing format NUL.
+        # Remove it only from the next hash, preserving field contents.
+        if offset > 0:
+            commit_hash = commit_hash.removeprefix("\n")
         if not valid_hash(commit_hash) or not selector:
             return None
         entries.append(

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2026-10-23 gitdash UI改善 summary</title>
+<style>body{font:16px/1.7 system-ui,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px;color:#172338;background:#f7f9fc}h1,h2{line-height:1.3}table{border-collapse:collapse;background:white;width:100%}td,th{border:1px solid #ccd5e2;padding:10px;text-align:left}code{overflow-wrap:anywhere}.score{font-size:25px;font-weight:700}li{margin:6px 0}</style>
+<h1>2026-10-23 gitdash UI改善</h1>
+<p class="score">開始30点 + 機能追加14件×5点 + 既存バグ修正1件×1点 = 101点</p>
+<p>100点の基準を達成。ユーザー指定の加点方式による結果であり、客観的な品質保証ではない。前日までの点数は持ち越していない。高速化・見た目・文言には加点していない。関連コントロール・テスト・レスポンシブ修正を別件として重複加点していない。</p>
+<h2>背景と変更</h2>
+<p>開始時はagent履歴が1,600件以上並び、対象の作業報告を探す操作がなかった。stash一覧は件名検索だけで、調査時期の絞り込みや結果の引き継ぎに手間がかかっていた。既存の読み取り専用機能と明示状態の契約を保持し、取得済みのデータを調べる機能を追加した。</p>
+<table><thead><tr><th>改善</th><th>分類・加点</th><th>ユーザー価値と検証根拠</th></tr></thead><tbody>
+<tr><td>agent報告の全文検索</td><td>機能 +5</td><td>project・branch・summary・worktreeを検索。GUIで対象の報告だけに縮小。</td></tr>
+<tr><td>agentプロジェクトの完全一致選択</td><td>機能 +5</td><td>同名プロジェクトもIDで区別。GUIでgit-managerを選択。</td></tr>
+<tr><td>agent明示状態の絞り込み</td><td>機能 +5</td><td>現在状態と履歴からテスト中・レビュー中等を検索。lifecycleから状態を補わない。</td></tr>
+<tr><td>agent履歴種別の選択</td><td>機能 +5</td><td>状態報告とライフサイクルを区別。GUIでlifecycleだけの履歴と現在状態の独立性を確認。</td></tr>
+<tr><td>agent履歴の日付範囲</td><td>機能 +5</td><td>ローカル暦日・両端を含む。GUIで同日1件、逆転範囲のエラー・CSV無効化を確認。</td></tr>
+<tr><td>agent履歴の並び替え</td><td>機能 +5</td><td>調査の起点から経過を追える。GUIで複数件の新しい順・古い順の実日時を比較。</td></tr>
+<tr><td>絞り込んだagent履歴CSV</td><td>機能 +5</td><td>実ダウンロードの1行をproject・status・kind・日時まで照合。数式対策は単体テスト。</td></tr>
+<tr><td>agent表示の固定・ライブ再開</td><td>機能 +5</td><td>読む途中の移動を防ぐ。固定中に実際の新状態報告を送り、旧表示保持と再開後の更新を確認。</td></tr>
+<tr><td>stashの日付範囲</td><td>機能 +5</td><td>実在2件から同日範囲で1件を表示。逆転範囲を明示エラーにしCSVを無効化。</td></tr>
+<tr><td>stashの並び替え</td><td>機能 +5</td><td>Git順・新しい順・古い順・件名順。GUIで実在2件の順序変更、単体で不明日時と安定順序を確認。</td></tr>
+<tr><td>表示中stashのCSV保存</td><td>機能 +5</td><td>実ダウンロードの2行を順序・完全hashまで照合。数式・引用符等は単体テスト。</td></tr>
+<tr><td>表示中stashの完全hashリストコピー</td><td>機能 +5</td><td>一覧の順序のまま不変IDを引き継げる。実クリップボードの2hashを確認。</td></tr>
+<tr><td>表示中stashの前後移動</td><td>機能 +5</td><td>複数の退避内容を順に調査。GUIで移動・端の無効化・条件外選択時の移動無効を確認。</td></tr>
+<tr><td>選択stashのMarkdown調査レポート</td><td>機能 +5</td><td>path・完全hash・日時・件名・tracked/untracked・ファイル・省略有無を共有。実コピーをAPIレスポンスからの期待出力と全文照合。</td></tr>
+<tr><td>複数stashで一覧APIが502になる不具合</td><td>バグ +1</td><td>GitがNULの後に入れる改行を次レコードのhashだけから除去。実データの502→200、複数stashとsubject改行保持の回帰テストで確認。</td></tr>
+</tbody></table>
+<h2>影響範囲と確認</h2>
+<ul><li>frontend: agent sidebar、stash explorerと各純粋関数・型・テスト。backend: stash一覧のレコード区切り解析のみ。</li>
+<li>frontend npm ci、npm test: 257/257成功。npm run build成功。Compose内の最終ビルドも成功。</li>
+<li>backend: uv run --with pytest python -m pytest: 302/302成功。既存Starlette非推奨警告1件。</li>
+<li>reviewer: P1指摘なし。現在状態と履歴の責務、固定表示の整合性、出力対象、読み取り専用Git、複数stash解析を確認。</li>
+<li>ブラウザー: デスクトップ1270pxとモバイル390×844で確認。モバイルはdocument幅380px。stash表680pxは312pxの領域内で横スクロール。追加見出しの絶対配置がページ幅へ影響しないようスクロール領域を位置基準にした。</li>
+<li>agentの固定表示は接続状態と区別。日付条件は履歴に適用し、現在状態を過去の状態として再構成しない。</li>
+<li>起動方式: /home/solution2024/.local/bin/gitdash-compose up -d --build。frontend Up、backend healthy、/api/health ok:true。アクセス http://localhost:4412。</li>
+<li>Compose定義の変更は不要。既存マウント・環境変数・認証設定を保持。</li></ul>
+<h2>Gitと定期設定</h2>
+<p>開始時mainとorigin/mainは802e8dfで一致。開始前にorigin/mainをfetch。ユーザー明示指定に従いmainで直接実装し、コミットしてorigin/mainへpushする。既存の未追跡backend/uv.lockは保持しコミットしない。UI証跡・ダウンロード結果は個人のautomation artifactsにローカル保存。</p>
+<p>保存されていた実行時刻が毎日2時だったため、既存automationを毎日8時に修正してACTIVEを維持。ホストのタイムゾーンはAsia/Tokyo。モデル・推論設定・プロンプト・対象プロジェクトは保持。定期設定変更はUI採点に含めない。</p>
+</html>

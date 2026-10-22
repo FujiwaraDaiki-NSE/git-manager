@@ -25,6 +25,14 @@
   padding: 16px;
 }
 
+.agent-timeline-heading-actions {
+  align-items: flex-end;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .agent-timeline-heading h2 {
   font: 600 16px/1.3 var(--control-sans);
   letter-spacing: -.015em;
@@ -51,7 +59,116 @@
 
 .agent-timeline-connection.is-on i { background: var(--control-green); }
 
+.agent-timeline-pause,
+.agent-timeline-clear,
+.agent-timeline-export {
+  background: var(--control-panel-soft);
+  border: 1px solid var(--control-border-strong);
+  border-radius: 5px;
+  color: var(--control-ink);
+  cursor: pointer;
+  font: 600 10px var(--control-sans);
+  min-height: 28px;
+  padding: 5px 8px;
+}
+
+.agent-timeline-pause:hover,
+.agent-timeline-clear:hover:not(:disabled),
+.agent-timeline-export:hover:not(:disabled) { border-color: var(--control-blue); }
+
+.agent-timeline-pause:focus-visible,
+.agent-timeline-clear:focus-visible,
+.agent-timeline-export:focus-visible,
+.agent-timeline-filters input:focus-visible,
+.agent-timeline-filters select:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
+
+.agent-timeline-pause.is-paused {
+  background: var(--control-blue-soft);
+  border-color: var(--control-blue);
+  color: var(--control-blue);
+}
+
+.agent-timeline-pause:disabled,
+.agent-timeline-clear:disabled,
+.agent-timeline-export:disabled { cursor: not-allowed; opacity: .5; }
+
+.agent-timeline-paused {
+  background: var(--control-blue-soft);
+  border-bottom: 1px solid var(--control-border);
+  color: var(--control-blue);
+  font: 10px/1.5 var(--control-sans);
+  margin: 0;
+  padding: 7px 12px;
+}
+
+.agent-timeline-paused span {
+  display: inline-block;
+  font: 700 10px var(--control-mono);
+  margin-right: 3px;
+}
+
+.agent-timeline-filters {
+  border-bottom: 1px solid var(--control-border);
+  padding: 0 12px;
+}
+
+.agent-timeline-filters summary {
+  align-items: center;
+  color: var(--control-ink);
+  cursor: pointer;
+  display: flex;
+  font: 600 10px var(--control-sans);
+  gap: 8px;
+  list-style-position: inside;
+  min-height: 36px;
+  user-select: none;
+}
+
+.agent-timeline-filters summary::marker { color: var(--control-muted); }
+.agent-timeline-filters summary span { color: var(--control-muted); font: 9px var(--control-mono); margin-left: auto; }
+
+.agent-timeline-filter-grid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 0 0 8px;
+}
+
+.agent-timeline-filter-grid label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agent-timeline-filter-grid label > span {
+  color: var(--control-muted);
+  font: 9px var(--control-sans);
+}
+
+.agent-timeline-filter-grid input,
+.agent-timeline-filter-grid select {
+  background: var(--control-bg);
+  border: 1px solid var(--control-border-strong);
+  border-radius: 4px;
+  color: var(--control-ink);
+  font: 10px var(--control-sans);
+  min-height: 28px;
+  min-width: 0;
+  padding: 4px 6px;
+  width: 100%;
+}
+
+.agent-timeline-filter-search { grid-column: 1 / -1; }
+.agent-timeline-clear { align-self: end; justify-self: start; }
+
+.agent-timeline-coverage {
+  color: var(--control-muted);
+  font: 9px/1.45 var(--control-sans);
+  margin: 0 0 9px;
+}
+
 .agent-timeline-scroll {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 0 12px 16px;
@@ -62,6 +179,21 @@
   min-width: 0;
   padding-top: 14px;
 }
+
+.agent-timeline-history-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 3px 4px 0;
+}
+
+.agent-timeline-export-status {
+  color: var(--control-muted);
+  font: 9px/1.4 var(--control-sans);
+}
+
+.agent-timeline-export-status[role="alert"] { color: var(--control-red); }
 
 .agent-timeline-history {
   border-top: 1px solid var(--control-border);
@@ -247,5 +379,14 @@
   .workspace-primary .control-shell { padding-inline: 16px; }
   .agent-timeline-heading { padding: 10px 12px; }
   .agent-timeline-heading h2 { font-size: 14px; }
+  .agent-timeline-heading-actions { align-items: flex-end; gap: 5px; }
+  .agent-timeline-pause { min-height: 26px; padding: 4px 6px; }
+  .agent-timeline-filter-grid { max-height: min(40dvh, 260px); overflow: auto; }
   .agent-timeline-project-link { padding: 8px; }
+}
+
+@media (max-width: 460px) {
+  .agent-timeline-filter-grid { grid-template-columns: minmax(0, 1fr); }
+  .agent-timeline-filter-search { grid-column: auto; }
+  .agent-timeline-clear { grid-column: auto; }
 }

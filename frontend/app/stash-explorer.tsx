@@ -5,7 +5,17 @@ import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
 import PatchView from "./patch-view";
 import type { Numstat } from "./types";
-import { searchStashes, stashCommand, stashPartLabel } from "./stash-explorer-tools.mjs";
+import {
+  adjacentStashes,
+  filterStashes,
+  stashCommand,
+  stashDateRangeError,
+  stashHashList,
+  stashInventoryCsv,
+  stashInvestigationMarkdown,
+  stashPartLabel,
+  sortStashes,
+} from "./stash-explorer-tools.mjs";
 import "./stash-explorer.css";
 
 type StashSummary = {
@@ -34,6 +44,8 @@ type StashDetail = StashSummary & {
   command: string;
   untracked_command: string | null;
 };
+
+type StashOrder = "git" | "newest" | "oldest" | "subject";
 
 function exactDate(value: string) {
   const date = new Date(value);
@@ -96,6 +108,9 @@ function StashPartView({
 export default function StashExplorer({ path }: { path: string }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+  const [order, setOrder] = useState<StashOrder>("git");
   const [inventory, setInventory] = useState<StashInventory | null>(null);
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
   const [inventoryLoading, setInventoryLoading] = useState(false);
@@ -103,6 +118,7 @@ export default function StashExplorer({ path }: { path: string }) {
   const [detail, setDetail] = useState<StashDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState("");
   const inventoryAttemptRef = useRef<string | null>(null);
   const inventoryControllerRef = useRef<AbortController | null>(null);
   const detailControllerRef = useRef<AbortController | null>(null);
@@ -187,11 +203,42 @@ export default function StashExplorer({ path }: { path: string }) {
     return () => controller.abort();
   }, [path, selectedHash]);
 
-  const visibleStashes = useMemo(
-    () => searchStashes(inventory?.stashes ?? [], query),
-    [inventory?.stashes, query],
+  const dateRangeError = useMemo(() => stashDateRangeError(startDate, endDate), [endDate, startDate]);
+  const filteredStashes = useMemo(
+    () => filterStashes(inventory?.stashes ?? [], query, startDate, endDate),
+    [endDate, inventory?.stashes, query, startDate],
   );
+  const visibleStashes = useMemo(() => sortStashes(filteredStashes, order), [filteredStashes, order]);
+  const navigation = useMemo(() => adjacentStashes(visibleStashes, selectedHash), [selectedHash, visibleStashes]);
   const detailCommand = detail ? stashCommand(path, detail.command) : null;
+
+  useEffect(() => {
+    setExportStatus("");
+  }, [endDate, order, query, startDate]);
+
+  const clearFilters = () => {
+    setQuery("");
+    setStartDate(null);
+    setEndDate(null);
+    setOrder("git");
+  };
+
+  const hasFilters = query.trim() !== "" || startDate !== null || endDate !== null || order !== "git";
+
+  const exportCsv = () => {
+    if (!visibleStashes.length) return;
+    try {
+      const url = URL.createObjectURL(new Blob([stashInventoryCsv(visibleStashes)], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "gitdash-stashes.csv";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportStatus(`${visibleStashes.length}件のCSV保存を開始しました。`);
+    } catch {
+      setExportStatus("CSVを保存できませんでした。");
+    }
+  };
 
   const onToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
     setOpen(event.currentTarget.open);
@@ -221,22 +268,52 @@ export default function StashExplorer({ path }: { path: string }) {
 
         {inventory && (
           <>
-            <div className="stash-explorer-tools">
+            <div className="stash-explorer-tools" role="group" aria-label="stash一覧の絞り込みと操作">
               <label>
                 <span>subject・hashを検索</span>
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="stash subject または hash" aria-label="stashのsubjectまたはhashを検索" />
               </label>
-              <span className="stash-explorer-count" role="status">{visibleStashes.length} / {inventory.stashes.length} 件</span>
+              <label>
+                <span>開始日（ローカル）</span>
+                <input aria-describedby={dateRangeError ? "stash-explorer-date-error" : undefined} aria-invalid={Boolean(dateRangeError)} aria-label="stashの開始日（ローカル）" type="date" value={startDate ?? ""} onChange={(event) => setStartDate(event.target.value || null)} />
+              </label>
+              <label>
+                <span>終了日（ローカル）</span>
+                <input aria-describedby={dateRangeError ? "stash-explorer-date-error" : undefined} aria-invalid={Boolean(dateRangeError)} aria-label="stashの終了日（ローカル）" type="date" value={endDate ?? ""} onChange={(event) => setEndDate(event.target.value || null)} />
+              </label>
+              <label>
+                <span>並び順</span>
+                <select aria-label="stashの並び順" value={order} onChange={(event) => setOrder(event.target.value as StashOrder)}>
+                  <option value="git">Gitの順序</option>
+                  <option value="newest">新しい順</option>
+                  <option value="oldest">古い順</option>
+                  <option value="subject">subject順</option>
+                </select>
+              </label>
+              <div className="stash-explorer-filter-actions">
+                <button className="subtle-button" type="button" onClick={clearFilters} disabled={!hasFilters} aria-label="stashの絞り込みと並び順をリセット">条件をリセット</button>
+                <button className="subtle-button" type="button" onClick={exportCsv} disabled={!visibleStashes.length || Boolean(dateRangeError)} aria-label="表示中のstash一覧をCSVで保存">表示中をCSV保存</button>
+                {visibleStashes.length > 0 && <CopyButton value={stashHashList(visibleStashes)} label="表示中stashの完全なhashをコピー" />}
+              </div>
+              <div className="stash-explorer-count" role="status">
+                <span>{visibleStashes.length} / {inventory.stashes.length} 件</span>
+                {navigation.index >= 0 && <span>選択 {navigation.index + 1} / {navigation.count}</span>}
+                {selectedHash && navigation.index < 0 && <span>選択中stashは現在の条件外</span>}
+                {exportStatus && <span aria-live="polite">{exportStatus}</span>}
+              </div>
             </div>
+
+            {dateRangeError && <p className="stash-explorer-date-error" id="stash-explorer-date-error" role="alert">{dateRangeError}</p>}
 
             {inventory.stashes.length === 0 ? (
               <p className="stash-explorer-empty">stashはありません。</p>
             ) : visibleStashes.length === 0 ? (
-              <p className="stash-explorer-empty">検索条件に一致するstashはありません。</p>
+              <p className="stash-explorer-empty">{dateRangeError ? "日付範囲が無効なため、stashを表示できません。" : "条件に一致するstashはありません。"}</p>
             ) : (
               <div className="stash-explorer-table-wrap">
                 <table className="stash-explorer-table">
-                  <thead><tr><th>stash</th><th>保存日時</th><th>hash</th></tr></thead>
+                  <caption className="sr-only">表示中のstash一覧</caption>
+                  <thead><tr><th scope="col">stash</th><th scope="col">保存日時</th><th scope="col">hash</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead>
                   <tbody>
                     {visibleStashes.map((stash) => (
                       <tr key={stash.hash} className={stash.hash === selectedHash ? "is-selected" : undefined}>
@@ -247,13 +324,19 @@ export default function StashExplorer({ path }: { path: string }) {
                           </button>
                         </td>
                         <td><time dateTime={stash.date}>{exactDate(stash.date)}</time></td>
-                        <td><code>{shortHash(stash.hash)}</code><CopyButton value={stash.hash} label="stash hashをコピー" /></td>
+                        <td><code title={stash.hash}>{shortHash(stash.hash)}</code><CopyButton value={stash.hash} label="stash hashをコピー" /></td>
+                        <td><button className="stash-explorer-row-action" type="button" onClick={() => setSelectedHash(stash.hash)} aria-label={`${stash.subject || "subject未取得"}のstashを調べる`}>調べる</button></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
+
+            <div className="stash-explorer-navigation" role="group" aria-label="表示中stashの移動">
+              <button type="button" className="subtle-button" onClick={() => navigation.previous && setSelectedHash(navigation.previous.hash)} disabled={navigation.previous === null} aria-label="前の表示中stashを選択">← 前のstash</button>
+              <button type="button" className="subtle-button" onClick={() => navigation.next && setSelectedHash(navigation.next.hash)} disabled={navigation.next === null} aria-label="次の表示中stashを選択">次のstash →</button>
+            </div>
           </>
         )}
 
@@ -266,7 +349,10 @@ export default function StashExplorer({ path }: { path: string }) {
                 <h3 id="stash-explorer-detail-title">{detail.subject || "subject未取得"}</h3>
                 <p><span>{detail.selector}</span><time dateTime={detail.date}>{exactDate(detail.date)}</time></p>
               </div>
-              <div className="stash-explorer-detail-hash"><code>{detail.hash}</code><CopyButton value={detail.hash} label="stash hashをコピー" /></div>
+              <div className="stash-explorer-detail-actions">
+                <div className="stash-explorer-detail-hash"><code>{detail.hash}</code><CopyButton value={detail.hash} label="stash hashをコピー" /></div>
+                <CopyButton value={stashInvestigationMarkdown(detail, path)} label="選択したstashの調査レポートをコピー" />
+              </div>
             </div>
             {detailCommand && (
               <div className="stash-explorer-command">

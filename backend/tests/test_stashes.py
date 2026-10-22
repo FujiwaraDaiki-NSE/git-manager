@@ -40,6 +40,31 @@ def test_empty_inventory_is_distinct_from_git_failure(tmp_path: Path):
     assert stashes.get_stashes(str(tmp_path / "missing")) is None
 
 
+def test_multiple_stashes_preserve_git_order_and_allow_each_detail(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    for subject in ["older", "newer"]:
+        (repo / "tracked.txt").write_text(f"{subject}\n", encoding="utf-8")
+        git(repo, "stash", "push", "-m", subject)
+
+    inventory = stashes.get_stashes(str(repo))
+    assert inventory is not None
+    assert [row["selector"] for row in inventory["stashes"]] == ["stash@{0}", "stash@{1}"]
+    assert [row["subject"] for row in inventory["stashes"]] == ["On main: newer", "On main: older"]
+    for row in inventory["stashes"]:
+        detail = stashes.get_stash(str(repo), row["hash"])
+        assert detail is not None
+        assert detail["subject"] == row["subject"]
+        assert detail["tracked"]["files"][0]["path"] == "tracked.txt"
+
+
+def test_inventory_separator_does_not_strip_subject_contents():
+    first, second = "a" * 40, "b" * 40
+    raw = f"{first}\0stash@{{0}}\0 subject\nline \0date\0\n{second}\0stash@{{1}}\0\nother \0date\0\n"
+    rows = stashes._parse_inventory(raw)
+    assert rows is not None
+    assert [row["subject"] for row in rows] == [" subject\nline ", "\nother "]
+
+
 def test_stash_inventory_and_detail_keep_tracked_and_untracked_parts_separate(tmp_path: Path):
     repo = make_repo(tmp_path)
     (repo / "tracked.txt").write_text("base\nstaged\n", encoding="utf-8")
