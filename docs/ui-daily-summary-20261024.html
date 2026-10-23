@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>2026-10-24 UI改善の記録</title>
+<style>body{max-width:1000px;margin:40px auto;padding:0 20px;font:16px/1.8 system-ui;color:#203047;background:#f6f8fb}h1,h2{line-height:1.4}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #ccd5df;text-align:left}code{overflow-wrap:anywhere}.score{font-size:24px;font-weight:bold}</style></head>
+<body><h1>2026年10月24日 git-manager UI改善</h1>
+<p>参照の移動履歴とファイルの変更履歴を絞り込み、読み進め、調査結果を持ち出す操作を追加した。既存の取得対象入力、CSV、コミット詳細、名前変更追跡、固定リビジョンでのページ追加を維持している。</p>
+<p class="score">開始30点 + 機能追加14件 × 5点 + 表示改善1件 × 2点 = 102点</p>
+<p>この点数は指定された加点基準による達成を示し、客観的な品質保証を意味しない。前日分は持ち越していない。高速化の主張・加点はない。付随するボタン、CSS、テスト、文言の調整を別件として加点していない。</p>
+<h2>改善と加点根拠</h2>
+<table><thead><tr><th>対象</th><th>分類・点</th><th>ユーザー価値と確認結果</th></tr></thead><tbody>
+<tr><td>reflog actor完全一致</td><td>機能 +5</td><td>操作した人に限定。実データで2件に一致。</td></tr>
+<tr><td>reflog操作種別</td><td>機能 +5</td><td>merge/pull/checkoutなどを抽出。引数付きmergeの10件を確認。</td></tr>
+<tr><td>reflog並び順</td><td>機能 +5</td><td>Git順、新しい順、古い順を選択。古い順の日時とJSON順を照合。</td></tr>
+<tr><td>reflog前後移動</td><td>機能 +5</td><td>同じコミットを指す別のcheckout操作も個別に選択して移動。</td></tr>
+<tr><td>reflog操作レポート</td><td>機能 +5</td><td>選択した操作と参照・日時・hashをMarkdownでコピー。実クリップボードをAPI由来の期待値と照合。</td></tr>
+<tr><td>reflog JSON保存</td><td>機能 +5</td><td>表示中の操作をrefと取得範囲情報付きで保存。実保存ファイル10件と順序を照合。</td></tr>
+<tr><td>reflog移動先の重複抑制</td><td>機能 +5</td><td>同じ移動先につき最新の一致操作だけを表示。3件から1件になり、条件外になった選択を明示。</td></tr>
+<tr><td>reflogカード表示</td><td>表示改善 +2</td><td>表とカードを切り替え、狭い画面で操作内容を縦に読める。390px幅で目視確認。</td></tr>
+<tr><td>ファイル履歴の日付範囲</td><td>機能 +5</td><td>ローカル暦日で両端を含める。同日7件、逆転時の警告と保存不可を確認。</td></tr>
+<tr><td>ファイル履歴の並び順</td><td>機能 +5</td><td>Git順、新旧順、件名順。日時と実JSONの件名順を照合。</td></tr>
+<tr><td>ファイル履歴の変更種別</td><td>機能 +5</td><td>追加・削除・名前変更等を抽出。不明を独立させ、追加1件・不明2件を確認。</td></tr>
+<tr><td>ファイル履歴の前後移動</td><td>機能 +5</td><td>表示中の順序でコミット詳細を読み進める。先頭の前移動不可と次のhashへの移動を確認。</td></tr>
+<tr><td>ファイル履歴JSON保存</td><td>機能 +5</td><td>リビジョン、固定hash、パス、名前変更追跡条件付きで保存。非マージ29件の実ファイルを照合。</td></tr>
+<tr><td>ファイル履歴コミットレポート</td><td>機能 +5</td><td>コミット・調査条件・変更ファイル・patchをMarkdownにまとめる。実クリップボード全文をAPI由来の期待値と照合。</td></tr>
+<tr><td>ファイル履歴のマージ条件</td><td>機能 +5</td><td>親コミット数に基づきマージ2件、非マージ29件を抽出。</td></tr>
+</tbody></table>
+<h2>検証と反映</h2>
+<ul><li>開始時main、origin/mainをfetchして差分0/0。既存の未追跡backend/uv.lockを保護。</li>
+<li>npm ci実施。変更前frontend257件、変更後271件がすべて成功。Next.js本番ビルド成功。</li>
+<li>backendはuvで302件成功。既存のStarlette非推奨警告1件。</li>
+<li>reviewerによるP1指摘なし。日付、非同期の取得対象切替、固定リビジョン、重複hashの操作識別、保存データの整合性を確認。</li>
+<li>ブラウザーで1270pxと390px幅の実画面を確認。モバイルのdocument幅380pxでviewport390px以内。</li>
+<li>ユーザー指定のgitdash-compose up -d --buildで本番コンテナに反映。frontend稼働、backend healthy、/api/healthのok:trueを確認。</li>
+<li>アクセス先: <a href="http://localhost:4412">http://localhost:4412</a>。プロジェクト情報の「参照の移動履歴を調べる」「ファイルの履歴を調べる」から利用。</li>
+<li>画面・API・クリップボードの証跡は個別プロジェクト情報を含むため、自動実行のローカルartifacts/20261024配下に保存し、リポジトリには含めない。</li>
+</ul><p>main直接実装・コミット・GitHub pushは、この定期作業についてのユーザー明示指定に従う。翌朝以降も基準点30から継続する。</p>
+</body></html>

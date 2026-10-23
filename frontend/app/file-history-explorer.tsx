@@ -6,13 +6,30 @@ import CommitFiles from "./commit-files";
 import PatchView from "./patch-view";
 import InvestigationPresets, { type FileHistoryPresetValues } from "./investigation-presets";
 import {
+  adjacentFileHistory,
+  fileHistoryCommitMarkdown,
+  fileHistoryDateRangeError,
+  fileHistoryJson,
+  filterFileHistoryInvestigation,
+  FILE_HISTORY_CHANGE_ALL,
+  FILE_HISTORY_CHANGE_KINDS,
+  FILE_HISTORY_CHANGE_UNKNOWN,
+  FILE_HISTORY_ORDER_GIT,
+  FILE_HISTORY_ORDER_NEWEST,
+  FILE_HISTORY_ORDER_OLDEST,
+  FILE_HISTORY_ORDER_SUBJECT,
+  FILE_HISTORY_TOPOLOGY_ALL,
+  FILE_HISTORY_TOPOLOGY_MERGE,
+  FILE_HISTORY_TOPOLOGY_NON_MERGE,
+  sortFileHistory,
+} from "./file-history-investigation-tools.mjs";
+import {
   encodeFileHistoryAuthor,
   fileHistoryAuthors,
   fileHistoryCsv,
   fileHistoryHashList,
   fileHistoryQuery,
   fileHistoryRequestKey,
-  filterFileHistory,
   hasUnknownFileHistoryAuthor,
   UNKNOWN_FILE_HISTORY_AUTHOR_FILTER,
 } from "./file-history-tools.mjs";
@@ -44,6 +61,9 @@ type FileHistoryPage = {
 };
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type FileHistoryOrder = "git" | "newest" | "oldest" | "subject";
+type FileHistoryChangeKind = "all" | "unknown" | "A" | "M" | "D" | "R" | "C" | "T" | "U" | "X" | "B";
+type FileHistoryTopology = "all" | "merge" | "nonmerge";
 
 function exactDate(value: string | null) {
   if (!value) return "日時未取得";
@@ -97,7 +117,41 @@ function downloadCsv(records: FileHistoryRecord[], setStatus: (message: string) 
   }
 }
 
-function CommitDetailPane({ path, hash }: { path: string; hash: string }) {
+function downloadJson(
+  records: FileHistoryRecord[],
+  metadata: { revision: string; pinnedHash: string; file: string; follow: boolean },
+  setStatus: (message: string) => void,
+) {
+  try {
+    const url = URL.createObjectURL(new Blob([fileHistoryJson(records, metadata)], { type: "application/json;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "gitdash-file-history.json";
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus(`${records.length}件のJSON保存を開始しました。固定リビジョンを含みます。`);
+  } catch {
+    setStatus("JSONを保存できませんでした。");
+  }
+}
+
+function CommitDetailPane({
+  path,
+  file,
+  hash,
+  record,
+  revision,
+  pinnedHash,
+  follow,
+}: {
+  path: string;
+  file: string;
+  hash: string;
+  record: FileHistoryRecord | null;
+  revision: string;
+  pinnedHash: string | null;
+  follow: boolean;
+}) {
   const [state, setState] = useState<LoadState>("loading");
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -132,7 +186,20 @@ function CommitDetailPane({ path, hash }: { path: string; hash: string }) {
         <h4 id="file-history-commit-title">コミット詳細</h4>
         <code>{hash}</code>
       </div>
-      <CopyButton value={hash} label="コミットIDをコピー" />
+      <div className="file-history-commit-actions">
+        <CopyButton value={hash} label="コミットIDをコピー" />
+        {state === "ready" && detail && record && pinnedHash && <CopyButton
+          value={fileHistoryCommitMarkdown(detail, {
+            repositoryPath: path,
+            file,
+            record,
+            revision,
+            pinnedHash,
+            follow,
+          })}
+          label="選択したコミットのMarkdownレポートをコピー"
+        />}
+      </div>
     </div>
     {state === "loading" && <p role="status">コミット詳細を取得中…</p>}
     {state === "error" && <p className="file-history-error" role="alert">コミット詳細を取得できませんでした。{error && <span>（{error}）</span>}<button type="button" className="subtle-button" onClick={() => setRetry((value) => value + 1)}>再取得</button></p>}
@@ -151,6 +218,11 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
   const [follow, setFollow] = useState(false);
   const [query, setQuery] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [order, setOrder] = useState<FileHistoryOrder>(FILE_HISTORY_ORDER_GIT);
+  const [changeKind, setChangeKind] = useState<FileHistoryChangeKind>(FILE_HISTORY_CHANGE_ALL);
+  const [topology, setTopology] = useState<FileHistoryTopology>(FILE_HISTORY_TOPOLOGY_ALL);
   const [records, setRecords] = useState<FileHistoryRecord[]>([]);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [pinnedHash, setPinnedHash] = useState<string | null>(null);
@@ -175,6 +247,11 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
     setFollow(false);
     setQuery("");
     setAuthorFilter("");
+    setStartDate("");
+    setEndDate("");
+    setOrder(FILE_HISTORY_ORDER_GIT);
+    setChangeKind(FILE_HISTORY_CHANGE_ALL);
+    setTopology(FILE_HISTORY_TOPOLOGY_ALL);
     setRecords([]);
     setNextOffset(null);
     setPinnedHash(null);
@@ -207,8 +284,23 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
 
   const authors = useMemo(() => fileHistoryAuthors(records) as string[], [records]);
   const includesUnknownAuthor = useMemo(() => hasUnknownFileHistoryAuthor(records) as boolean, [records]);
-  const filtered = useMemo(() => filterFileHistory(records, query, authorFilter) as FileHistoryRecord[], [authorFilter, query, records]);
+  const dateRangeError = useMemo(() => fileHistoryDateRangeError(startDate, endDate) as string | null, [endDate, startDate]);
+  const filtered = useMemo(() => filterFileHistoryInvestigation(records, {
+    query,
+    authorFilter,
+    startDate,
+    endDate,
+    changeKind,
+    topology,
+  }) as FileHistoryRecord[], [authorFilter, changeKind, endDate, query, records, startDate, topology]);
+  const visibleRecords = useMemo(() => sortFileHistory(filtered, order) as FileHistoryRecord[], [filtered, order]);
+  const navigation = useMemo(() => adjacentFileHistory(visibleRecords, selectedHash), [selectedHash, visibleRecords]);
+  const selectedRecord = useMemo(() => selectedHash === null ? null : records.find((record) => record.hash === selectedHash) ?? null, [records, selectedHash]);
   const activeKey = useMemo(() => fileHistoryRequestKey(path, revision, file, follow), [file, follow, path, revision]);
+
+  useEffect(() => {
+    setExportStatus("");
+  }, [authorFilter, changeKind, endDate, order, query, startDate, topology]);
 
   const load = async (offset: number, initial: boolean) => {
     if (state === "loading" && initial === false) return;
@@ -279,6 +371,11 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
   const clearFilters = () => {
     setQuery("");
     setAuthorFilter("");
+    setStartDate("");
+    setEndDate("");
+    setOrder(FILE_HISTORY_ORDER_GIT);
+    setChangeKind(FILE_HISTORY_CHANGE_ALL);
+    setTopology(FILE_HISTORY_TOPOLOGY_ALL);
     setExportStatus("");
   };
 
@@ -288,10 +385,22 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
     setFollow(values.follow);
     setQuery("");
     setAuthorFilter("");
+    setStartDate("");
+    setEndDate("");
+    setOrder(FILE_HISTORY_ORDER_GIT);
+    setChangeKind(FILE_HISTORY_CHANGE_ALL);
+    setTopology(FILE_HISTORY_TOPOLOGY_ALL);
     setOpen(true);
   };
 
-  const hasFilters = query.trim() !== "" || authorFilter !== "";
+  const exportMetadata = pinnedHash === null ? null : { revision, pinnedHash, file, follow };
+  const hasFilters = query.trim() !== ""
+    || authorFilter !== ""
+    || startDate !== ""
+    || endDate !== ""
+    || order !== FILE_HISTORY_ORDER_GIT
+    || changeKind !== FILE_HISTORY_CHANGE_ALL
+    || topology !== FILE_HISTORY_TOPOLOGY_ALL;
   const canRun = revision.trim() !== "" && file.trim() !== "" && state !== "loading";
 
   return <details className="file-history-explorer" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -325,14 +434,26 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
           <div className="file-history-tools" role="group" aria-label="取得済み履歴の絞り込み">
             <label><span>履歴内検索</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="件名・パス・ハッシュ" aria-label="取得済みファイル履歴を検索" /></label>
             <label><span>作成者（完全一致）</span><select value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)} aria-label="取得済みファイル履歴を作成者で絞り込み"><option value="">すべて</option>{authors.map((author) => <option key={author} value={encodeFileHistoryAuthor(author)}>{author}</option>)}{includesUnknownAuthor && <option value={UNKNOWN_FILE_HISTORY_AUTHOR_FILTER}>作成者未取得</option>}</select></label>
+            <label><span>開始日（ローカル）</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} aria-label="ファイル履歴の開始日（ローカル）" aria-invalid={Boolean(dateRangeError)} /></label>
+            <label><span>終了日（ローカル）</span><input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} aria-label="ファイル履歴の終了日（ローカル）" aria-invalid={Boolean(dateRangeError)} /></label>
+            <label><span>変更種別</span><select value={changeKind} onChange={(event) => setChangeKind(event.target.value as FileHistoryChangeKind)} aria-label="ファイル履歴の変更種別で絞り込み"><option value={FILE_HISTORY_CHANGE_ALL}>すべて</option>{FILE_HISTORY_CHANGE_KINDS.map((kind) => <option key={kind} value={kind}>{kind}{kind === "A" ? " 追加" : kind === "M" ? "変更" : kind === "D" ? "削除" : kind === "R" ? "名前変更" : kind === "C" ? "コピー" : kind === "T" ? "タイプ変更" : kind === "U" ? "未解決" : kind === "X" ? "種別不明" : "対応関係の分断"}</option>)}<option value={FILE_HISTORY_CHANGE_UNKNOWN}>不明</option></select></label>
+            <label><span>トポロジー</span><select value={topology} onChange={(event) => setTopology(event.target.value as FileHistoryTopology)} aria-label="ファイル履歴のマージトポロジーで絞り込み"><option value={FILE_HISTORY_TOPOLOGY_ALL}>すべて</option><option value={FILE_HISTORY_TOPOLOGY_MERGE}>マージのみ</option><option value={FILE_HISTORY_TOPOLOGY_NON_MERGE}>非マージのみ</option></select></label>
+            <label><span>並び順</span><select value={order} onChange={(event) => setOrder(event.target.value as FileHistoryOrder)} aria-label="ファイル履歴の並び順"><option value={FILE_HISTORY_ORDER_GIT}>Gitの順序</option><option value={FILE_HISTORY_ORDER_NEWEST}>新しい順</option><option value={FILE_HISTORY_ORDER_OLDEST}>古い順</option><option value={FILE_HISTORY_ORDER_SUBJECT}>subject順</option></select></label>
             <button type="button" className="subtle-button" disabled={!hasFilters} onClick={clearFilters}>条件をリセット</button>
-            <button type="button" className="subtle-button" disabled={filtered.length === 0} onClick={() => downloadCsv(filtered, setExportStatus)}>一致する履歴をCSV保存</button>
-            {filtered.length > 0 && <CopyButton value={fileHistoryHashList(filtered)} label="一致するコミットのハッシュをコピー" />}
+            <button type="button" className="subtle-button" disabled={visibleRecords.length === 0} onClick={() => downloadCsv(visibleRecords, setExportStatus)}>一致する履歴をCSV保存</button>
+            <button type="button" className="subtle-button" disabled={visibleRecords.length === 0 || exportMetadata === null} onClick={() => exportMetadata && downloadJson(visibleRecords, exportMetadata, setExportStatus)}>一致する履歴をJSON保存</button>
+            {visibleRecords.length > 0 && <CopyButton value={fileHistoryHashList(visibleRecords)} label="一致するコミットのハッシュをコピー" />}
           </div>
-          <div className="file-history-coverage" role="status"><span>{filtered.length} / {records.length} 件を表示</span><span>{follow ? "名前変更を追跡中" : "入力パスのみ"}</span><span>{limitReached ? "取得上限に達しました。残りの履歴はターミナルで確認してください。" : hasMore ? "追加ページあり" : "すべて取得済み"}</span>{exportStatus && <span>{exportStatus}</span>}</div>
-          {filtered.length === 0 ? <p className="file-history-empty" role="status">{records.length === 0 ? "一致するコミットはありません。" : "条件に一致する取得済み履歴はありません。"}</p> : <div className="file-history-table-wrap" role="region" aria-label="ファイル履歴" tabIndex={0}><table className="file-history-table"><thead><tr><th>ハッシュ</th><th>件名</th><th>作成者</th><th>日時</th><th>変更</th><th>パス</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{filtered.map((record, index) => <tr key={recordKey(record, index)}><td className="file-history-hash"><code title={record.hash}>{shortHash(record.hash)}</code><CopyButton value={record.hash} label={`${shortHash(record.hash)} をコピー`} /></td><td>{record.subject || "件名未取得"}</td><td>{record.author || "作成者未取得"}</td><td><time dateTime={record.date || undefined}>{exactDate(record.date)}</time></td><td>{statusLabel(record.status)}</td><td className="file-history-path" title={displayedPath(record)}>{displayedPath(record)}</td><td><button type="button" className="table-action" onClick={() => setSelectedHash(record.hash)}>コミットを表示</button></td></tr>)}</tbody></table></div>}
+          <div className="file-history-coverage" role="status"><span>{visibleRecords.length} / {records.length} 件を表示</span><span>{follow ? "名前変更を追跡中" : "入力パスのみ"}</span><span>{limitReached ? "取得上限に達しました。残りの履歴はターミナルで確認してください。" : hasMore ? "追加ページあり" : "すべて取得済み"}</span>{dateRangeError && <span>ローカル日付範囲が無効です。</span>}{exportStatus && <span>{exportStatus}</span>}</div>
+          {dateRangeError && <p className="file-history-date-error" role="alert">{dateRangeError}</p>}
+          {visibleRecords.length === 0 ? <p className="file-history-empty" role="status">{records.length === 0 ? "一致するコミットはありません。" : dateRangeError ? "日付範囲が無効なため、履歴を表示できません。" : "条件に一致する取得済み履歴はありません。"}</p> : <div className="file-history-table-wrap" role="region" aria-label="ファイル履歴" tabIndex={0}><table className="file-history-table"><thead><tr><th>ハッシュ</th><th>件名</th><th>作成者</th><th>日時</th><th>変更</th><th>パス</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={recordKey(record, index)} className={record.hash === selectedHash ? "is-selected" : undefined}><td className="file-history-hash"><code title={record.hash}>{shortHash(record.hash)}</code><CopyButton value={record.hash} label={`${shortHash(record.hash)} をコピー`} /></td><td>{record.subject || "件名未取得"}</td><td>{record.author || "作成者未取得"}</td><td><time dateTime={record.date || undefined}>{exactDate(record.date)}</time></td><td>{statusLabel(record.status)}</td><td className="file-history-path" title={displayedPath(record)}>{displayedPath(record)}</td><td><button type="button" className="table-action" onClick={() => setSelectedHash(record.hash)}>コミットを表示</button></td></tr>)}</tbody></table></div>}
           {hasMore && nextOffset !== null && <button type="button" className="file-history-more" onClick={loadMore} disabled={state === "loading"}>{state === "loading" ? "追加履歴を取得中…" : "さらに履歴を取得"}</button>}
-          {selectedHash && <CommitDetailPane key={selectedHash} path={path} hash={selectedHash} />}
+          <div className="file-history-navigation" role="group" aria-label="表示中コミットの移動">
+            <button type="button" className="subtle-button" onClick={() => navigation.previous && setSelectedHash(navigation.previous.hash)} disabled={navigation.previous === null} aria-label="前の表示中コミットを選択">← 前のコミット</button>
+            <span role="status">{navigation.index >= 0 ? `選択 ${navigation.index + 1} / ${navigation.count}` : selectedHash ? "選択中コミットは現在の条件外" : "コミットを選択してください"}</span>
+            <button type="button" className="subtle-button" onClick={() => navigation.next && setSelectedHash(navigation.next.hash)} disabled={navigation.next === null} aria-label="次の表示中コミットを選択">次のコミット →</button>
+          </div>
+          {selectedHash && <CommitDetailPane key={selectedHash} path={path} file={file} hash={selectedHash} record={selectedRecord} revision={revision} pinnedHash={pinnedHash} follow={follow} />}
         </>}
         {state === "idle" && <p className="file-history-empty" role="status">対象を入力して履歴を取得してください。</p>}
       </div>

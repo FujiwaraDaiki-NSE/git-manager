@@ -72,6 +72,10 @@
   font-size: 0.8rem;
 }
 
+.file-history-tools label:nth-child(n + 3) {
+  min-width: min(100%, 150px);
+}
+
 .file-history-inputs input[type="text"],
 .file-history-tools input,
 .file-history-tools select {
@@ -108,6 +112,12 @@
   padding: 9px 11px;
   background: color-mix(in srgb, var(--control-red) 8%, transparent);
   color: var(--control-red);
+}
+
+.file-history-date-error {
+  margin: -5px 0 0;
+  color: var(--control-red);
+  font-size: 0.84rem;
 }
 
 .file-history-coverage {
@@ -148,6 +158,10 @@
   border-bottom: 0;
 }
 
+.file-history-table tbody tr.is-selected {
+  background: var(--control-blue-soft);
+}
+
 .file-history-hash {
   display: flex;
   align-items: center;
@@ -184,6 +198,20 @@
   opacity: 0.65;
 }
 
+.file-history-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--control-muted);
+  font-size: 0.84rem;
+}
+
+.file-history-navigation .subtle-button {
+  min-height: 34px;
+}
+
 .file-history-commit {
   display: grid;
   gap: 10px;
@@ -193,6 +221,14 @@
 
 .file-history-commit-heading {
   align-items: center;
+}
+
+.file-history-commit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .file-history-commit-heading > div {
