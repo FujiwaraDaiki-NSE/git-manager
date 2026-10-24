@@ -95,6 +95,14 @@
   font: inherit;
 }
 
+.blame-tools input[type="date"] {
+  min-width: 154px;
+}
+
+.blame-tools .blame-line-number {
+  min-width: 150px !important;
+}
+
 .blame-input-note {
   margin-top: -4px;
 }
@@ -111,6 +119,62 @@
   flex-wrap: wrap;
   color: var(--control-muted);
   font-size: 0.84rem;
+}
+
+.blame-inline-note {
+  margin: 0;
+}
+
+.blame-summary {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--control-panel-soft);
+}
+
+.blame-summary-heading,
+.blame-summary-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.blame-summary-heading {
+  justify-content: space-between;
+  color: var(--control-muted);
+  font-size: 0.84rem;
+}
+
+.blame-summary-heading h4 {
+  margin: 0;
+  color: var(--control-ink);
+  font-size: 0.95rem;
+}
+
+.blame-summary-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.blame-summary-item {
+  min-width: 0;
+  color: var(--control-muted);
+  font-size: 0.84rem;
+}
+
+.blame-summary-item code {
+  min-width: 86px;
+  color: var(--control-ink);
+}
+
+.blame-summary-item span {
+  min-width: 116px;
 }
 
 .blame-pinned {
@@ -240,6 +304,15 @@
   padding-top: 16px;
 }
 
+.blame-commit-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--control-muted);
+  font-size: 0.84rem;
+}
+
 .blame-commit-meta {
   display: flex;
   flex-wrap: wrap;
@@ -256,6 +329,20 @@
   .blame-commit-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .blame-commit-navigation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .blame-commit-navigation span {
+    order: -1;
+    text-align: center;
+  }
+
+  .blame-commit-navigation button {
+    width: 100%;
   }
 
   .blame-repo {
