@@ -394,4 +394,3 @@ export function tagInvestigationMarkdown(detail, repositoryPath, targetCommit) {
     "- read_only: true",
   ].join("\n");
 }
-

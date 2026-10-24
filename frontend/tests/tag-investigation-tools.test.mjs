@@ -140,4 +140,3 @@ test("selected-tag Markdown captures repository, object, target, annotation, and
   assert.throws(() => tagInvestigationMarkdown({}, "/repo", null), /provided explicitly/);
   assert.throws(() => tagInvestigationMarkdown({ ...tags[5], annotation: null }, "/repo"), /targetCommit/);
 });
-

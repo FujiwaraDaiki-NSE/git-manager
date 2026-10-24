@@ -207,4 +207,3 @@ export function blameJson(lines, metadata) {
   if (!filters || typeof filters !== "object") throw new TypeError("filters must be provided explicitly");
   return `${JSON.stringify({ repo, revision, pinned_hash, file, requested_range, filters, lines }, null, 2)}\n`;
 }
-

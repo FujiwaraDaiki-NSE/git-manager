@@ -110,4 +110,3 @@ test("JSON export carries repository, revision, requested range, and every filte
   assert.equal(json.filters.order, "newest");
   assert.deepEqual(json.lines, [lines[0], lines[2]]);
 });
-
