@@ -111,6 +111,7 @@
 }
 
 .tree-sizes-inventory,
+.tree-sizes-objects,
 .tree-sizes-directories,
 .tree-sizes-files {
   display: grid;
@@ -192,6 +193,82 @@
 }
 
 .tree-sizes-tools .subtle-button {
+  white-space: nowrap;
+}
+
+.tree-sizes-checkbox {
+  min-width: min(250px, 100%) !important;
+}
+
+.tree-sizes-checkbox > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 31px;
+  color: var(--ink);
+  font: 11px var(--sans);
+}
+
+.tree-sizes-checkbox input {
+  accent-color: var(--accent);
+}
+
+.tree-sizes-export-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tree-sizes-export-actions .copy-control {
+  display: inline-flex;
+}
+
+.tree-sizes-object-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.tree-sizes-object-summary > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.tree-sizes-object-summary span {
+  color: var(--muted-on-paper);
+  font-size: 10px;
+}
+
+.tree-sizes-object-summary strong {
+  color: var(--ink);
+  font: 600 13px var(--mono);
+}
+
+.tree-sizes-object-summary small,
+.tree-sizes-object-note {
+  color: var(--muted-on-paper);
+  font: 11px var(--mono);
+}
+
+.tree-sizes-object-note {
+  margin: 0;
+  padding: 7px 9px;
+  border-left: 3px solid var(--rule);
+  line-height: 1.5;
+}
+
+.tree-sizes-object-table th:first-child {
+  min-width: 220px;
+}
+
+.tree-sizes-object-table td:nth-child(2),
+.tree-sizes-object-table td:nth-child(3) {
   white-space: nowrap;
 }
 

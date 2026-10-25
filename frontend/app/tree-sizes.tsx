@@ -4,18 +4,31 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   aggregateTreeSizeDirectories,
   aggregateTreeSizeEntries,
+  aggregateTreeSizeObjectSummary,
   filterTreeSizeEntries,
   formatTreeSizeBytes,
+  listTreeSizeExtensions,
+  maximumTreeSizeError,
   minimumTreeSizeError,
+  parseMaximumTreeSize,
   parseMinimumTreeSize,
   sortTreeSizeEntries,
   treeSizeBreadcrumbs,
   treeSizeKind,
   treeSizeKindLabel,
+  treeSizeRangeError,
+  treeSizesJson,
+  treeSizesPathLines,
   treeSizesCsv,
   treeSizesQuery,
+  TREE_SIZE_EXTENSION_ALL,
+  TREE_SIZE_EXTENSION_NONE,
+  TREE_SIZE_FILTER_ALL,
+  TREE_SIZE_FILTER_KNOWN,
+  TREE_SIZE_FILTER_UNKNOWN,
 } from "./tree-sizes-tools.mjs";
 import "./tree-sizes.css";
+import CopyButton from "./copy-button";
 
 type TreeSizeEntry = {
   path: string;
@@ -39,6 +52,7 @@ type TreeSizesInventory = {
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type TreeSizeKindFilter = "all" | "regular" | "symlink" | "gitlink";
+type TreeSizeSizeFilter = "all" | "known" | "unknown";
 type TreeSizeOrder = "size" | "path";
 type TreeSizeDirection = "ascending" | "descending";
 
@@ -114,6 +128,10 @@ export default function TreeSizes({ path }: { path: string }) {
   const [pathFilter, setPathFilter] = useState("");
   const [kindFilter, setKindFilter] = useState<TreeSizeKindFilter>("all");
   const [minimumBytesText, setMinimumBytesText] = useState("");
+  const [maximumBytesText, setMaximumBytesText] = useState("");
+  const [sizeFilter, setSizeFilter] = useState<TreeSizeSizeFilter>(TREE_SIZE_FILTER_ALL);
+  const [extension, setExtension] = useState<string>(TREE_SIZE_EXTENSION_ALL);
+  const [duplicateOnly, setDuplicateOnly] = useState(false);
   const [order, setOrder] = useState<TreeSizeOrder>("size");
   const [direction, setDirection] = useState<TreeSizeDirection>("descending");
   const [inventory, setInventory] = useState<TreeSizesInventory | null>(null);
@@ -123,6 +141,19 @@ export default function TreeSizes({ path }: { path: string }) {
   const controllerRef = useRef<AbortController | null>(null);
   const requestKeyRef = useRef<string | null>(null);
 
+  const resetFilters = () => {
+    setDirectory("");
+    setPathFilter("");
+    setKindFilter("all");
+    setMinimumBytesText("");
+    setMaximumBytesText("");
+    setSizeFilter(TREE_SIZE_FILTER_ALL);
+    setExtension(TREE_SIZE_EXTENSION_ALL);
+    setDuplicateOnly(false);
+    setOrder("size");
+    setDirection("descending");
+  };
+
   useEffect(() => {
     controllerRef.current?.abort();
     controllerRef.current = null;
@@ -131,12 +162,7 @@ export default function TreeSizes({ path }: { path: string }) {
     setInventory(null);
     setLoadState("idle");
     setLoadError(null);
-    setDirectory("");
-    setPathFilter("");
-    setKindFilter("all");
-    setMinimumBytesText("");
-    setOrder("size");
-    setDirection("descending");
+    resetFilters();
     setOpen(false);
   }, [path]);
 
@@ -150,10 +176,7 @@ export default function TreeSizes({ path }: { path: string }) {
     setInventory(null);
     setLoadState("idle");
     setLoadError(null);
-    setDirectory("");
-    setPathFilter("");
-    setKindFilter("all");
-    setMinimumBytesText("");
+    resetFilters();
   };
 
   const loadInventory = () => {
@@ -175,10 +198,7 @@ export default function TreeSizes({ path }: { path: string }) {
     setLoadState("loading");
     setLoadError(null);
     setInventory(null);
-    setDirectory("");
-    setPathFilter("");
-    setKindFilter("all");
-    setMinimumBytesText("");
+    resetFilters();
     setOpen(true);
     const params = treeSizesQuery(path, revision);
     void fetch(`/api/repo/tree-sizes?${params}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
@@ -202,30 +222,52 @@ export default function TreeSizes({ path }: { path: string }) {
 
   const minimumError = minimumTreeSizeError(minimumBytesText);
   const minimumBytes = parseMinimumTreeSize(minimumBytesText);
+  const maximumError = maximumTreeSizeError(maximumBytesText);
+  const maximumBytes = parseMaximumTreeSize(maximumBytesText);
+  const sizeRangeError = treeSizeRangeError(minimumBytes, maximumBytes);
+  const extensionOptions = useMemo(
+    () => inventory ? listTreeSizeExtensions(inventory.entries) : [],
+    [inventory],
+  );
   const scopedEntries = useMemo(() => {
     if (!inventory) return [];
     return inventory.entries.filter((entry) => treeSizePathWithinDirectory(entry.path, directory));
   }, [directory, inventory]);
   const visibleEntries = useMemo(() => {
-    if (!inventory || minimumError) return [];
+    if (!inventory || minimumError || maximumError || sizeRangeError) return [];
     return sortTreeSizeEntries(filterTreeSizeEntries(inventory.entries, {
       directory,
       pathQuery: pathFilter,
       kind: kindFilter,
       minimumBytes,
+      maximumBytes,
+      sizeFilter,
+      extension,
+      duplicateOnly,
     }), order, direction);
-  }, [directory, direction, inventory, kindFilter, minimumBytes, minimumError, order, pathFilter]);
+  }, [directory, direction, duplicateOnly, extension, inventory, kindFilter, maximumBytes, maximumError, minimumBytes, minimumError, order, pathFilter, sizeFilter, sizeRangeError]);
   const directoryAggregates = useMemo(() => aggregateTreeSizeDirectories(scopedEntries, directory), [directory, scopedEntries]);
   const scopedSummary = useMemo(() => aggregateTreeSizeEntries(scopedEntries), [scopedEntries]);
+  const objectSummary = useMemo(() => aggregateTreeSizeObjectSummary(visibleEntries), [visibleEntries]);
   const largestEntry = useMemo(
     () => sortTreeSizeEntries(visibleEntries, "size", "descending").find((entry) => entry.size !== null) ?? null,
     [visibleEntries],
   );
   const breadcrumbs = useMemo(() => treeSizeBreadcrumbs(directory), [directory]);
   const chartMaximum = Math.max(1, ...directoryAggregates.map((item) => item.totalBytes));
+  const hasFilters = directory !== ""
+    || pathFilter !== ""
+    || kindFilter !== "all"
+    || minimumBytesText !== ""
+    || maximumBytesText !== ""
+    || sizeFilter !== TREE_SIZE_FILTER_ALL
+    || extension !== TREE_SIZE_EXTENSION_ALL
+    || duplicateOnly
+    || order !== "size"
+    || direction !== "descending";
 
   const exportCsv = () => {
-    if (!visibleEntries.length || minimumError) return;
+    if (!visibleEntries.length || minimumError || maximumError || sizeRangeError) return;
     const blob = new Blob([treeSizesCsv(visibleEntries)], { type: "text/csv;charset=utf-8" });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -235,6 +277,32 @@ export default function TreeSizes({ path }: { path: string }) {
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(href), 1000);
   };
+
+  const snapshotConditions = {
+    directory,
+    pathQuery: pathFilter,
+    kind: kindFilter,
+    minimumBytes,
+    maximumBytes,
+    sizeFilter,
+    extension,
+    duplicateOnly,
+    order,
+    direction,
+  };
+  const exportJson = () => {
+    if (!inventory || !visibleEntries.length || minimumError || maximumError || sizeRangeError) return;
+    const blob = new Blob([treeSizesJson(visibleEntries, inventory, snapshotConditions, path)], { type: "application/json;charset=utf-8" });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const safeRevision = revision.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").trim();
+    anchor.href = href;
+    anchor.download = `gitdash-tree-sizes-${safeRevision || "revision"}.json`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+  };
+  const visiblePathLines = useMemo(() => treeSizesPathLines(visibleEntries), [visibleEntries]);
+  const resetTreeSizeFilters = () => resetFilters();
 
   return (
     <details className="tree-sizes" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -275,16 +343,40 @@ export default function TreeSizes({ path }: { path: string }) {
               <label><span>パス検索</span><input id="tree-sizes-path-filter" type="search" value={pathFilter} onChange={(event) => setPathFilter(event.target.value)} placeholder="取得済みパスを検索" aria-label="容量一覧のパス検索" /></label>
               <label><span>種類</span><select id="tree-sizes-type-filter" value={kindFilter} onChange={(event) => setKindFilter(event.target.value as TreeSizeKindFilter)} aria-label="容量一覧の種類フィルター"><option value="all">すべて</option><option value="regular">regular</option><option value="symlink">symlink</option><option value="gitlink">gitlink</option></select></label>
               <label><span>最小サイズ（バイト）</span><input id="tree-sizes-min-bytes" type="text" inputMode="numeric" value={minimumBytesText} onChange={(event) => setMinimumBytesText(event.target.value)} placeholder="未指定" aria-invalid={Boolean(minimumError)} aria-describedby={minimumError ? "tree-sizes-min-bytes-error" : undefined} /></label>
+              <label><span>最大サイズ（バイト）</span><input id="tree-sizes-max-bytes" type="text" inputMode="numeric" value={maximumBytesText} onChange={(event) => setMaximumBytesText(event.target.value)} placeholder="未指定（0も可）" aria-invalid={Boolean(maximumError)} aria-describedby={maximumError ? "tree-sizes-max-bytes-error" : undefined} /></label>
+              <label><span>サイズ状態</span><select id="tree-sizes-size-filter" value={sizeFilter} onChange={(event) => setSizeFilter(event.target.value as TreeSizeSizeFilter)} aria-label="容量一覧のサイズ状態フィルター"><option value={TREE_SIZE_FILTER_ALL}>判明・不明すべて</option><option value={TREE_SIZE_FILTER_KNOWN}>サイズ判明</option><option value={TREE_SIZE_FILTER_UNKNOWN}>サイズ不明</option></select></label>
+              <label><span>拡張子（完全一致）</span><select id="tree-sizes-extension-filter" value={extension} onChange={(event) => setExtension(event.target.value)} aria-label="容量一覧の拡張子フィルター"><option value={TREE_SIZE_EXTENSION_ALL}>すべて</option>{extensionOptions.map((item) => <option key={item} value={item}>{item === TREE_SIZE_EXTENSION_NONE ? "拡張子なし" : item}</option>)}</select></label>
+              <label className="tree-sizes-checkbox"><span>object重複</span><span><input id="tree-sizes-duplicate-filter" type="checkbox" checked={duplicateOnly} onChange={(event) => setDuplicateOnly(event.target.checked)} /> 同じtype+hashを複数pathが参照</span></label>
               <label><span>並び順</span><select id="tree-sizes-sort" value={order} onChange={(event) => setOrder(event.target.value as TreeSizeOrder)} aria-label="容量一覧の並び順"><option value="size">サイズ</option><option value="path">パス</option></select></label>
               <label><span>方向</span><select id="tree-sizes-sort-direction" value={direction} onChange={(event) => setDirection(event.target.value as TreeSizeDirection)} aria-label="容量一覧の並び方向"><option value="descending">降順</option><option value="ascending">昇順</option></select></label>
-              <button id="tree-sizes-csv" type="button" className="subtle-button" disabled={!visibleEntries.length || Boolean(minimumError)} onClick={exportCsv}>絞り込み結果をCSV保存</button>
+              <div className="tree-sizes-export-actions" role="group" aria-label="表示結果の保存とコピー">
+                <button id="tree-sizes-csv" type="button" className="subtle-button" disabled={!visibleEntries.length || Boolean(minimumError) || Boolean(maximumError) || Boolean(sizeRangeError)} onClick={exportCsv}>絞り込み結果をCSV保存</button>
+                <button id="tree-sizes-json" type="button" className="subtle-button" disabled={!visibleEntries.length || Boolean(minimumError) || Boolean(maximumError) || Boolean(sizeRangeError)} onClick={exportJson}>表示中をJSON保存</button>
+                {visibleEntries.length > 0 && <CopyButton value={visiblePathLines} label="表示中pathをJSON行でコピー" />}
+                <button id="tree-sizes-reset" type="button" className="subtle-button" disabled={!hasFilters} onClick={resetTreeSizeFilters}>条件をリセット</button>
+              </div>
             </div>
             {minimumError && <p className="tree-sizes-input-error" id="tree-sizes-min-bytes-error" role="alert">{minimumError}</p>}
+            {maximumError && <p className="tree-sizes-input-error" id="tree-sizes-max-bytes-error" role="alert">{maximumError}</p>}
+            {sizeRangeError && <p className="tree-sizes-input-error" id="tree-sizes-range-error" role="alert">{sizeRangeError}</p>}
 
             <div className="tree-sizes-directory-toolbar" id="tree-sizes-directory" role="group" aria-label="ディレクトリ容量の範囲">
               <span>ディレクトリ範囲</span>
               <div className="tree-sizes-breadcrumbs"><button type="button" className={directory === "" ? "is-current" : ""} onClick={() => setDirectory("")}>ルート</button>{breadcrumbs.map((crumb: { name: string; path: string }) => <span key={crumb.path}><span aria-hidden="true">/</span><button type="button" className={directory === crumb.path ? "is-current" : ""} onClick={() => setDirectory(crumb.path)}>{crumb.name}</button></span>)}</div>
             </div>
+
+            <section className="tree-sizes-objects" aria-labelledby="tree-sizes-objects-title">
+              <div className="tree-sizes-subheading"><div><h4 id="tree-sizes-objects-title">表示中のGitオブジェクト別容量</h4><p>同じ種類・ハッシュを参照するパスを1つにまとめた容量です。</p></div></div>
+              {visibleEntries.length === 0 ? <p className="tree-sizes-empty" role="status">object集計の対象となる表示中pathがありません。</p> : <>
+                <div className="tree-sizes-object-summary" aria-label="表示中のpathとdistinct objectの容量比較">
+                  <div><span>通常のパス合計（既知）</span><strong>{formatTreeSizeBytes(objectSummary.pathTotalBytes)}</strong><small>{objectSummary.pathUnknownSizeCount.toLocaleString()}件は不明</small></div>
+                  <div><span>重複をまとめたobject合計（既知）</span><strong>{formatTreeSizeBytes(objectSummary.objectTotalBytes)}</strong><small>{objectSummary.objectUnknownSizeCount.toLocaleString()} objectは不明</small></div>
+                  <div><span>object数（重複をまとめた単位）</span><strong>{objectSummary.objectCount.toLocaleString()}</strong><small>重複参照 {objectSummary.duplicateReferenceCount.toLocaleString()}件</small></div>
+                </div>
+                <p className="tree-sizes-object-note" role="note">取得済みの表示対象だけの集計です。不明サイズは合計に含みません。Gitのディスク使用量や削減可能な容量を示すものではありません。</p>
+                <div className="tree-sizes-table-wrap" role="region" aria-label="object容量一覧" tabIndex={0}><table className="tree-sizes-table tree-sizes-object-table"><thead><tr><th scope="col">種類 / object</th><th scope="col">容量</th><th scope="col">参照パス数</th></tr></thead><tbody>{objectSummary.objects.map((object) => <tr key={`${object.type}:${object.hash}`}><th scope="row"><span>{object.type}</span> <code title={object.hash}>{shortHash(object.hash)}</code></th><td>{formatTreeSizeBytes(object.size)}</td><td>{object.referenceCount.toLocaleString()}</td></tr>)}</tbody></table></div>
+              </>}
+            </section>
 
             <section className="tree-sizes-directories" aria-labelledby="tree-sizes-directories-title">
               <div className="tree-sizes-subheading"><div><h4 id="tree-sizes-directories-title">ディレクトリ別の合計</h4><p>取得済みパスから計算した範囲別の集計です。行を選ぶとそのディレクトリへ移動します。</p></div></div>

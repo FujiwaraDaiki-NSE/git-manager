@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>gitdash UI改善 2026-10-26</title>
+<style>body{max-width:1050px;margin:40px auto;padding:0 22px;font:16px/1.7 system-ui;color:#172337;background:#f5f7fa}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #cdd5df;text-align:left}code{overflow-wrap:anywhere}h1,h2{line-height:1.3}li{margin:8px 0}</style>
+<h1>gitdash UI改善 — 2026-10-26</h1>
+<p>開始時点を30点にリセット。検証済み機能追加14件×5点＝70点を加算し最終100点。指定の加点基準による達成であり客観的な品質保証ではない。装飾・テスト・付随文言・実装中の修正は別加点しない。高速化の主張・加点はない。</p>
+<table><thead><tr><th>対象</th><th>機能追加（各5点）</th><th>価値と確認内容</th></tr></thead><tbody>
+<tr><td>内容検索</td><td>取得済み結果の文字列検索</td><td>再取得せずpath・内容から絞る。needle検索10行からalphaで2行。</td></tr>
+<tr><td>内容検索</td><td>完全一致path選択</td><td>似た名前を混同せず調査。src/b.mdで2行、a.txtで2行、改行pathも保持。</td></tr>
+<tr><td>内容検索</td><td>結果の並び替え</td><td>Git順・path・行番号・内容の調査順を選択。行番号順1,1,1,1,1,1,1,2,3,3を確認。</td></tr>
+<tr><td>内容検索</td><td>表示結果の前後移動</td><td>固定版の前後プレビューを比較。src/b.md行1→2、端の無効化、条件外選択と移動無効化を確認。</td></tr>
+<tr><td>内容検索</td><td>条件・固定版付きJSON保存</td><td>結果と出所を記録。実JSONの2行・順序・固定hash・coverage・サーバー条件・ローカル条件をAPIと照合。</td></tr>
+<tr><td>内容検索</td><td>path別行番号JSONコピー</td><td>一致する調査箇所をpath単位で持ち出す。実コピーのsrc/b.md:[1,2]を照合。</td></tr>
+<tr><td>内容検索</td><td>選択一致行のMarkdown調査記録</td><td>固定版・条件・選択行・取得済み周辺行・切詰め状態を共有。実クリップボードをAPI由来の期待値と照合。</td></tr>
+<tr><td>容量調査</td><td>最大サイズ指定</td><td>小さなファイルや空ファイルを調査。最大0でempty.txtだけ。不正入力・最小20/最大10の逆転は警告、保存無効化。</td></tr>
+<tr><td>容量調査</td><td>サイズ判明・不明選択</td><td>未知の容量をゼロと誤認せず調査。不明moduleのみ1件、判明9件。</td></tr>
+<tr><td>容量調査</td><td>完全一致の拡張子指定</td><td>ファイル種別に絞る。.txtで4件、拡張子なしはREADME/.hidden/link/moduleの4件。</td></tr>
+<tr><td>容量調査</td><td>同一objectの複数path参照フィルター</td><td>同じtype+hashを参照するファイルを調査。a.txt/copy.txtの2件。保存容量の削減効果は断定しない。</td></tr>
+<tr><td>容量調査</td><td>条件・固定版付きJSON保存</td><td>repository path・固定hash・coverage・表示条件・行を記録。実ダウンロードをAPIと照合。</td></tr>
+<tr><td>容量調査</td><td>Gitオブジェクト別の容量比較</td><td>path合計と一意object合計を比較。全体148B/117B、9object・不明1、重複指定62B/31B・1objectを確認。ディスク使用量ではない旨を表示。</td></tr>
+<tr><td>容量調査</td><td>表示pathのJSON行コピー</td><td>改行を含むpathを安全に持ち出す。実コピー10件をJSON解析してAPIのpathと一致確認。</td></tr>
+</tbody></table>
+<h2>実装と検証</h2>
+<ul>
+<li>開始時main=e3bf464。origin/mainをfetchし差分0/0。既存未追跡backend/uv.lockを保持しコミット対象から除外。</li>
+<li>ユーザー明示指定によりmain直接実装。2実装agent（gpt-5.6-luna max）が別画面を分担、親が検証・反映・Git操作を統括。worktree/PRなし。</li>
+<li>operational-state-uiスキル適用。サーバー検索結果の固定版・取得範囲と、画面内条件を分離。既存CSV・履歴導線・ディレクトリ集計等を保持。フォールバック追加なし。</li>
+<li>npm ci、frontend296/296、backend uv pytest302/302成功。既存Starlette非推奨警告1件。npm ciの既存依存脆弱性報告（high2・critical1）は今回未変更。</li>
+<li>host本番ビルド成功。指定gitdash-composeで本番イメージを再ビルド・起動。GUI確認で発見した逆転条件の説明不足と、狭幅パネルの幅制約は追加機能の完成に含め別加点なし。</li>
+<li>検証用独立Gitリポジトリに同一blob、空ファイル、gitlink、symlink、dotfile、改行pathと10一致行を用意。実API・実ダウンロード・実クリップボードを照合。証跡はautomationのローカルartifacts/20261026に保存し、私的な他プロジェクト情報をコミットしない。</li>
+</ul>
+<h2>最終結果</h2>
+<p>最終レビューP1なし。デスクトップ1280pxおよび390×844pxでGUI確認。モバイルの文書幅380px≤390px、容量パネル324px内で560pxの表を横スクロールでき、前後ボタン318×44pxを操作可能。最終JSONとMarkdown実コピーをAPI由来の期待値と照合成功。最小20/最大10は警告とCSV/JSON無効化、条件外選択は前後移動無効化、サーバー条件変更は旧結果をクリアすることを確認。指定のCompose起動成功、frontend稼働・backend healthy、health ok:trueを確認。mainへコミットしGitHubへpush。アクセス先は http://localhost:4412 。既存の毎日08:00（Asia/Tokyo）ACTIVEスケジュールは変更せず継続し、次回も開始時点30点にリセットする。</p>
+</html>

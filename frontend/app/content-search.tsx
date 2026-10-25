@@ -1,14 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import CopyButton from "./copy-button";
 import {
+  CONTENT_SEARCH_SORTS,
+  adjacentContentSearchMatches,
   buildContentSearchFileHistoryHref,
   contentSearchContext,
   contentSearchCsv,
   contentSearchFileQuery,
+  contentSearchInvestigationMarkdown,
+  contentSearchJson,
   contentSearchMatchKey,
+  contentSearchPathLineList,
+  contentSearchPaths,
   contentSearchQuery,
   contentSearchRequestKey,
+  contentSearchVisibleMatches,
 } from "./content-search-tools.mjs";
 import "./content-search.css";
 
@@ -43,6 +51,43 @@ type RepositoryFilePayload = {
 };
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type ContentSearchSort = "git" | "path" | "line" | "text";
+
+type ContentSearchContext = {
+  start: number;
+  end: number;
+  lines: { line: number; text: string; highlight: boolean }[];
+};
+
+type ContentSearchExportMetadata = {
+  repository_path: string;
+  pinned_hash: string;
+  input: {
+    revision: string;
+    query: string;
+    case_sensitive: boolean;
+    directory: string;
+  };
+  coverage: {
+    server_matches: number;
+    visible_matches: number;
+    server_truncated: boolean;
+    server_limit: number;
+    server_byte_limit: number;
+  };
+  local_conditions: {
+    search: string;
+    path: string;
+    sort: ContentSearchSort;
+  };
+};
+
+const CONTENT_SEARCH_SORT_LABELS: Record<ContentSearchSort, string> = {
+  git: "Git順",
+  path: "パス順",
+  line: "行番号順",
+  text: "内容順",
+};
 
 const CONTEXT_RADIUS = 3;
 
@@ -116,9 +161,23 @@ function downloadCsv(matches: ContentSearchMatch[], setStatus: (message: string)
     anchor.download = "gitdash-content-search.csv";
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setStatus(`${matches.length}行のCSV保存を開始しました。`);
+    setStatus(`${matches.length}行の表示中CSV保存を開始しました。`);
   } catch {
     setStatus("CSVを保存できませんでした。");
+  }
+}
+
+function downloadJson(matches: ContentSearchMatch[], metadata: ContentSearchExportMetadata, setStatus: (message: string) => void) {
+  try {
+    const url = URL.createObjectURL(new Blob([contentSearchJson(matches, metadata)], { type: "application/json;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "gitdash-content-search.json";
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus(`${matches.length}行の表示中JSON保存を開始しました。`);
+  } catch {
+    setStatus("JSONを保存できませんでした。調査条件を確認してください。");
   }
 }
 
@@ -128,6 +187,9 @@ export default function ContentSearch({ path }: { path: string }) {
   const [directory, setDirectory] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [matches, setMatches] = useState<ContentSearchMatch[]>([]);
+  const [localQuery, setLocalQuery] = useState("");
+  const [pathFilter, setPathFilter] = useState("");
+  const [sort, setSort] = useState<ContentSearchSort>("git");
   const [pinnedHash, setPinnedHash] = useState<string | null>(null);
   const [result, setResult] = useState<ContentSearchResponse | null>(null);
   const [state, setState] = useState<LoadState>("idle");
@@ -157,6 +219,9 @@ export default function ContentSearch({ path }: { path: string }) {
     setDirectory("");
     setCaseSensitive(false);
     setMatches([]);
+    setLocalQuery("");
+    setPathFilter("");
+    setSort("git");
     setPinnedHash(null);
     setResult(null);
     setState("idle");
@@ -179,6 +244,9 @@ export default function ContentSearch({ path }: { path: string }) {
     searchKeyRef.current = null;
     previewKeyRef.current = null;
     setMatches([]);
+    setLocalQuery("");
+    setPathFilter("");
+    setSort("git");
     setPinnedHash(null);
     setResult(null);
     setState("idle");
@@ -274,8 +342,53 @@ export default function ContentSearch({ path }: { path: string }) {
     });
   };
 
+  const paths = useMemo(() => contentSearchPaths(matches) as string[], [matches]);
+  const visibleMatches = useMemo(() => contentSearchVisibleMatches(matches, {
+    localQuery,
+    pathFilter,
+    sort,
+  }) as ContentSearchMatch[], [localQuery, matches, pathFilter, sort]);
+  const navigation = useMemo(() => adjacentContentSearchMatches(visibleMatches, selectedMatch) as {
+    index: number;
+    count: number;
+    previous: ContentSearchMatch | null;
+    next: ContentSearchMatch | null;
+  }, [selectedMatch, visibleMatches]);
+  const exportMetadata = useMemo<ContentSearchExportMetadata | null>(() => {
+    if (!result || !pinnedHash) return null;
+    return {
+      repository_path: path,
+      pinned_hash: pinnedHash,
+      input: {
+        revision: result.revision,
+        query: result.query,
+        case_sensitive: result.case_sensitive,
+        directory: result.directory,
+      },
+      coverage: {
+        server_matches: matches.length,
+        visible_matches: visibleMatches.length,
+        server_truncated: result.truncated,
+        server_limit: result.limit,
+        server_byte_limit: result.byte_limit,
+      },
+      local_conditions: {
+        search: localQuery,
+        path: pathFilter,
+        sort,
+      },
+    };
+  }, [localQuery, matches.length, path, pathFilter, pinnedHash, result, sort, visibleMatches.length]);
+  const pathLineList = useMemo(() => contentSearchPathLineList(visibleMatches) as string, [visibleMatches]);
   const context = selectedMatch && preview?.text !== null && preview?.text !== undefined
-    ? contentSearchContext(preview.text, selectedMatch.line, CONTEXT_RADIUS) as { start: number; end: number; lines: { line: number; text: string; highlight: boolean }[] }
+    ? contentSearchContext(preview.text, selectedMatch.line, CONTEXT_RADIUS) as ContentSearchContext
+    : null;
+  const investigationReport = exportMetadata && selectedMatch && previewState === "ready" && preview
+    ? contentSearchInvestigationMarkdown(selectedMatch, exportMetadata, context && context.start <= context.end ? context : null, {
+      binary: preview.binary,
+      text_available: preview.text !== null,
+      truncated: preview.truncated,
+    }) as string
     : null;
   const historyHref = useMemo(() => {
     if (typeof window === "undefined" || !pinnedHash || !selectedMatch) return null;
@@ -286,10 +399,17 @@ export default function ContentSearch({ path }: { path: string }) {
     }
   }, [path, pinnedHash, selectedMatch]);
 
+  const clearLocalFilters = () => {
+    setLocalQuery("");
+    setPathFilter("");
+    setSort("git");
+    setExportStatus("");
+  };
+  const hasLocalFilters = localQuery.trim() !== "" || pathFilter !== "" || sort !== "git";
   const canRun = Boolean(path && revision && query) && state !== "loading";
 
   return <details className="content-search" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary id="content-search-title">版を指定して内容を検索 <span>固定revision・ディレクトリ・CSV</span></summary>
+    <summary id="content-search-title">版を指定して内容を検索 <span>固定revision・ディレクトリ・ローカル絞り込み・CSV/JSON</span></summary>
     <div className="content-search-body">
       <div className="content-search-heading">
         <div>
@@ -312,17 +432,29 @@ export default function ContentSearch({ path }: { path: string }) {
 
       {(state === "ready" || (state === "loading" && result) || (state === "error" && result)) && result && <>
         <div className="content-search-coverage" role="status">
-          <span>{matches.length.toLocaleString()} 行</span>
+          <span>{visibleMatches.length.toLocaleString()} / {matches.length.toLocaleString()} 行を表示</span>
           <span>{caseSensitive ? "大小文字を区別" : "大小文字を区別しない"}</span>
           <span>{directory || "ルート全体"}</span>
+          <span>並び順: {CONTENT_SEARCH_SORT_LABELS[sort]}</span>
+          {localQuery.trim() !== "" && <span>ローカル検索: {localQuery}</span>}
+          {pathFilter !== "" && <span>path: {pathFilter}</span>}
           <span className="content-search-pinned"><code title={pinnedHash ?? undefined}>{pinnedHash ? shortHash(pinnedHash) : "固定版未取得"}</code></span>
           {exportStatus && <span>{exportStatus}</span>}
         </div>
         {result.truncated && <p className="content-search-truncated" role="status">結果は上限 {result.limit.toLocaleString()} 行または {formatBytes(result.byte_limit)} に達したため一部だけを表示しています。</p>}
         <div className="content-search-tools" role="group" aria-label="内容検索結果の操作">
-          <button type="button" className="subtle-button" disabled={matches.length === 0} onClick={() => downloadCsv(matches, setExportStatus)}>一致する行をCSV保存</button>
+          <label className="content-search-local-search"><span>取得済み一致行を検索（path / 内容）</span><input type="search" value={localQuery} onChange={(event) => setLocalQuery(event.target.value)} placeholder="pathまたは内容" aria-label="取得済み一致行をpathまたは内容で検索" /></label>
+          <label><span>path（完全一致）</span><select value={pathFilter} onChange={(event) => setPathFilter(event.target.value)} aria-label="取得済み一致行をpathで完全一致絞り込み"><option value="">すべて</option>{paths.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label><span>表示順</span><select value={sort} onChange={(event) => setSort(event.target.value as ContentSearchSort)} aria-label="内容検索結果の表示順">{CONTENT_SEARCH_SORTS.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select></label>
+          <div className="content-search-filter-actions">
+            <button type="button" className="subtle-button" disabled={!hasLocalFilters} onClick={clearLocalFilters}>ローカル条件をリセット</button>
+            <button type="button" className="subtle-button" disabled={visibleMatches.length === 0} onClick={() => downloadCsv(visibleMatches, setExportStatus)} aria-label="表示中の内容検索結果をCSV保存">表示中をCSV保存</button>
+            <button type="button" className="subtle-button" disabled={visibleMatches.length === 0 || exportMetadata === null} onClick={() => { if (exportMetadata) downloadJson(visibleMatches, exportMetadata, setExportStatus); }} aria-label="表示中の内容検索結果をJSON保存">表示中をJSON保存</button>
+            {visibleMatches.length > 0 && <CopyButton value={pathLineList} label="表示中のpath別行番号JSONをコピー" />}
+          </div>
         </div>
-        {matches.length === 0 ? <p className="content-search-empty" role="status">一致する行はありません。</p> : <div className="content-search-table-wrap" role="region" aria-label="内容検索の一致行" tabIndex={0}><table className="content-search-table"><thead><tr><th>ファイル</th><th>行</th><th>内容</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{matches.map((match, index) => {
+        {selectedMatch && navigation.index < 0 && <p className="content-search-selection-note" role="status">選択中の一致行は現在のローカル条件外です。前後の表示結果へ移動できません。</p>}
+        {matches.length === 0 ? <p className="content-search-empty" role="status">一致する行はありません。</p> : visibleMatches.length === 0 ? <p className="content-search-empty" role="status">ローカル条件に一致する行はありません。</p> : <div className="content-search-table-wrap" role="region" aria-label="内容検索の一致行" tabIndex={0}><table className="content-search-table"><thead><tr><th>ファイル</th><th>行</th><th>内容</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{visibleMatches.map((match, index) => {
           const selected = selectedMatch?.path === match.path && selectedMatch.line === match.line && selectedMatch.text === match.text;
           const key = contentSearchMatchKey(match, index) as string;
           return <tr key={key} className={selected ? "is-selected" : undefined} aria-selected={selected}>
@@ -335,7 +467,12 @@ export default function ContentSearch({ path }: { path: string }) {
         {selectedMatch && <section className="content-search-preview" aria-labelledby="content-search-preview-title">
           <div className="content-search-preview-heading">
             <div><h4 id="content-search-preview-title">一致行の前後を表示</h4><p><code>{selectedMatch.path}</code> · 行 {selectedMatch.line} · 固定版 <code>{pinnedHash ? shortHash(pinnedHash) : "未取得"}</code></p></div>
-            <div className="content-search-preview-actions">{historyHref && <a className="subtle-button" href={historyHref} aria-label="固定した版でファイル履歴を調べる（自動取得しない）">ファイル履歴を調べる</a>}</div>
+            <div className="content-search-preview-actions">{historyHref && <a className="subtle-button" href={historyHref} aria-label="固定した版でファイル履歴を調べる（自動取得しない）">ファイル履歴を調べる</a>}{investigationReport && <CopyButton value={investigationReport} label="選択した一致行のMarkdown調査レポートをコピー" />}</div>
+          </div>
+          <div className="content-search-navigation" role="group" aria-label="表示中の一致行の移動">
+            <button type="button" className="subtle-button" disabled={navigation.previous === null} onClick={() => { if (navigation.previous) selectMatch(navigation.previous); }} aria-label="前の表示中の一致行へ">← 前の表示結果</button>
+            <span role="status">{navigation.index >= 0 ? `選択 ${navigation.index + 1} / ${navigation.count} 件` : "選択中の一致行は表示条件外です"}</span>
+            <button type="button" className="subtle-button" disabled={navigation.next === null} onClick={() => { if (navigation.next) selectMatch(navigation.next); }} aria-label="次の表示中の一致行へ">次の表示結果 →</button>
           </div>
           {previewState === "loading" && <p className="content-search-status" role="status">ファイル内容を取得中…</p>}
           {previewState === "error" && <p className="content-search-error" role="alert">一致行のファイルを取得できませんでした。{previewError && <span>（{previewError}）</span>}</p>}
