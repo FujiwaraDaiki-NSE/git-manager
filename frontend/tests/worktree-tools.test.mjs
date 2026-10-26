@@ -15,6 +15,15 @@ import {
   worktreeHealth,
   worktreeHealthTokens,
   worktreeInventoryTsv,
+  worktreeInventoryJson,
+  worktreeInventoryMarkdown,
+  worktreePathHeadJson,
+  summarizeWorktreeHeads,
+  worktreeUpstreamKey,
+  worktreeSyncThresholdsMatch,
+  parseWorktreeSyncThreshold,
+  duplicateWorktreeHeadKeys,
+  worktreeHeadMatches,
   worktreeState,
   worktreeStateTokens,
   worktreeSync,
@@ -54,6 +63,10 @@ function filterOptions(overrides = {}) {
     health: "all",
     sync: "all",
     branch: "all",
+    upstream: "all",
+    head: "all",
+    minAhead: null,
+    minBehind: null,
     ...overrides,
   };
 }
@@ -151,6 +164,64 @@ test("upstream synchronization uses only explicit lane tracking facts", () => {
   assert.deepEqual(combined.map((row) => row.worktree.path), ["/repo/ahead"]);
 });
 
+test("upstream selector keeps exact names, null no-upstream, and absent unknown separate", () => {
+  const rows = [
+    { worktree: worktree({ path: "/repo/main" }), lane: lane("/repo/main", { upstream: "origin/main" }) },
+    { worktree: worktree({ path: "/repo/local", is_main: false }), lane: lane("/repo/local", { upstream: null }) },
+    { worktree: worktree({ path: "/repo/unknown", is_main: false }), lane: lane("/repo/unknown", { upstream: undefined }) },
+    { worktree: worktree({ path: "/repo/no-lane", is_main: false }), lane: null },
+  ];
+  assert.equal(worktreeUpstreamKey(rows[0]), "upstream:origin/main");
+  assert.equal(worktreeUpstreamKey(rows[1]), "no-upstream");
+  assert.equal(worktreeUpstreamKey(rows[2]), "unknown");
+  assert.equal(worktreeUpstreamKey(rows[3]), "unknown");
+  assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ upstream: "upstream:origin/main" })).map((row) => row.worktree.path), ["/repo/main"]);
+  assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ upstream: "no-upstream" })).map((row) => row.worktree.path), ["/repo/local"]);
+  assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ upstream: "unknown" })).map((row) => row.worktree.path), ["/repo/unknown", "/repo/no-lane"]);
+});
+
+test("numeric ahead and behind thresholds validate and require known tracking counts", () => {
+  const ahead = { worktree: worktree({ path: "/repo/ahead", is_main: false }), lane: lane("/repo/ahead", { upstream_ahead: 3, upstream_behind: 1 }) };
+  const behind = { worktree: worktree({ path: "/repo/behind", is_main: false }), lane: lane("/repo/behind", { upstream_ahead: 1, upstream_behind: 4 }) };
+  const unknown = { worktree: worktree({ path: "/repo/unknown", is_main: false }), lane: lane("/repo/unknown", { upstream_ahead: null, upstream_behind: 4 }) };
+  assert.equal(worktreeSyncThresholdsMatch(ahead, 3, null), true);
+  assert.equal(worktreeSyncThresholdsMatch(ahead, 4, null), false);
+  assert.equal(worktreeSyncThresholdsMatch(behind, null, 4), true);
+  assert.equal(worktreeSyncThresholdsMatch(unknown, null, 1), false);
+  assert.equal(worktreeSyncThresholdsMatch(ahead, -1, null), false);
+  assert.equal(worktreeSyncThresholdsMatch(ahead, 1.5, null), false);
+  assert.deepEqual(filterWorktreeInventory([ahead, behind], filterOptions({ minAhead: 2, minBehind: 1 })).map((row) => row.worktree.path), ["/repo/ahead"]);
+});
+
+test("threshold input parsing keeps invalid values invalid instead of broadening the inventory", () => {
+  assert.deepEqual(parseWorktreeSyncThreshold(""), { value: null, valid: true });
+  assert.deepEqual(parseWorktreeSyncThreshold(" 3 "), { value: 3, valid: true });
+  assert.deepEqual(parseWorktreeSyncThreshold("1.5"), { value: null, valid: false });
+  assert.deepEqual(parseWorktreeSyncThreshold("-1"), { value: null, valid: false });
+  assert.deepEqual(parseWorktreeSyncThreshold("9007199254740992"), { value: null, valid: false });
+  assert.deepEqual(parseWorktreeSyncThreshold(null), { value: null, valid: false });
+});
+
+test("duplicate HEAD filter and grouping identify shared commits without grouping unknown heads", () => {
+  const shared = "2222222222222222222222222222222222222222";
+  const rows = [
+    { worktree: worktree({ path: "/repo/a", head: shared, is_main: false }), lane: null },
+    { worktree: worktree({ path: "/repo/b", head: shared, is_main: false }), lane: null },
+    { worktree: worktree({ path: "/repo/c", head: null, is_main: false }), lane: null },
+  ];
+  const duplicates = duplicateWorktreeHeadKeys(rows);
+  assert.deepEqual([...duplicates], [shared]);
+  assert.equal(worktreeHeadMatches(rows[0], "duplicate", duplicates), true);
+  assert.equal(worktreeHeadMatches(rows[2], "duplicate", duplicates), false);
+  assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ head: "duplicate" })).map((row) => row.worktree.path), ["/repo/a", "/repo/b"]);
+  assert.deepEqual(summarizeWorktreeHeads(rows), {
+    uniqueCount: 1,
+    duplicateCount: 1,
+    unknownCount: 1,
+    groups: [{ head: shared, paths: ["/repo/a", "/repo/b"], count: 2 }],
+  });
+});
+
 test("branch selector preserves exact branches and distinguishes detached from unknown", () => {
   const exact = { worktree: worktree({ path: "/repo/exact", branch: "detached", detached: false }), lane: null };
   const detached = { worktree: worktree({ path: "/repo/detached", branch: null, detached: true }), lane: null };
@@ -205,4 +276,26 @@ test("TSV cells neutralize formula prefixes and delimiters while preserving unkn
   const mainTsv = worktreeInventoryTsv([{ worktree: worktree({ state: "ok", is_main: true }), lane: lane("/repo/main") }]);
   assert.match(mainTsv, /\/repo\/main\tmain\t1111111111111111111111111111111111111111\tok\ttrue\tfalse/);
   assert.equal(tsv.includes("\nthird"), false);
+});
+
+test("JSON and Markdown exports retain filtered context and explicit metadata", () => {
+  const rows = [{
+    worktree: worktree({ path: "/repo/feature", branch: "feature/x", head: "abcdef1234567890", is_main: false }),
+    lane: lane("/repo/feature", { upstream: "origin/feature", upstream_ahead: 2, upstream_behind: 1 }),
+  }];
+  const context = {
+    project: "demo",
+    mainPath: "/repo",
+    order: "path",
+    filters: { query: "feature", head: "all", minAhead: 1, minBehind: null },
+  };
+  const json = JSON.parse(worktreeInventoryJson(rows, context));
+  assert.equal(json.project, "demo");
+  assert.equal(json.main_path, "/repo");
+  assert.deepEqual(json.filters, context.filters);
+  assert.equal(json.worktrees[0].head, "abcdef1234567890");
+  assert.equal(json.worktrees[0].lane.upstream_present, true);
+  assert.match(worktreeInventoryMarkdown(rows, context), /\| Path \| Branch \| HEAD \| State \| Health \| Upstream \| Ahead \| Behind \|/);
+  assert.match(worktreeInventoryMarkdown(rows, context), /origin\/feature/);
+  assert.deepEqual(JSON.parse(worktreePathHeadJson(rows)), { "/repo/feature": "abcdef1234567890" });
 });

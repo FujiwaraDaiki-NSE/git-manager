@@ -3531,6 +3531,12 @@ body {
 .branch-relations-controls select, .branch-relations-controls input { background: var(--control-panel); border: 1px solid var(--control-border); border-radius: 6px; color: var(--control-ink); font: 11px var(--control-mono); min-height: 34px; max-width: min(360px, 70vw); padding: 5px 8px; }
 .branch-relations-search input { min-width: min(280px, 52vw); }
 .branch-relations-controls > span { color: var(--control-muted); font: 10px var(--control-mono); margin-left: auto; }
+.branch-relations-filter-row { align-items: end; display: flex; flex-wrap: wrap; gap: 8px 10px; }
+.branch-relations-filter-row label { align-items: center; color: var(--control-muted); display: inline-flex; font: 10px var(--control-sans); gap: 5px; }
+.branch-relations-filter-row select { background: var(--control-panel); border: 1px solid var(--control-border); border-radius: 6px; color: var(--control-ink); font: 10px var(--control-mono); min-height: 30px; padding: 4px 7px; }
+.branch-relations-export-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.branch-relations-export-actions .subtle-button { min-height: 30px; padding: 4px 8px; }
+.branch-relations-export-status { color: var(--control-muted); font: 10px/1.5 var(--control-sans); margin: 0; }
 .branch-relations-subheading { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; }
 .branch-relations-subheading h4 { font: 600 12px var(--control-sans); margin: 0; }
 .branch-relation-counts { align-items: center; color: var(--control-muted); display: flex; flex-wrap: wrap; font: 10px var(--control-mono); gap: 4px 9px; }
@@ -3584,6 +3590,11 @@ body {
   .branch-relations-controls label { align-items: start; display: grid; }
   .branch-relations-controls select, .branch-relations-controls input { max-width: none; width: 100%; }
   .branch-relations-controls > span { margin-left: 0; }
+  .branch-relations-filter-row { align-items: stretch; display: grid; }
+  .branch-relations-filter-row label { align-items: start; display: grid; }
+  .branch-relations-filter-row select { width: 100%; }
+  .branch-relations-export-actions { margin-left: 0; }
+  .branch-relations-export-actions .subtle-button { flex: 1; }
   .branch-relation-badge { margin-left: 0; }
   .branch-relations-panel > details > summary { line-height: 1.55; }
 }

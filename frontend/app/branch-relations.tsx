@@ -7,7 +7,6 @@ import {
   coverageLabels,
   edgeReferenceIds,
   evidenceLabel,
-  filterReferencePairs,
   operationLabel,
   preferredReferenceId,
   referenceDisplayName,
@@ -17,6 +16,13 @@ import {
   selectReferencePairs,
   syncSelectedReferenceId,
 } from "./branch-relations-tools.mjs";
+import {
+  filterHistoricalEdges,
+  filterVisibleReferencePairs,
+  sortVisibleReferencePairs,
+  visiblePairsJson,
+  visiblePairsMarkdown,
+} from "./branch-relations-ui-tools.mjs";
 import type {
   ProjectBranchConnectionEdge,
   ProjectBranchConnectionUnresolved,
@@ -86,33 +92,25 @@ function statusLabel(status: ProjectResponse["branch_connections"] extends infer
   return "未取得";
 }
 
-function edgeMatchesQuery(
-  edge: ProjectBranchConnectionEdge,
-  refs: ProjectBranchConnectionRef[],
-  rows: ProjectBranchRow[],
-  query: string,
-) {
-  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return true;
-  const text = [
-    edge.label,
-    edge.evidence,
-    edge.operation,
-    edge.source,
-    edge.target,
-    edge.commit_hash,
-    edge.source_commit_hash,
-    edge.target_commit_hash,
-    endpointLabel(edge, "source", refs, rows),
-    endpointLabel(edge, "target", refs, rows),
-    edge.pr_number === null || edge.pr_number === undefined ? "" : `pr ${edge.pr_number}`,
-  ].filter(Boolean).join(" ").toLocaleLowerCase();
-  return terms.every((term) => text.includes(term));
-}
-
 function RelationBadge({ relation }: { relation: string }) {
   return <span className={`branch-relation-badge is-${relation}`}>{relationLabel(relation)}</span>;
 }
+
+function downloadText(content: string, type: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+const RELATION_FILTERS = ["equal", "ahead", "behind", "diverged", "unrelated", "unknown"] as const;
+const REF_KIND_FILTERS = ["local", "remote", "detached"] as const;
+const EVIDENCE_FILTERS = ["pull_request", "merge_base", "reflog"] as const;
+const OPERATION_FILTERS = ["fast_forward", "merge", "branch_create", "pull_request"] as const;
 
 function RefName({ reference: ref }: { reference: ProjectBranchConnectionRef | undefined }) {
   if (!ref) return <span className="branch-relation-ref-missing">参照未取得</span>;
@@ -186,6 +184,12 @@ export default function BranchRelations({
   const preferred = useMemo(() => preferredReferenceId(refs, selectedRowId, selectedLane, relationRef), [refs, selectedLane, selectedRowId, relationRef]);
   const [selectedRefId, setSelectedRefId] = useState<string | null>(preferred);
   const [query, setQuery] = useState("");
+  const [pairRelation, setPairRelation] = useState("");
+  const [pairKind, setPairKind] = useState("");
+  const [pairSort, setPairSort] = useState("name");
+  const [historyEvidence, setHistoryEvidence] = useState("");
+  const [historyOperation, setHistoryOperation] = useState("");
+  const [exportStatus, setExportStatus] = useState("");
   const [open, setOpen] = useState(true);
   const [showAllUnresolved, setShowAllUnresolved] = useState(false);
   const selectionContext = JSON.stringify([selectedRowId, selectedLane, relationRef]);
@@ -197,23 +201,36 @@ export default function BranchRelations({
   }, [preferred, refsById, selectionContext]);
   useEffect(() => {
     setQuery("");
+    setPairRelation("");
+    setPairKind("");
+    setPairSort("name");
+    setHistoryEvidence("");
+    setHistoryOperation("");
+    setExportStatus("");
     setShowAllUnresolved(false);
   }, [project.id, project.main_path]);
 
   const oriented = useMemo(() => selectReferencePairs(pairs, selectedRefId), [pairs, selectedRefId]);
-  const filteredPairs = useMemo(() => filterReferencePairs(oriented, refsById, query), [oriented, query, refsById]);
+  const filteredPairs = useMemo(() => sortVisibleReferencePairs(
+    filterVisibleReferencePairs(oriented, refsById, { query, relation: pairRelation, otherKind: pairKind }),
+    refsById,
+    pairSort,
+  ), [oriented, pairKind, pairRelation, pairSort, query, refsById]);
   const edges = connection?.edges ?? [];
-  const filteredEdges = useMemo(() => edges.filter((edge) => {
-    const ids = edgeReferenceIds(edge, refs);
-    const isRelated = !selectedRefId || ids.source === selectedRefId || ids.target === selectedRefId;
-    return isRelated && edgeMatchesQuery(edge, refs, rows, query);
-  }), [edges, query, refs, rows, selectedRefId]);
+  const filteredEdges = useMemo(() => filterHistoricalEdges(edges, refs, selectedRefId, {
+    query,
+    evidence: historyEvidence,
+    operation: historyOperation,
+    rows,
+  }), [edges, historyEvidence, historyOperation, query, refs, rows, selectedRefId]);
   const unresolved: ProjectBranchConnectionUnresolved[] = connection?.unresolved ?? [];
   const filteredUnresolved = useMemo(() => {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     return unresolved.filter((item) => {
       const related = !selectedRefId || item.source_ref_id === selectedRefId || item.target_ref_id === selectedRefId;
       if (!showAllUnresolved && !related) return false;
+      if (historyEvidence && item.evidence !== historyEvidence) return false;
+      if (historyOperation && item.operation !== historyOperation) return false;
       if (!terms.length) return true;
       const haystack = [
         item.source,
@@ -228,7 +245,7 @@ export default function BranchRelations({
       ].filter(Boolean).join(" ").toLocaleLowerCase();
       return terms.every((term) => haystack.includes(term));
     });
-  }, [query, selectedRefId, showAllUnresolved, unresolved]);
+  }, [historyEvidence, historyOperation, query, selectedRefId, showAllUnresolved, unresolved]);
   const counts: Record<string, number> = useMemo(() => (oriented as Array<{ relation: string }>).reduce<Record<string, number>>((result, item) => {
     result[item.relation] = (result[item.relation] ?? 0) + 1;
     return result;
@@ -247,6 +264,36 @@ export default function BranchRelations({
     return !ids.source && !ids.target;
   }).length : 0;
   const unknownUnresolved = selectedRefId ? unresolved.filter((item) => !item.source_ref_id && !item.target_ref_id).length : 0;
+  const exportFilters = useMemo(() => ({
+    query,
+    relation: pairRelation || null,
+    other_kind: pairKind || null,
+    sort: pairSort,
+    history_evidence: historyEvidence || null,
+    history_operation: historyOperation || null,
+  }), [pairKind, pairRelation, pairSort, query]);
+  const exportCoverage = useMemo(() => ({ ancestry: coverage.ancestry, reflog: coverage.reflog }), [coverage.ancestry, coverage.reflog]);
+  const selectedRef = selectedRefId ? refsById.get(selectedRefId) : undefined;
+  const exportCurrentPairs = () => {
+    downloadText(
+      visiblePairsJson({ repository: project.main_path, selectedRef, coverage: exportCoverage, filters: exportFilters, pairs: filteredPairs, refsById }),
+      "application/json;charset=utf-8",
+      "gitdash-branch-relations.json",
+    );
+    setExportStatus("表示中の関係をJSONで保存しました。");
+  };
+  const copyCurrentPairs = async () => {
+    if (!navigator.clipboard?.writeText) {
+      setExportStatus("Markdownをコピーできません。ブラウザーのClipboard APIが利用できません。");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(visiblePairsMarkdown({ repository: project.main_path, selectedRef, coverage: exportCoverage, filters: exportFilters, pairs: filteredPairs, refsById }));
+      setExportStatus("表示中の関係をMarkdownでコピーしました。");
+    } catch {
+      setExportStatus("Markdownをコピーできませんでした。");
+    }
+  };
 
   return <section className="branch-relations-panel" aria-labelledby="branch-relations-title">
     <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -273,12 +320,23 @@ export default function BranchRelations({
 
           {refs.length > 0 && selectedRefId && <div className="branch-relations-pair-section">
             <div className="branch-relations-subheading"><h4><RefName reference={refsById.get(selectedRefId)} />との現在の関係</h4><div className="branch-relation-counts">{Object.entries(counts).map(([relation, count]) => count > 0 && <span key={relation}>{relationLabel(relation)} {count}</span>)}</div></div>
-            {pairs.length === 0 ? <p className="branch-relations-empty">現在の参照比較は未取得です。ペア情報が返るまでGitの意味を推測しません。</p> : filteredPairs.length === 0 ? <p className="branch-relations-empty">検索条件に一致する関係はありません。</p> : <ul className="branch-relations-pairs" tabIndex={0} aria-label="現在の比較結果（スクロール可能）">{filteredPairs.map((item) => <RelationPairRow item={item} key={`${item.pair.left_ref_id}:${item.pair.right_ref_id}`} refsById={refsById} selectedRef={refsById.get(selectedRefId)} />)}</ul>}
+            <div className="branch-relations-filter-row" aria-label="現在の関係の絞り込み">
+              <label><span>関係</span><select aria-label="現在の関係で絞り込み" value={pairRelation} onChange={(event) => setPairRelation(event.target.value)}><option value="">すべて</option>{RELATION_FILTERS.map((relation) => <option key={relation} value={relation}>{relationLabel(relation)}</option>)}</select></label>
+              <label><span>相手の種別</span><select aria-label="相手の参照種別で絞り込み" value={pairKind} onChange={(event) => setPairKind(event.target.value)}><option value="">すべて</option>{REF_KIND_FILTERS.map((kind) => <option key={kind} value={kind}>{refKindLabel(kind)}</option>)}</select></label>
+              <label><span>並び順</span><select aria-label="現在の関係の並び順" value={pairSort} onChange={(event) => setPairSort(event.target.value)}><option value="name">参照名</option><option value="relation">関係</option><option value="divergence">分岐差分</option></select></label>
+              <div className="branch-relations-export-actions"><button type="button" className="subtle-button" disabled={!filteredPairs.length} onClick={exportCurrentPairs} aria-label="表示中の関係をJSON保存">JSON保存</button><button type="button" className="subtle-button" disabled={!filteredPairs.length} onClick={copyCurrentPairs} aria-label="表示中の関係をMarkdownコピー">Markdownコピー</button></div>
+            </div>
+            {exportStatus && <p className="branch-relations-export-status" role="status" aria-live="polite">{exportStatus}</p>}
+            {pairs.length === 0 ? <p className="branch-relations-empty">現在の参照比較は未取得です。ペア情報が返るまでGitの意味を推測しません。</p> : filteredPairs.length === 0 ? <p className="branch-relations-empty">検索条件に一致する関係はありません。</p> : <ul className="branch-relations-pairs" tabIndex={0} aria-label="現在の比較結果（スクロール可能）">{filteredPairs.map((item: ReturnType<typeof selectReferencePairs>[number]) => <RelationPairRow item={item} key={`${item.pair.left_ref_id}:${item.pair.right_ref_id}`} refsById={refsById} selectedRef={refsById.get(selectedRefId)} />)}</ul>}
           </div>}
 
           <div className="branch-relations-history-section">
             <div className="branch-relations-subheading"><h4>{selectedRefId ? "対象の参照に関連する過去イベント" : "過去の分岐・合流イベント"}</h4><span>{filteredEdges.length}件</span></div>
-            {filteredEdges.length === 0 ? <p className="branch-relations-empty">表示できる操作イベントはありません。根拠が未取得の履歴は推測していません。</p> : <ul className="branch-relations-events">{filteredEdges.map((edge) => <ConnectionEventRow edge={edge} key={edge.id} refs={refs} rows={rows} selectedRefId={selectedRefId} />)}</ul>}
+            <div className="branch-relations-filter-row" aria-label="過去イベントの絞り込み">
+              <label><span>根拠</span><select aria-label="過去イベントの根拠で絞り込み" value={historyEvidence} onChange={(event) => setHistoryEvidence(event.target.value)}><option value="">すべて</option>{EVIDENCE_FILTERS.map((evidence) => <option key={evidence} value={evidence}>{evidenceLabel(evidence)}</option>)}</select></label>
+              <label><span>操作</span><select aria-label="過去イベントの操作で絞り込み" value={historyOperation} onChange={(event) => setHistoryOperation(event.target.value)}><option value="">すべて</option>{OPERATION_FILTERS.map((operation) => <option key={operation} value={operation}>{operationLabel(operation)}</option>)}</select></label>
+            </div>
+            {filteredEdges.length === 0 ? <p className="branch-relations-empty">表示できる操作イベントはありません。根拠が未取得の履歴は推測していません。</p> : <ul className="branch-relations-events">{filteredEdges.map((edge: ProjectBranchConnectionEdge) => <ConnectionEventRow edge={edge} key={edge.id} refs={refs} rows={rows} selectedRefId={selectedRefId} />)}</ul>}
             {selectedRefId && unknownHistoryEdges > 0 && <p className="branch-relations-note" role="status">{unknownHistoryEdges}件の過去イベントは取り込み元・先の参照 ID が未取得のため、対象の参照には自動追加していません。対象を解除すると全件を確認できます。</p>}
           </div>
 

@@ -14,7 +14,13 @@ import {
   worktreeCdCommand,
   worktreeHealth,
   worktreeHealthTokens,
+  worktreeInventoryJson,
+  worktreeInventoryMarkdown,
   worktreeInventoryTsv,
+  worktreePathHeadJson,
+  parseWorktreeSyncThreshold,
+  summarizeWorktreeHeads,
+  worktreeUpstreamKey,
   worktreeState,
   worktreeStateTokens,
   worktreeSync,
@@ -25,6 +31,8 @@ type WorktreeStateFilter = "all" | "main" | "ok" | "detached" | "prunable" | "lo
 type WorktreeHealthFilter = "all" | "dirty" | "conflict" | "clean" | "unknown";
 type WorktreeSyncFilter = "all" | "ahead" | "behind" | "diverged" | "synced" | "no-upstream" | "unknown";
 type WorktreeBranchFilter = "all" | "detached" | "unknown" | `branch:${string}`;
+type WorktreeUpstreamFilter = "all" | "no-upstream" | "unknown" | `upstream:${string}`;
+type WorktreeHeadFilter = "all" | "duplicate";
 type WorktreeOrder = "status" | "branch" | "path";
 type WorktreeDensity = "comfortable" | "compact";
 type WorktreeInventoryRow = {
@@ -105,6 +113,13 @@ function branchLabel(row: WorktreeInventoryRow) {
   return "ブランチ未取得";
 }
 
+function upstreamOptionLabel(key: WorktreeUpstreamFilter) {
+  if (key === "all") return "すべて";
+  if (key === "no-upstream") return "追跡先なし";
+  if (key === "unknown") return "追跡先未取得";
+  return key.slice("upstream:".length);
+}
+
 function headLabel(row: WorktreeInventoryRow) {
   if (typeof row.worktree.head !== "string" || row.worktree.head.length === 0) return "HEAD 未取得";
   return row.worktree.head.slice(0, 10);
@@ -120,12 +135,16 @@ function upstreamFactLabel(row: WorktreeInventoryRow) {
 }
 
 function downloadTsv(projectName: string, value: string) {
-  const blob = new Blob([value], { type: "text/tab-separated-values;charset=utf-8" });
+  downloadText(projectName, "worktrees.tsv", value, "text/tab-separated-values;charset=utf-8");
+}
+
+function downloadText(projectName: string, suffix: string, value: string, type: string) {
+  const blob = new Blob([value], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   const safeName = projectName.replace(/[^A-Za-z0-9._-]+/g, "-");
   anchor.href = url;
-  anchor.download = `${safeName}-worktrees.tsv`;
+  anchor.download = `${safeName}-${suffix}`;
   anchor.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
@@ -154,6 +173,10 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
   const [healthFilter, setHealthFilter] = useState<WorktreeHealthFilter>("all");
   const [syncFilter, setSyncFilter] = useState<WorktreeSyncFilter>("all");
   const [branchFilter, setBranchFilter] = useState<WorktreeBranchFilter>("all");
+  const [upstreamFilter, setUpstreamFilter] = useState<WorktreeUpstreamFilter>("all");
+  const [headFilter, setHeadFilter] = useState<WorktreeHeadFilter>("all");
+  const [minAheadInput, setMinAheadInput] = useState("");
+  const [minBehindInput, setMinBehindInput] = useState("");
   const [order, setOrder] = useState<WorktreeOrder>("status");
   const [density, setDensity] = useState<WorktreeDensity>("comfortable");
 
@@ -176,23 +199,52 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
     }
     return options;
   }, [inventory]);
+  const upstreamOptions = useMemo<Array<{ key: WorktreeUpstreamFilter; label: string }>>(() => {
+    const upstreams = [...new Set(inventory
+      .map((row) => worktreeUpstreamKey(row))
+      .filter((key): key is `upstream:${string}` => key.startsWith("upstream:")))]
+      .sort((a, b) => a.localeCompare(b));
+    return [
+      { key: "all", label: upstreamOptionLabel("all") },
+      ...upstreams.map((key) => ({ key, label: upstreamOptionLabel(key) })),
+      ...(inventory.some((row) => worktreeUpstreamKey(row) === "no-upstream") ? [{ key: "no-upstream" as const, label: upstreamOptionLabel("no-upstream") }] : []),
+      ...(inventory.some((row) => worktreeUpstreamKey(row) === "unknown") ? [{ key: "unknown" as const, label: upstreamOptionLabel("unknown") }] : []),
+    ];
+  }, [inventory]);
+  const aheadThreshold = parseWorktreeSyncThreshold(minAheadInput);
+  const behindThreshold = parseWorktreeSyncThreshold(minBehindInput);
+  const minAhead = aheadThreshold.value;
+  const minBehind = behindThreshold.value;
+  const thresholdsValid = aheadThreshold.valid && behindThreshold.valid;
+  const minAheadError = !aheadThreshold.valid;
+  const minBehindError = !behindThreshold.valid;
   const visible = useMemo(() => {
+    if (!thresholdsValid) return [];
     const filtered = filterWorktreeInventory(inventory, {
       query,
       state: stateFilter,
       health: healthFilter,
       sync: syncFilter,
       branch: branchFilter,
+      upstream: upstreamFilter,
+      head: headFilter,
+      minAhead,
+      minBehind,
     });
     return sortWorktreeInventory(filtered, order);
-  }, [branchFilter, healthFilter, inventory, order, query, stateFilter, syncFilter]);
+  }, [branchFilter, headFilter, healthFilter, inventory, minAhead, minBehind, order, query, stateFilter, syncFilter, thresholdsValid, upstreamFilter]);
   const visibleCdCommands = useMemo(() => worktreeCdCommands(visible), [visible]);
+  const headSummary = useMemo(() => summarizeWorktreeHeads(visible), [visible]);
   const hasActiveFilters = query.trim().length > 0
     || stateFilter !== "all"
     || healthFilter !== "all"
     || syncFilter !== "all"
-    || branchFilter !== "all";
-  const summaryFilterContextClear = query.trim().length === 0 && syncFilter === "all" && branchFilter === "all";
+    || branchFilter !== "all"
+    || upstreamFilter !== "all"
+    || headFilter !== "all"
+    || minAheadInput.trim().length > 0
+    || minBehindInput.trim().length > 0;
+  const summaryFilterContextClear = query.trim().length === 0 && syncFilter === "all" && branchFilter === "all" && upstreamFilter === "all" && headFilter === "all" && minAheadInput.trim().length === 0 && minBehindInput.trim().length === 0;
 
   const clearFilters = () => {
     setQuery("");
@@ -200,11 +252,35 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
     setHealthFilter("all");
     setSyncFilter("all");
     setBranchFilter("all");
+    setUpstreamFilter("all");
+    setHeadFilter("all");
+    setMinAheadInput("");
+    setMinBehindInput("");
   };
 
   const exportVisible = () => {
     if (visible.length === 0) return;
     downloadTsv(project.name, worktreeInventoryTsv(visible));
+  };
+  const exportContext = {
+    project: project.name,
+    mainPath: project.main_path,
+    order,
+    filters: {
+      query,
+      state: stateFilter,
+      health: healthFilter,
+      sync: syncFilter,
+      branch: branchFilter,
+      upstream: upstreamFilter,
+      head: headFilter,
+      minAhead,
+      minBehind,
+    },
+  };
+  const exportJson = () => {
+    if (visible.length === 0) return;
+    downloadText(project.name, "worktrees.json", worktreeInventoryJson(visible, exportContext), "application/json;charset=utf-8");
   };
 
   return (
@@ -218,8 +294,13 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
         <div className="worktree-explorer-heading-actions">
           <span className="worktree-explorer-result-count" role="status">{visible.length} / {summary.total} 件</span>
           {visibleCdCommands && <CopyButton value={visibleCdCommands} label="表示中の cd をコピー" />}
+          {visible.length > 0 && <CopyButton value={worktreeInventoryMarkdown(visible, exportContext)} label="表示中の一覧をMarkdownでコピー" />}
+          {visible.length > 0 && <CopyButton value={worktreePathHeadJson(visible)} label="パスとHEADのJSONをコピー" />}
           <button className="worktree-explorer-export" type="button" disabled={visible.length === 0} onClick={exportVisible}>
             TSVを書き出す
+          </button>
+          <button className="worktree-explorer-export is-secondary" type="button" disabled={visible.length === 0} onClick={exportJson}>
+            メタデータJSONを書き出す
           </button>
         </div>
       </header>
@@ -246,6 +327,12 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
             </select>
           </label>
           <label className="worktree-explorer-order">
+            <span>追跡先</span>
+            <select aria-label="worktree の upstream で絞り込み" value={upstreamFilter} onChange={(event) => setUpstreamFilter(event.target.value as WorktreeUpstreamFilter)}>
+              {upstreamOptions.map((option) => <option value={option.key} key={option.key}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="worktree-explorer-order">
             <span>並び順</span>
             <select value={order} onChange={(event) => setOrder(event.target.value as WorktreeOrder)}>
               {orderOptions.map((option) => <option value={option.key} key={option.key}>{option.label}</option>)}
@@ -256,9 +343,15 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
             <button type="button" aria-pressed={density === "comfortable"} onClick={() => setDensity("comfortable")}>ゆったり</button>
             <button type="button" aria-pressed={density === "compact"} onClick={() => setDensity("compact")}>コンパクト</button>
           </div>
+          <div className="worktree-explorer-thresholds" role="group" aria-label="upstream の差分数で絞り込み">
+            <span>最低差分</span>
+            <label>ahead <input aria-label="最低 ahead 数" inputMode="numeric" type="number" min="0" step="1" value={minAheadInput} aria-invalid={minAheadError} onChange={(event) => setMinAheadInput(event.target.value)} /></label>
+            <label>behind <input aria-label="最低 behind 数" inputMode="numeric" type="number" min="0" step="1" value={minBehindInput} aria-invalid={minBehindError} onChange={(event) => setMinBehindInput(event.target.value)} /></label>
+          </div>
           {hasActiveFilters && <button className="worktree-explorer-clear" type="button" onClick={clearFilters}>絞り込みを解除</button>}
         </div>
       </div>
+      {(minAheadError || minBehindError) && <p className="worktree-explorer-filter-error" role="alert">ahead / behind は0以上の整数で指定してください。</p>}
 
       <div className="worktree-explorer-filters">
         <div className="worktree-explorer-filter-group" role="group" aria-label="worktree の状態で絞り込み">
@@ -273,7 +366,25 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
           <span className="worktree-explorer-filter-title">upstream</span>
           {syncFilters.map((option) => <button type="button" key={option.key} aria-pressed={syncFilter === option.key} onClick={() => setSyncFilter(option.key)}>{option.label}</button>)}
         </div>
+        <div className="worktree-explorer-filter-group" role="group" aria-label="同じHEADのworktreeで絞り込み">
+          <span className="worktree-explorer-filter-title">HEAD比較</span>
+          <button type="button" aria-pressed={headFilter === "all"} onClick={() => setHeadFilter("all")}>すべて</button>
+          <button type="button" aria-pressed={headFilter === "duplicate"} onClick={() => setHeadFilter("duplicate")}>同じHEADのみ ({headSummary.duplicateCount})</button>
+        </div>
       </div>
+
+      <section className="worktree-explorer-head-summary" aria-label="同じHEADの比較">
+        <div className="worktree-explorer-head-summary-heading">
+          <strong>HEAD比較</strong>
+          <span>{headSummary.uniqueCount} unique · {headSummary.duplicateCount} 組の重複 · {headSummary.unknownCount} 未取得</span>
+        </div>
+        {headSummary.groups.some((group: { count: number }) => group.count > 1) ? <div className="worktree-explorer-head-groups">
+          {headSummary.groups.filter((group: { count: number }) => group.count > 1).map((group: { head: string; paths: string[]; count: number }) => <div className="worktree-explorer-head-group" key={group.head}>
+            <code>{group.head}</code>
+            <span>{group.paths.join(" · ")}</span>
+          </div>)}
+        </div> : <p>表示中のworktreeに同じHEADはありません。</p>}
+      </section>
 
       <div className="worktree-explorer-list" aria-live="polite">
         {visible.map((row: WorktreeInventoryRow, index: number) => {

@@ -60,6 +60,17 @@ export const WORKTREE_SYNC_LABELS = Object.freeze({
   unknown: "同期状態未取得",
 });
 
+export const WORKTREE_UPSTREAM_FILTER_LABELS = Object.freeze({
+  all: "すべて",
+  "no-upstream": "追跡先なし",
+  unknown: "追跡先未取得",
+});
+
+export const WORKTREE_HEAD_FILTER_LABELS = Object.freeze({
+  all: "すべて",
+  duplicate: "同じHEADのみ",
+});
+
 /** Return the final path component without making a platform-specific API call. */
 export function basename(value) {
   if (typeof value !== "string" || value.length === 0) return "";
@@ -198,6 +209,96 @@ export function worktreeSyncMatches(row, filter) {
   return filter === "all" || worktreeSync(row) === filter;
 }
 
+/** Preserve the distinction between an explicit null upstream and an absent fact. */
+export function worktreeUpstreamKey(row) {
+  const lane = row.lane;
+  if (!lane) return "unknown";
+  if (lane.upstream === null) return "no-upstream";
+  if (typeof lane.upstream !== "string" || lane.upstream.length === 0) return "unknown";
+  return `upstream:${lane.upstream}`;
+}
+
+export function worktreeUpstreamFilterValue(upstream) {
+  if (typeof upstream !== "string" || upstream.length === 0) return null;
+  return `upstream:${upstream}`;
+}
+
+export function worktreeUpstreamMatches(row, filter) {
+  return filter === "all" || worktreeUpstreamKey(row) === filter;
+}
+
+function validSyncThreshold(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Parse the optional UI threshold without turning an invalid value into "no filter". */
+export function parseWorktreeSyncThreshold(value) {
+  if (typeof value !== "string") return { value: null, valid: false };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { value: null, valid: true };
+  if (!/^\d+$/.test(trimmed)) return { value: null, valid: false };
+  const parsed = Number(trimmed);
+  return validSyncThreshold(parsed)
+    ? { value: parsed, valid: true }
+    : { value: null, valid: false };
+}
+
+/** Apply minimum ahead/behind thresholds only to validated, known tracking counts. */
+export function worktreeSyncThresholdsMatch(row, minAhead, minBehind) {
+  if (minAhead !== null && !validSyncThreshold(minAhead)) return false;
+  if (minBehind !== null && !validSyncThreshold(minBehind)) return false;
+  if (minAhead === null && minBehind === null) return true;
+  const lane = row.lane;
+  if (!lane || worktreeSync(row) === "unknown" || worktreeSync(row) === "no-upstream") return false;
+  const ahead = lane.upstream_ahead;
+  const behind = lane.upstream_behind;
+  if (!validSyncThreshold(ahead) || !validSyncThreshold(behind)) return false;
+  return (minAhead === null || ahead >= minAhead) && (minBehind === null || behind >= minBehind);
+}
+
+export function worktreeHeadKey(row) {
+  const head = row.worktree?.head;
+  return typeof head === "string" && head.length > 0 ? head : null;
+}
+
+export function duplicateWorktreeHeadKeys(rows) {
+  const counts = new Map();
+  for (const row of rows) {
+    const head = worktreeHeadKey(row);
+    if (head !== null) counts.set(head, (counts.get(head) ?? 0) + 1);
+  }
+  return new Set([...counts].filter(([, count]) => count > 1).map(([head]) => head));
+}
+
+export function worktreeHeadMatches(row, filter, duplicateHeads) {
+  return filter === "all" || (filter === "duplicate" && duplicateHeads.has(worktreeHeadKey(row)));
+}
+
+/** Group known HEADs so operators can compare worktree paths sharing one commit. */
+export function summarizeWorktreeHeads(rows) {
+  const grouped = new Map();
+  let unknownCount = 0;
+  for (const row of rows) {
+    const head = worktreeHeadKey(row);
+    if (head === null) {
+      unknownCount += 1;
+      continue;
+    }
+    const paths = grouped.get(head) ?? [];
+    paths.push(typeof row.worktree.path === "string" && row.worktree.path.length > 0 ? row.worktree.path : "パス未取得");
+    grouped.set(head, paths);
+  }
+  const groups = [...grouped.entries()]
+    .map(([head, paths]) => ({ head, paths: [...paths].sort((a, b) => a.localeCompare(b)), count: paths.length }))
+    .sort((a, b) => b.count - a.count || a.head.localeCompare(b.head));
+  return {
+    uniqueCount: groups.length,
+    duplicateCount: groups.filter((group) => group.count > 1).length,
+    unknownCount,
+    groups,
+  };
+}
+
 /** Return the exact branch option key used by the worktree branch selector. */
 export function worktreeBranchFilterValue(branch) {
   if (typeof branch !== "string" || branch.length === 0) return null;
@@ -247,12 +348,20 @@ export function filterWorktreeInventory(rows, options) {
   const health = options.health;
   const sync = options.sync;
   const branch = options.branch;
+  const upstream = options.upstream;
+  const head = options.head;
+  const duplicateHeads = duplicateWorktreeHeadKeys(rows);
+  const minAhead = options.minAhead;
+  const minBehind = options.minBehind;
   return rows.filter((row) => (
     worktreeMatchesSearch(row, query)
     && worktreeStateMatches(row, state)
     && worktreeHealthMatches(row, health)
     && worktreeSyncMatches(row, sync)
     && worktreeBranchMatches(row, branch)
+    && worktreeUpstreamMatches(row, upstream)
+    && worktreeHeadMatches(row, head, duplicateHeads)
+    && worktreeSyncThresholdsMatch(row, minAhead, minBehind)
   ));
 }
 
@@ -385,4 +494,79 @@ export function worktreeInventoryTsv(rows) {
     ].map(tsvCell).join("\t"));
   }
   return `${lines.join("\n")}\n`;
+}
+
+function metadataRow(row) {
+  const worktree = row.worktree;
+  const lane = row.lane;
+  const upstreamPresent = Boolean(lane && Object.prototype.hasOwnProperty.call(lane, "upstream"));
+  return {
+    path: worktree.path,
+    branch: worktree.branch,
+    head: worktree.head,
+    state: worktree.state,
+    is_main: worktree.is_main,
+    detached: worktree.detached,
+    lane: lane ? {
+      id: lane.id,
+      name: lane.name,
+      branch: lane.branch,
+      dirty: lane.dirty ?? null,
+      conflict: lane.conflict ?? null,
+      upstream: lane.upstream ?? null,
+      upstream_present: upstreamPresent,
+      upstream_ahead: lane.upstream_ahead ?? null,
+      upstream_behind: lane.upstream_behind ?? null,
+    } : null,
+    upstream_sync: worktreeSync(row),
+  };
+}
+
+/** Serialize only the currently filtered rows while retaining explicit unknown facts. */
+export function worktreeInventoryJson(rows, context) {
+  return `${JSON.stringify({
+    project: context.project,
+    main_path: context.mainPath,
+    row_count: rows.length,
+    filters: context.filters,
+    order: context.order,
+    worktrees: rows.map(metadataRow),
+  }, null, 2)}\n`;
+}
+
+function markdownCell(value) {
+  return String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/\r\n|\r|\n/g, " ");
+}
+
+/** Build a readable Markdown table from the currently displayed inventory. */
+export function worktreeInventoryMarkdown(rows, context) {
+  const lines = [
+    `# Worktree inventory: ${markdownCell(context.project)}`,
+    "",
+    `作業場所: \`${markdownCell(context.mainPath)}\``,
+    `表示件数: ${rows.length}`,
+    `並び順: ${markdownCell(context.order)}`,
+    "",
+    "| Path | Branch | HEAD | State | Health | Upstream | Ahead | Behind |",
+    "| --- | --- | --- | --- | --- | --- | ---: | ---: |",
+  ];
+  for (const row of rows) {
+    const head = worktreeHeadKey(row);
+    lines.push(`| ${markdownCell(row.worktree.path)} | ${markdownCell(row.worktree.branch)} | ${markdownCell(head ? head.slice(0, 10) : "HEAD 未取得")} | ${markdownCell(row.worktree.state ?? "状態未取得")} | ${markdownCell(worktreeHealth(row))} | ${markdownCell(worktreeUpstreamKey(row).replace(/^upstream:/, ""))} | ${markdownCell(row.lane?.upstream_ahead ?? "未取得")} | ${markdownCell(row.lane?.upstream_behind ?? "未取得")} |`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** Serialize a deterministic path-to-full-HEAD mapping for scripts and review. */
+export function worktreePathHeadJson(rows) {
+  const mapping = {};
+  for (const row of [...rows].sort((a, b) => String(a.worktree.path ?? "").localeCompare(String(b.worktree.path ?? "")))) {
+    const path = row.worktree.path;
+    if (typeof path !== "string" || path.length === 0) continue;
+    mapping[path] = worktreeHeadKey(row);
+  }
+  return `${JSON.stringify(mapping, null, 2)}\n`;
 }

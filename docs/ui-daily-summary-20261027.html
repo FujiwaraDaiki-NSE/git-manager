@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>gitdash UI改善 2026-10-27</title>
+<style>body{max-width:1050px;margin:40px auto;padding:0 22px;font:16px/1.7 system-ui;color:#172337;background:#f5f7fa}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #cdd5df;text-align:left}code{overflow-wrap:anywhere}h1,h2{line-height:1.3}li{margin:8px 0}</style>
+<h1>gitdash UI改善 — 2026-10-27</h1>
+<p>開始時点を30点にリセット。検証済み機能追加14件×5点＝70点を加算し、最終100点。指定の加点基準による達成であり、客観的な品質保証ではない。装飾・テスト・付随文言・実装中の修正は別加点しない。高速化の主張・加点はない。</p>
+<table><thead><tr><th>対象</th><th>機能追加（各5点）</th><th>価値と確認内容</th></tr></thead><tbody>
+<tr><td>参照関係</td><td>現在の関係種別で絞り込み</td><td>分岐中だけを調査。mainとの比較73組から分岐中6組。完全一致のAPI種別を使用。</td></tr>
+<tr><td>参照関係</td><td>相手の参照種別で絞り込み</td><td>ローカル・リモート・detachedを区別。分岐中のリモート3組、同じ先端のdetached1組を確認。</td></tr>
+<tr><td>参照関係</td><td>比較結果の安定した並び替え</td><td>名前・関係・分岐差分の3順。分岐差分順の合計122、131、140を実JSONとAPIで照合。</td></tr>
+<tr><td>参照関係</td><td>現在の比較結果JSON保存</td><td>repository、対象と相手の完全hash、取得範囲、比較条件と表示行を保存。実ダウンロード3行をAPIと照合。</td></tr>
+<tr><td>参照関係</td><td>比較結果Markdown共有</td><td>完全hash・差分数・共通祖先を含む表をコピー。実クリップボードの表示3組と完全hashを照合。</td></tr>
+<tr><td>参照関係</td><td>過去イベントの根拠フィルター</td><td>現在の包含関係と記録された操作を混同せず調査。対象mainのPR根拠0件、reflog根拠の表示を確認。</td></tr>
+<tr><td>参照関係</td><td>過去イベントの操作フィルター</td><td>分岐作成・merge・fast-forward等を調査。mainのreflogかつブランチ作成8件を確認。</td></tr>
+<tr><td>worktree</td><td>追跡先の完全一致フィルター</td><td>origin/mainは1件、明示的な追跡先なしは2件。未取得との区別は単体テストも実施。</td></tr>
+<tr><td>worktree</td><td>ahead・behind件数の下限指定</td><td>2入力を1機能として加点。behind 7以上で1件、ahead 1以上で0件。小数入力は警告・0件・TSV/JSON無効・コピー非表示。</td></tr>
+<tr><td>worktree</td><td>同じHEADの作業場所に絞り込み</td><td>同じコミットから作業する場所だけを表示。検証用detachedとmainの2件に絞る。</td></tr>
+<tr><td>worktree</td><td>HEAD別の作業場所比較</td><td>単なる絞り込みと別に、完全hashごとのpath一覧と一意HEAD数を比較。全体33場所・32HEAD・重複1組、絞り込み後2場所・1HEADを確認。未コミット内容の一致とは判定しない。</td></tr>
+<tr><td>worktree</td><td>調査条件付きメタデータJSON保存</td><td>project・main_path・条件・並び順・Git事実・lane情報を保存。実JSON2件のpath/HEAD/branchをAPIと照合。</td></tr>
+<tr><td>worktree</td><td>表示一覧のMarkdown共有</td><td>作業場所・同期件数を含む可読な表。実コピーのrepository・2path・件数を照合。</td></tr>
+<tr><td>worktree</td><td>pathと完全HEADの対応JSONコピー</td><td>スクリプトや後日の比較に使う最小の対応表。表示2pathの実コピーをJSON解析し、完全hashをAPIと照合。</td></tr>
+</tbody></table>
+<h2>実装と検証</h2>
+<ul>
+<li>開始時main=5377fe8。origin/mainをfetchし差分0/0。既存未追跡backend/uv.lockは保持し、コミット対象から除外。</li>
+<li>ユーザーのmain直接実装・push・起動の明示指定を適用。2実装agentが画面を分担し、親が統合・GUI検証・Git操作を実施。実装用worktree/PRなし。GUI検証専用のdetached worktreeは検証後に撤去。</li>
+<li>operational-state-uiスキルを適用。APIが返す関係とGit状態をそのまま投影。既存TSV・cdコピー・詳細導線を保持。新規フィルターの必須引数欠落は例外、不正な数値条件は結果を広げない。</li>
+<li>npm ci成功。frontend最終306/306、backend uv pytest302/302、TypeScript、本番build、git diff --check成功。既存Starlette非推奨警告1件。npm ciの既存依存脆弱性報告（high2・critical1）は今回変更していない。</li>
+<li>指定のgitdash-compose up -d --buildで最終ソースを再ビルド・反映。frontend稼働、backend healthy、/api/health ok:true。APIログ200、起動ログReadyを確認。</li>
+<li>ブラウザーGUIはデスクトップ1270pxと390×844px。文書幅380pxで横はみ出しなし。モバイルでMarkdownコピーとHEADフィルターを操作。狭いデスクトップの見出しは出力操作を下段へ折り返して修正し、最終コンテナで目視確認。</li>
+<li>実API、実ダウンロード、実クリップボード、スクリーンショット、gui-results.jsonをautomationのローカルartifacts/20261027に保存。他プロジェクトの画面情報はコミットしない。</li>
+</ul>
+<h2>レビューと残る制約</h2>
+<p>最終レビューP0/P1なし。P1の必須フィルター引数検証を修正済み。方針に従いP2以下は今回修正していない。P2は、過去イベントの条件のみを変更した場合の比較JSON/Markdownの付帯履歴条件メタデータ更新漏れと、表示名が残っていない削除済みrefの完全IDによる履歴検索。現在比較の出力行・hash・差分数は正しい。P3はヘルパー内の古いコメント。</p>
+<h2>最終結果</h2>
+<p>100点は指定加点基準による結果。mainへコミットしGitHubへpush。アクセス先は <a href="http://localhost:4412">http://localhost:4412</a>。既存の毎日08:00（Asia/Tokyo）ACTIVEスケジュールは変更せず継続。次回も開始時点を30点にリセットする。</p>
+</html>
