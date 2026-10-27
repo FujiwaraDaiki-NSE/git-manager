@@ -9,6 +9,8 @@
 
 export const FILE_ATTRIBUTES_DIRECTORY_ALL = "/";
 export const FILE_ATTRIBUTES_DIRECTORY_ROOT = ".";
+export const FILE_ATTRIBUTES_EXTENSION_ALL = "/";
+export const FILE_ATTRIBUTES_EOL_VALUE_ALL = "/";
 export const EOL_FILTER_ALL = "all";
 export const EOL_FILTER_ANOMALOUS = "anomalous";
 export const EOL_FILTER_DIFFERENT = "different";
@@ -31,6 +33,13 @@ function requireString(value, name) {
 function requireEntries(entries) {
   if (!Array.isArray(entries)) throw new TypeError("entries must be provided explicitly");
   return entries;
+}
+
+function requirePaths(paths) {
+  if (!Array.isArray(paths) || !paths.every((path) => typeof path === "string" && path.length > 0)) {
+    throw new TypeError("selected paths must be provided explicitly");
+  }
+  return paths;
 }
 
 function entryPath(entry) {
@@ -62,6 +71,25 @@ export function listFileAttributeDirectories(entries) {
     if (right === FILE_ATTRIBUTES_DIRECTORY_ROOT) return 1;
     return left.localeCompare(right, undefined, { sensitivity: "base" });
   });
+}
+
+/** Extension spelling is exact; dotfiles without another dot are extensionless. */
+export function fileAttributesExtension(path) {
+  requireString(path, "path");
+  const filename = path.slice(path.lastIndexOf("/") + 1);
+  const dot = filename.lastIndexOf(".");
+  return dot <= 0 ? "" : filename.slice(dot);
+}
+
+export function listFileAttributeExtensions(entries) {
+  requireEntries(entries);
+  return [...new Set(entries.map((entry) => fileAttributesExtension(entry.path)))].sort();
+}
+
+export function listFileAttributeEolValues(entries, field) {
+  requireEntries(entries);
+  if (field !== "index_eol" && field !== "worktree_eol") throw new RangeError(`Unknown EOL field: ${field}`);
+  return [...new Set(entries.map((entry) => requireString(entry[field], field)))].sort();
 }
 
 export function searchFileAttributeEntries(entries, query) {
@@ -111,14 +139,40 @@ export function filterFileAttributeEntriesByEol(entries, filter) {
   return entries.filter((entry) => fileAttributeEolMatches(entry, filter));
 }
 
-export function filterFileAttributeEntries(entries, { query, directory, eol }) {
+export function filterFileAttributeEntries(entries, { query, directory, eol, extension, indexEol, worktreeEol, selectedPaths, selectedOnly }) {
   requireEntries(entries);
   requireString(query, "query");
   requireString(directory, "directory");
   requireString(eol, "eol");
+  requireString(extension, "extension");
+  requireString(indexEol, "indexEol");
+  requireString(worktreeEol, "worktreeEol");
+  requirePaths(selectedPaths);
+  if (typeof selectedOnly !== "boolean") throw new TypeError("selectedOnly must be provided explicitly");
+  const selected = new Set(selectedPaths);
   const searched = searchFileAttributeEntries(entries, query);
   const byDirectory = filterFileAttributeEntriesByDirectory(searched, directory);
-  return filterFileAttributeEntriesByEol(byDirectory, eol);
+  return filterFileAttributeEntriesByEol(byDirectory, eol).filter((entry) => (
+    (extension === FILE_ATTRIBUTES_EXTENSION_ALL || fileAttributesExtension(entry.path) === extension)
+    && (indexEol === FILE_ATTRIBUTES_EOL_VALUE_ALL || entry.index_eol === indexEol)
+    && (worktreeEol === FILE_ATTRIBUTES_EOL_VALUE_ALL || entry.worktree_eol === worktreeEol)
+    && (!selectedOnly || selected.has(entry.path))
+  ));
+}
+
+/** Preserve current choices and add only displayed paths, in displayed order. */
+export function selectDisplayedFileAttributePaths(entries, selectedPaths) {
+  requireEntries(entries);
+  requirePaths(selectedPaths);
+  if (selectedPaths.length > FILE_ATTRIBUTES_MAX_ATTRIBUTE_PATHS) throw new RangeError("too many selected paths");
+  const paths = new Set(selectedPaths);
+  for (const entry of entries) {
+    if (paths.size >= FILE_ATTRIBUTES_MAX_ATTRIBUTE_PATHS) break;
+    const path = entryPath(entry);
+    if (path === null) throw new TypeError("displayed entries need explicit paths");
+    paths.add(path);
+  }
+  return [...paths];
 }
 
 export function sortFileAttributeEntries(entries, order) {
@@ -249,3 +303,59 @@ export function fileAttributesCsv(entries, inspectedEntries, mode) {
 }
 
 export const eolAttributesCsv = fileAttributesCsv;
+
+/** Keep the bounded inventory and the actual successful attribute evaluation distinct. */
+export function fileAttributesJson(entries, { repositoryPath, inventory, filters, selectedPaths, attributeResult }) {
+  requireEntries(entries);
+  requireString(repositoryPath, "repositoryPath");
+  requireEntries(inventory.entries);
+  requirePaths(selectedPaths);
+  if (typeof inventory.truncated !== "boolean" || typeof inventory.limit !== "number" || typeof inventory.byte_limit !== "number") {
+    throw new TypeError("inventory coverage must be provided explicitly");
+  }
+  for (const field of ["query", "directory", "eol", "extension", "indexEol", "worktreeEol", "order"]) {
+    requireString(filters[field], `filters.${field}`);
+  }
+  if (typeof filters.selectedOnly !== "boolean") throw new TypeError("filters.selectedOnly must be provided explicitly");
+  const displayed = new Set(entries.map((entry) => entry.path));
+  let evaluation = null;
+  if (attributeResult !== null) {
+    if (!FILE_ATTRIBUTE_MODES.includes(attributeResult.mode)) throw new RangeError("attribute result needs its actual mode");
+    requireEntries(attributeResult.entries);
+    requirePaths(attributeResult.paths);
+    evaluation = {
+      mode: attributeResult.mode,
+      requested_paths: [...attributeResult.paths],
+      returned_count: attributeResult.entries.length,
+      limit: attributeResult.limit,
+      byte_limit: attributeResult.byte_limit,
+      command: attributeResult.command,
+      entries: attributeResult.entries.filter((entry) => displayed.has(entry.path)),
+    };
+  }
+  return JSON.stringify({
+    repository_path: repositoryPath,
+    inventory: {
+      returned_count: inventory.entries.length,
+      truncated: inventory.truncated,
+      limit: inventory.limit,
+      byte_limit: inventory.byte_limit,
+      command: inventory.command,
+    },
+    filters: { ...filters },
+    selected_paths: [...selectedPaths],
+    displayed_count: entries.length,
+    entries,
+    attribute_evaluation: evaluation,
+  }, null, 2) + "\n";
+}
+
+/** One JSON string per line preserves tabs, newlines, quotes, and whitespace. */
+export function fileAttributePathsJsonl(entries) {
+  requireEntries(entries);
+  return entries.map((entry) => {
+    const path = entryPath(entry);
+    if (path === null) throw new TypeError("displayed entries need explicit paths");
+    return JSON.stringify(path);
+  }).join("\n");
+}

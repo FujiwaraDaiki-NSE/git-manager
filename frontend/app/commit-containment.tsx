@@ -8,15 +8,23 @@ import type { CommitDetail } from "./types";
 import {
   buildContainmentCompareUrl,
   buildContainmentCsv,
+  buildContainmentJson,
+  buildContainmentRefMapping,
+  buildContainmentRefMarkdown,
+  containmentRefNavigation,
   containmentRefDisplayName,
+  containmentRemoteNamespaces,
   containmentRequestQuery,
   containmentSnapshotKey,
   containmentTypeLabel,
   CONTAINMENT_TYPES,
   defaultCommitContainment,
   filterContainmentRefs,
+  filterContainmentRemoteRefs,
+  groupContainmentRefs,
   isContainmentHash,
   isValidContainmentRevision,
+  sortContainmentRefs,
 } from "./commit-containment-tools.mjs";
 import "./commit-containment.css";
 
@@ -41,6 +49,7 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 
 const FILTER_TYPES = ["all", "local", "remote", "tag"] as const;
 type FilterType = typeof FILTER_TYPES[number];
+type RefOrder = "git" | "name" | "type";
 
 function isValidRef(value: unknown): value is ContainmentRef {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -89,8 +98,8 @@ function shortHash(value: string) {
   return value.slice(0, 12);
 }
 
-function downloadCsv(content: string, name: string) {
-  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+function downloadFile(content: string, name: string, mime: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = name;
@@ -175,6 +184,9 @@ export default function CommitContainment({ path }: CommitContainmentProps) {
   const [revision, setRevision] = useState(defaults.revision);
   const [query, setQuery] = useState(defaults.query);
   const [type, setType] = useState<FilterType>(defaults.type as FilterType);
+  const [remote, setRemote] = useState<string | null>(null);
+  const [order, setOrder] = useState<RefOrder>("git");
+  const [grouped, setGrouped] = useState(false);
   const [inventory, setInventory] = useState<ContainmentInventory | null>(null);
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>("idle");
@@ -192,6 +204,9 @@ export default function CommitContainment({ path }: CommitContainmentProps) {
     setRevision(defaults.revision);
     setQuery(defaults.query);
     setType(defaults.type as FilterType);
+    setRemote(null);
+    setOrder("git");
+    setGrouped(false);
     setInventory(null);
     setSelectedRef(null);
     setState("idle");
@@ -200,8 +215,14 @@ export default function CommitContainment({ path }: CommitContainmentProps) {
   }, [defaults]);
 
   const filtered = useMemo(
-    () => filterContainmentRefs(inventory?.refs ?? [], query, type) as ContainmentRef[],
-    [inventory?.refs, query, type],
+    () => inventory === null ? [] : sortContainmentRefs(filterContainmentRemoteRefs(filterContainmentRefs(inventory.refs, query, type) as ContainmentRef[], remote), order),
+    [inventory, order, query, remote, type],
+  );
+  const groups = useMemo(() => groupContainmentRefs(filtered), [filtered]);
+  const displayed = useMemo(() => grouped ? groups.flatMap((group) => group.refs) : filtered, [filtered, grouped, groups]);
+  const remoteNamespaces = useMemo(
+    () => inventory === null ? [] : containmentRemoteNamespaces(inventory.refs),
+    [inventory],
   );
   const selected = useMemo(
     () => selectedRef === null ? null : inventory?.refs.find((item) => item.ref === selectedRef) ?? null,
@@ -210,6 +231,12 @@ export default function CommitContainment({ path }: CommitContainmentProps) {
   const snapshotKey = useMemo(
     () => inventory === null ? null : containmentSnapshotKey(path, inventory),
     [inventory, path],
+  );
+  const navigation = useMemo(() => containmentRefNavigation(displayed, selectedRef), [displayed, selectedRef]);
+  const mappingJson = useMemo(() => buildContainmentRefMapping(displayed), [displayed]);
+  const selectedMarkdown = useMemo(
+    () => selected === null || inventory === null ? null : buildContainmentRefMarkdown(path, selected, inventory),
+    [inventory, path, selected],
   );
 
   const invalidate = useCallback(() => {
@@ -277,14 +304,25 @@ export default function CommitContainment({ path }: CommitContainmentProps) {
   }, []);
 
   const exportCsv = useCallback(() => {
-    if (inventory === null || filtered.length === 0) return;
+    if (inventory === null || displayed.length === 0) return;
     try {
-      downloadCsv(buildContainmentCsv(filtered, inventory), "gitdash-commit-containment.csv");
-      setExportStatus(`${filtered.length}件の一致する参照のCSV保存を開始しました。`);
+      downloadFile(buildContainmentCsv(displayed, inventory), "gitdash-commit-containment.csv", "text/csv;charset=utf-8");
+      setExportStatus(`${displayed.length}件の一致する参照のCSV保存を開始しました。`);
     } catch {
       setExportStatus("CSVを保存できませんでした。");
     }
-  }, [filtered, inventory]);
+  }, [displayed, inventory]);
+
+  const exportJson = useCallback(() => {
+    if (inventory === null || displayed.length === 0) return;
+    try {
+      const content = buildContainmentJson(displayed, inventory, { path, query, type, remote, order, grouped });
+      downloadFile(content, "gitdash-commit-containment.json", "application/json;charset=utf-8");
+      setExportStatus(`${displayed.length}件の一致する参照と調査条件のJSON保存を開始しました。`);
+    } catch {
+      setExportStatus("JSONを保存できませんでした。");
+    }
+  }, [displayed, grouped, inventory, order, path, query, remote, type]);
 
   const retry = useCallback(() => {
     if (state === "loading") return;
@@ -340,17 +378,33 @@ export default function CommitContainment({ path }: CommitContainmentProps) {
             <div className="commit-containment-tools">
               <label className="commit-containment-search"><span>取得済み参照を検索</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ref名・表示名" aria-label="取得済み参照を検索" /></label>
               <label><span>参照の種類</span><select aria-label="参照の種類で絞り込み" value={type} onChange={(event) => setType(event.target.value as FilterType)}>{CONTAINMENT_TYPES.map((item) => <option key={item} value={item}>{containmentTypeLabel(item)}</option>)}</select></label>
-              <button className="subtle-button" type="button" onClick={() => { setQuery(""); setType("all"); setExportStatus(""); }} disabled={!query && type === "all"}>条件をリセット</button>
+              <label><span>remote名前空間</span><select aria-label="remote名前空間で絞り込み" value={remote === null ? "" : remote} onChange={(event) => setRemote(event.target.value === "" ? null : event.target.value)}><option value="">絞り込まない</option>{remoteNamespaces.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+              <label><span>参照の並び順</span><select aria-label="参照の並び順" value={order} onChange={(event) => setOrder(event.target.value as RefOrder)}><option value="git">Gitの順序</option><option value="name">参照名順</option><option value="type">種類・参照名順</option></select></label>
+              <label className="commit-containment-group-toggle"><input type="checkbox" checked={grouped} onChange={(event) => setGrouped(event.target.checked)} />同じ固定先コミットでまとめる</label>
+              <button className="subtle-button" type="button" onClick={() => { setQuery(""); setType("all"); setRemote(null); setExportStatus(""); }} disabled={!query && type === "all" && remote === null}>条件をリセット</button>
               <button className="subtle-button" type="button" onClick={exportCsv} disabled={filtered.length === 0}>一致する参照をCSV保存</button>
+              <button className="subtle-button" type="button" onClick={exportJson} disabled={filtered.length === 0}>一致する参照と調査条件をJSON保存</button>
               <button className="subtle-button" type="button" onClick={() => void run()} disabled={!canRun}>一覧を更新</button>
               {inventory.command && <CopyButton value={inventory.command} label="含有参照の確認コマンドをコピー" />}
             </div>
             <div className="commit-containment-coverage" role="status">
               <span>{filtered.length} / {inventory.refs.length} 件</span>
+              {grouped && <span>固定先コミット {groups.length} 件</span>}
               <span>固定コミット <code>{inventory.pinned_hash}</code></span>
               <time dateTime={dateTimeValue(inventory.observed_at)}>観測 {exactDate(inventory.observed_at)}</time>
               {exportStatus && <span>{exportStatus}</span>}
             </div>
+            {filtered.length > 0 && <details className="commit-containment-export-preview">
+              <summary>表示中のrefと完全コミットIDの対応（JSON）</summary>
+              <CopyButton value={mappingJson} label="表示中のrefとコミット対応をJSONコピー" />
+              <pre tabIndex={0}>{mappingJson}</pre>
+            </details>}
+            {(filtered.length > 0 || selected !== null) && <div className="commit-containment-navigation" role="group" aria-label="表示中の参照を移動">
+              <button className="subtle-button" type="button" disabled={navigation.previous === null} onClick={() => { if (navigation.previous !== null) setSelectedRef(navigation.previous); }}>前の参照</button>
+              <span role="status">{navigation.position !== null ? `${navigation.position} / ${navigation.total} 件目` : selected !== null ? "選択中の参照は現在の絞り込みに含まれていません。" : "参照を選択してコミットを表示できます。"}</span>
+              <button className="subtle-button" type="button" disabled={navigation.next === null} onClick={() => { if (navigation.next !== null) setSelectedRef(navigation.next); }}>次の参照</button>
+              {navigation.position === null && navigation.first !== null && <button className="subtle-button" type="button" onClick={() => { if (navigation.first !== null) setSelectedRef(navigation.first); }}>一覧の先頭の参照を表示</button>}
+            </div>}
             {inventory.refs.length === 0 ? (
               <p className="commit-containment-empty" role="status">このコミットを含む参照はありません。</p>
             ) : filtered.length === 0 ? (
@@ -359,7 +413,9 @@ export default function CommitContainment({ path }: CommitContainmentProps) {
               <div className="commit-containment-table-wrap" role="region" aria-label="コミットを含む参照一覧" tabIndex={0}>
                 <table className="commit-containment-table">
                   <thead><tr><th scope="col">種類</th><th scope="col">参照</th><th scope="col">ref object</th><th scope="col">固定先コミット</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead>
-                  <tbody>{filtered.map((item) => {
+                  {(grouped ? groups : [{ peeled_commit: null, refs: displayed }]).map((group) => <tbody key={group.peeled_commit === null ? "refs" : group.peeled_commit}>
+                  {group.peeled_commit !== null && <tr className="commit-containment-group-heading"><th scope="rowgroup" colSpan={5}><span>固定先コミット <code>{group.peeled_commit}</code></span><span>{group.refs.length} 参照</span></th></tr>}
+                  {group.refs.map((item) => {
                     const selectedRow = item.ref === selectedRef;
                     const href = compareHref(item);
                     return <tr key={`${snapshotKey}:${item.ref}:${item.object_hash}`} data-testid="commit-containment-row" data-ref={item.ref} className={selectedRow ? "is-selected" : undefined}>
@@ -369,10 +425,15 @@ export default function CommitContainment({ path }: CommitContainmentProps) {
                       <td className="commit-containment-hash"><code title={item.peeled_commit}>{shortHash(item.peeled_commit)}</code><CopyButton value={item.peeled_commit} label="固定先コミットIDをコピー" /></td>
                       <td className="commit-containment-actions"><button className="table-action" type="button" onClick={() => setSelectedRef(selectedRow ? null : item.ref)}>{selectedRow ? "表示中" : "コミットを表示"}</button>{href && <a className="table-action" href={href}>比較条件を入力</a>}</td>
                     </tr>;
-                  })}</tbody>
+                  })}</tbody>)}
                 </table>
               </div>
             )}
+            {selected && selectedMarkdown !== null && <details className="commit-containment-export-preview">
+              <summary>選択した参照のMarkdownレポート</summary>
+              <CopyButton value={selectedMarkdown} label="選択した参照のMarkdownをコピー" />
+              <pre tabIndex={0}>{selectedMarkdown}</pre>
+            </details>}
             {selected && snapshotKey && <CommitDetailPane key={`${snapshotKey}:${selected.ref}:${selected.peeled_commit}`} path={path} snapshotKey={snapshotKey} item={selected} />}
           </>
         )}

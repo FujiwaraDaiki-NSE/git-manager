@@ -6,14 +6,22 @@ import {
   EOL_FILTER_ALL,
   FILE_ATTRIBUTES_DIRECTORY_ALL,
   FILE_ATTRIBUTES_DIRECTORY_ROOT,
+  FILE_ATTRIBUTES_EXTENSION_ALL,
+  FILE_ATTRIBUTES_EOL_VALUE_ALL,
+  FILE_ATTRIBUTES_MAX_ATTRIBUTE_PATHS,
   FILE_ATTRIBUTE_MODES,
   attributesForPath,
   compareFileAttributes,
   fileAttributesCsv,
   fileAttributesEolQuery,
+  fileAttributesJson,
+  fileAttributePathsJsonl,
   fileAttributesRequestBody,
   filterFileAttributeEntries,
   listFileAttributeDirectories,
+  listFileAttributeExtensions,
+  listFileAttributeEolValues,
+  selectDisplayedFileAttributePaths,
   sortFileAttributeEntries,
 } from "./file-attributes-tools.mjs";
 import "./file-attributes.css";
@@ -122,6 +130,10 @@ export default function FileAttributes({ path }: FileAttributesProps) {
   const [query, setQuery] = useState("");
   const [directory, setDirectory] = useState(FILE_ATTRIBUTES_DIRECTORY_ALL);
   const [eolFilter, setEolFilter] = useState<EolFilter>(EOL_FILTER_ALL);
+  const [extension, setExtension] = useState(FILE_ATTRIBUTES_EXTENSION_ALL);
+  const [indexEol, setIndexEol] = useState(FILE_ATTRIBUTES_EOL_VALUE_ALL);
+  const [worktreeEol, setWorktreeEol] = useState(FILE_ATTRIBUTES_EOL_VALUE_ALL);
+  const [selectedOnly, setSelectedOnly] = useState(false);
   const [order, setOrder] = useState<"asc" | "desc">("asc");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [attributeMode, setAttributeMode] = useState<AttributeMode>("worktree");
@@ -130,7 +142,8 @@ export default function FileAttributes({ path }: FileAttributesProps) {
   const [attributeError, setAttributeError] = useState<string | null>(null);
   const [compareLeft, setCompareLeft] = useState("");
   const [compareRight, setCompareRight] = useState("");
-  const [downloadStatus, setDownloadStatus] = useState<"idle" | "success" | "error">("idle");
+  const [downloadStatus, setDownloadStatus] = useState<{ format: "CSV" | "JSON"; state: "success" | "error" } | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "success" | "error">("idle");
   const attributeController = useRef<AbortController | null>(null);
   const attributeRequestKey = useRef<string | null>(null);
 
@@ -160,6 +173,10 @@ export default function FileAttributes({ path }: FileAttributesProps) {
     setQuery("");
     setDirectory(FILE_ATTRIBUTES_DIRECTORY_ALL);
     setEolFilter(EOL_FILTER_ALL);
+    setExtension(FILE_ATTRIBUTES_EXTENSION_ALL);
+    setIndexEol(FILE_ATTRIBUTES_EOL_VALUE_ALL);
+    setWorktreeEol(FILE_ATTRIBUTES_EOL_VALUE_ALL);
+    setSelectedOnly(false);
     setOrder("asc");
     setSelectedPaths([]);
     setAttributeResult(null);
@@ -167,7 +184,8 @@ export default function FileAttributes({ path }: FileAttributesProps) {
     setAttributeError(null);
     setCompareLeft("");
     setCompareRight("");
-    setDownloadStatus("idle");
+    setDownloadStatus(null);
+    setCopyStatus("idle");
     return () => {
       attributeController.current?.abort();
       attributeRequestKey.current = null;
@@ -176,16 +194,27 @@ export default function FileAttributes({ path }: FileAttributesProps) {
 
   const entries = inventory?.entries ?? [];
   const directories = useMemo(() => listFileAttributeDirectories(entries), [entries]);
+  const extensions = useMemo(() => listFileAttributeExtensions(entries), [entries]);
+  const indexEolValues = useMemo(() => listFileAttributeEolValues(entries, "index_eol"), [entries]);
+  const worktreeEolValues = useMemo(() => listFileAttributeEolValues(entries, "worktree_eol"), [entries]);
+  const filters = useMemo(() => ({ query, directory, eol: eolFilter, extension, indexEol, worktreeEol, selectedPaths, selectedOnly }), [directory, eolFilter, extension, indexEol, query, selectedOnly, selectedPaths, worktreeEol]);
   const visible = useMemo(() => sortFileAttributeEntries(
-    filterFileAttributeEntries(entries, { query, directory, eol: eolFilter }),
+    filterFileAttributeEntries(entries, filters),
     order,
-  ), [directory, entries, eolFilter, order, query]);
+  ), [entries, filters, order]);
   const filteredCounts = useMemo(() => Object.fromEntries(
     EOL_FILTERS.map((item) => [
       item.key,
-      filterFileAttributeEntries(entries, { query, directory, eol: item.key }).length,
+      filterFileAttributeEntries(entries, { ...filters, eol: item.key }).length,
     ]),
-  ), [directory, entries, query]);
+  ), [entries, filters]);
+  const unselectedVisibleCount = visible.filter((entry) => !selectedPaths.includes(entry.path)).length;
+  const displayedSelectionCount = Math.min(unselectedVisibleCount, FILE_ATTRIBUTES_MAX_ATTRIBUTE_PATHS - selectedPaths.length);
+
+  useEffect(() => {
+    setDownloadStatus(null);
+    setCopyStatus("idle");
+  }, [visible]);
 
   const inspectedEntries = attributeResult?.entries ?? [];
   const compareResult = useMemo(() => {
@@ -262,25 +291,54 @@ export default function FileAttributes({ path }: FileAttributesProps) {
     invalidateAttributeRequest();
     setSelectedPaths((current) => {
       if (current.includes(filePath)) return current.filter((value) => value !== filePath);
-      if (current.length >= 100) return current;
+      if (current.length >= FILE_ATTRIBUTES_MAX_ATTRIBUTE_PATHS) return current;
       return [...current, filePath];
     });
   };
 
-  const exportCsv = () => {
-    setDownloadStatus("idle");
+  const selectDisplayed = () => {
+    invalidateAttributeRequest();
+    setSelectedPaths((current) => selectDisplayedFileAttributePaths(visible, current));
+  };
+
+  const clearSelection = () => {
+    invalidateAttributeRequest();
+    setSelectedPaths([]);
+  };
+
+  const exportInventory = (format: "CSV" | "JSON") => {
+    if (inventory === null) return;
+    setDownloadStatus(null);
     try {
-      const csv = fileAttributesCsv(visible, inspectedEntries, attributeResult?.mode ?? null);
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const content = format === "CSV"
+        ? fileAttributesCsv(visible, inspectedEntries, attributeResult?.mode ?? null)
+        : fileAttributesJson(visible, {
+          repositoryPath: path,
+          inventory,
+          filters: { query, directory, eol: eolFilter, extension, indexEol, worktreeEol, selectedOnly, order },
+          selectedPaths,
+          attributeResult,
+        });
+      const blob = new Blob([content], { type: format === "CSV" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = "gitdash-file-attributes.csv";
+      anchor.download = `gitdash-file-attributes.${format.toLowerCase()}`;
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setDownloadStatus("success");
+      setDownloadStatus({ format, state: "success" });
     } catch {
-      setDownloadStatus("error");
+      setDownloadStatus({ format, state: "error" });
+    }
+  };
+
+  const copyDisplayedPaths = async () => {
+    setCopyStatus("idle");
+    try {
+      await navigator.clipboard.writeText(fileAttributePathsJsonl(visible));
+      setCopyStatus("success");
+    } catch {
+      setCopyStatus("error");
     }
   };
 
@@ -302,10 +360,29 @@ export default function FileAttributes({ path }: FileAttributesProps) {
             <div className="file-attributes-controls" aria-label="改行情報の表示条件">
               <label className="file-attributes-search"><span>ファイルを検索</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="パスで検索" aria-label="改行情報のファイルを検索" /></label>
               <label><span>ディレクトリ</span><select value={directory} onChange={(event) => setDirectory(event.target.value)} aria-label="改行情報をディレクトリで絞り込み"><option value={FILE_ATTRIBUTES_DIRECTORY_ALL}>すべて</option>{directories.map((item) => <option value={item} key={item}>{item === FILE_ATTRIBUTES_DIRECTORY_ROOT ? "ルート" : item}</option>)}</select></label>
+              <label><span>拡張子（完全一致）</span><select value={extension} onChange={(event) => setExtension(event.target.value)} aria-label="改行情報を拡張子で絞り込み"><option value={FILE_ATTRIBUTES_EXTENSION_ALL}>すべて</option>{extensions.map((item) => <option value={item} key={item}>{item === "" ? "拡張子なし" : item}</option>)}</select></label>
               <label><span>改行の見方</span><select value={eolFilter} onChange={(event) => setEolFilter(event.target.value as EolFilter)} aria-label="改行情報のフィルター">{EOL_FILTERS.map((item) => <option key={item.key} value={item.key}>{item.label} ({filteredCounts[item.key] ?? 0})</option>)}</select></label>
+              <label><span>index の改行（完全一致）</span><select value={indexEol} onChange={(event) => setIndexEol(event.target.value)} aria-label="index の改行で絞り込み"><option value={FILE_ATTRIBUTES_EOL_VALUE_ALL}>すべて</option>{indexEolValues.map((value) => <option value={value} key={value}>{value === "" ? "（空の値）" : eolLabel(value)}</option>)}</select></label>
+              <label><span>作業ツリーの改行（完全一致）</span><select value={worktreeEol} onChange={(event) => setWorktreeEol(event.target.value)} aria-label="作業ツリーの改行で絞り込み"><option value={FILE_ATTRIBUTES_EOL_VALUE_ALL}>すべて</option>{worktreeEolValues.map((value) => <option value={value} key={value}>{value === "" ? "（空の値）" : eolLabel(value)}</option>)}</select></label>
               <button type="button" className="file-attributes-order" onClick={() => setOrder((value) => value === "asc" ? "desc" : "asc")} aria-label={`パス順を${order === "asc" ? "降順" : "昇順"}に変更`}>パス順 {order === "asc" ? "↑" : "↓"}</button>
             </div>
-            <div className="file-attributes-summary" role="status"><span>{visible.length} / {entries.length} ファイル</span><span>属性調査の選択 {selectedPaths.length} / 100</span><button type="button" onClick={exportCsv} disabled={visible.length === 0}>現在の一覧をCSV保存</button>{downloadStatus === "success" && <span>CSVの保存を開始しました。</span>}{downloadStatus === "error" && <span role="alert">CSVを保存できませんでした。</span>}</div>
+            <div className="file-attributes-selection">
+              <span>属性調査の選択 {selectedPaths.length} / {FILE_ATTRIBUTES_MAX_ATTRIBUTE_PATHS}</span>
+              <button type="button" onClick={selectDisplayed} disabled={displayedSelectionCount === 0}>表示中の未選択 {displayedSelectionCount} 件を追加</button>
+              <button type="button" onClick={clearSelection} disabled={selectedPaths.length === 0}>属性調査の選択をすべて解除</button>
+              <label><input type="checkbox" checked={selectedOnly} onChange={(event) => setSelectedOnly(event.target.checked)} />選択したファイルだけ表示</label>
+              {unselectedVisibleCount > displayedSelectionCount && <span>合計{FILE_ATTRIBUTES_MAX_ATTRIBUTE_PATHS}件まで、表示順で追加します。</span>}
+            </div>
+            <div className="file-attributes-summary" role="status">
+              <span>{visible.length} / {entries.length} ファイル</span>
+              <button type="button" onClick={() => exportInventory("CSV")} disabled={visible.length === 0}>現在の一覧をCSV保存</button>
+              <button type="button" onClick={() => exportInventory("JSON")} disabled={visible.length === 0}>現在の一覧をJSON保存</button>
+              <button type="button" onClick={() => void copyDisplayedPaths()} disabled={visible.length === 0}>表示パスをJSONLでコピー</button>
+              {downloadStatus?.state === "success" && <span>{downloadStatus.format}の保存を開始しました。</span>}
+              {downloadStatus?.state === "error" && <span role="alert">{downloadStatus.format}を保存できませんでした。</span>}
+              {copyStatus === "success" && <span>表示パスをJSONLでコピーしました。</span>}
+              {copyStatus === "error" && <span role="alert">表示パスをコピーできませんでした。</span>}
+            </div>
             {inventory.truncated && <div className="file-attributes-note" role="status">Gitの一覧は {inventory.limit} 件までです。表示されていない追跡ファイルはこの調査に含まれません。</div>}
             <div className="file-attributes-table-wrap">
               <table className="file-attributes-table">
@@ -313,7 +390,7 @@ export default function FileAttributes({ path }: FileAttributesProps) {
                 <tbody>
                   {visible.map((entry) => {
                     const checked = selectedPaths.includes(entry.path);
-                    const disabled = !checked && selectedPaths.length >= 100;
+                    const disabled = !checked && selectedPaths.length >= FILE_ATTRIBUTES_MAX_ATTRIBUTE_PATHS;
                     return <tr key={entry.path}><td><input type="checkbox" checked={checked} disabled={disabled} onChange={() => togglePath(entry.path)} aria-label={`${entry.path}を属性調査に含める`} /></td><th scope="row"><code title={entry.path}>{entry.path}</code></th><td><code>{eolLabel(entry.index_eol)}</code></td><td><code>{eolLabel(entry.worktree_eol)}</code></td><td><code>{eolLabel(entry.attribute_eol)}</code></td><td><span className={`file-attributes-observation observation-${entry.eol_status}`}>{statusLabel(entry)}</span>{entry.flags.length > 0 && <span className="file-attributes-flags">{entry.flags.join(" · ")}</span>}</td><td><code>{entry.attributes || "（属性欄なし）"}</code></td></tr>;
                   })}
                   {visible.length === 0 && <tr><td colSpan={7} className="file-attributes-empty">条件に一致する追跡ファイルはありません。</td></tr>}

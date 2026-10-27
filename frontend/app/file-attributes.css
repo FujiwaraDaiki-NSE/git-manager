@@ -43,6 +43,7 @@
 
 .file-attributes-refresh,
 .file-attributes-summary button,
+.file-attributes-selection button,
 .file-attributes-inspection-controls button,
 .file-attributes-error button {
   border: 1px solid var(--rule);
@@ -57,6 +58,7 @@
 
 .file-attributes-refresh:hover:not(:disabled),
 .file-attributes-summary button:hover:not(:disabled),
+.file-attributes-selection button:hover:not(:disabled),
 .file-attributes-inspection-controls button:hover:not(:disabled),
 .file-attributes-error button:hover:not(:disabled) {
   background: var(--hover);
@@ -64,6 +66,7 @@
 
 .file-attributes-refresh:disabled,
 .file-attributes-summary button:disabled,
+.file-attributes-selection button:disabled,
 .file-attributes-inspection-controls button:disabled,
 .file-attributes-error button:disabled {
   cursor: default;
@@ -72,7 +75,7 @@
 
 .file-attributes-controls {
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) minmax(130px, 1fr) minmax(130px, 1fr) auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
   gap: 8px;
   margin-top: 14px;
@@ -104,6 +107,7 @@
 
 .file-attributes-search {
   min-width: 0;
+  grid-column: span 2;
 }
 
 .file-attributes-order {
@@ -123,6 +127,7 @@
 }
 
 .file-attributes-summary,
+.file-attributes-selection,
 .file-attributes-inspection-meta {
   display: flex;
   align-items: center;
@@ -133,8 +138,16 @@
   font-size: var(--fs-aux);
 }
 
-.file-attributes-summary button {
+.file-attributes-summary button,
+.file-attributes-selection button {
   padding: 4px 7px;
+}
+
+.file-attributes-selection label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
 }
 
 .file-attributes-summary > span:last-child {

@@ -8,6 +8,7 @@
 .commit-containment-detail-heading,
 .commit-containment-coverage,
 .commit-containment-tools,
+.commit-containment-navigation,
 .commit-containment-run {
   display: flex;
   min-width: 0;
@@ -86,6 +87,58 @@
   flex: 1 1 260px;
 }
 
+.commit-containment-tools .commit-containment-group-toggle {
+  display: flex;
+  align-items: center;
+  flex: 0 1 250px;
+  min-width: 0;
+  min-height: 34px;
+  gap: 6px;
+}
+
+.commit-containment-group-toggle input {
+  flex: 0 0 auto;
+}
+
+.commit-containment-navigation {
+  padding-block: 6px;
+}
+
+.commit-containment-navigation span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.commit-containment-export-preview {
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 8px;
+}
+
+.commit-containment-export-preview summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.commit-containment-export-preview .copy-control {
+  margin-top: 8px;
+}
+
+.commit-containment-export-preview pre {
+  margin: 8px 0 0;
+  max-height: 260px;
+  max-width: 100%;
+  overflow: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .commit-containment-coverage {
   color: var(--muted);
   font: 11px var(--sans);
@@ -130,6 +183,18 @@
 
 .commit-containment-table tbody tr:last-child td { border-bottom: 0; }
 .commit-containment-table tbody tr.is-selected { background: var(--selected); }
+
+.commit-containment-table .commit-containment-group-heading th {
+  width: auto;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  font-weight: 500;
+}
+
+.commit-containment-group-heading span {
+  display: inline-block;
+  margin-right: 12px;
+  overflow-wrap: anywhere;
+}
 
 .commit-containment-ref,
 .commit-containment-hash {
