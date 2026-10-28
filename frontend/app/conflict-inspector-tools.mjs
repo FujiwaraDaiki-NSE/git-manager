@@ -190,3 +190,160 @@ export function sameConflictSelection(left, right) {
   if (!left || !right) return false;
   return left.path === right.path && left.file === right.file && left.stage === right.stage && left.hash === right.hash && left.snapshotKey === right.snapshotKey;
 }
+
+export const CONFLICT_KINDS = Object.freeze([
+  { key: "both-modified", label: "両側で変更", description: "BASE・OURS・THEIRSがINDEXにあります。両側の変更をBASEと照らして確認できます。" },
+  { key: "both-added", label: "両側で追加", description: "BASEがなく、OURSとTHEIRSがINDEXにあります。同じパスに追加された内容を確認してください。" },
+  { key: "ours-deleted", label: "OURSで削除", description: "BASEとTHEIRSがあり、OURSはありません。片側の削除と、もう片側の内容を確認してください。" },
+  { key: "theirs-deleted", label: "THEIRSで削除", description: "BASEとOURSがあり、THEIRSはありません。片側の削除と、もう片側の内容を確認してください。" },
+  { key: "both-deleted", label: "両側で削除", description: "BASEだけがINDEXにあります。削除された共通の内容を確認できます。" },
+  { key: "ours-added", label: "OURSのみ追加", description: "OURSだけがINDEXにあります。追加された側の内容とマージの経緯を確認してください。" },
+  { key: "theirs-added", label: "THEIRSのみ追加", description: "THEIRSだけがINDEXにあります。追加された側の内容とマージの経緯を確認してください。" },
+  { key: "unknown", label: "stageなし", description: "取得した一覧にBASE・OURS・THEIRSの情報がありません。一覧を再取得してください。" },
+]);
+
+const conflictKindByStages = Object.freeze({ "111": "both-modified", "011": "both-added", "101": "ours-deleted", "110": "theirs-deleted", "100": "both-deleted", "010": "ours-added", "001": "theirs-added", "000": "unknown" });
+
+/** Describes the index topology; it does not infer a merge strategy or branch identity. */
+export function conflictFileKind(file) {
+  const key = CONFLICT_STAGES.map((stage) => conflictStageRecord(file, stage) === null ? "0" : "1").join("");
+  return CONFLICT_KINDS.find((kind) => kind.key === conflictKindByStages[key]);
+}
+
+export function conflictFileExtension(file) {
+  const basename = requireConflictFile(file).path.split("/").at(-1);
+  const dot = basename.lastIndexOf(".");
+  return dot <= 0 || dot === basename.length - 1 ? "" : basename.slice(dot).toLowerCase();
+}
+
+export function conflictInventoryExtensions(files) {
+  if (!Array.isArray(files)) throw new TypeError("files must be provided explicitly");
+  return [...new Set(files.map(conflictFileExtension))].sort();
+}
+
+export function filterConflictFiles(files, { query, extension, kind }) {
+  if (!Array.isArray(files)) throw new TypeError("files must be provided explicitly");
+  if (typeof query !== "string") throw new TypeError("query must be provided explicitly");
+  if (extension !== null && typeof extension !== "string") throw new TypeError("extension must be a string or null");
+  if (kind !== null && !CONFLICT_KINDS.some((entry) => entry.key === kind)) throw new TypeError("kind must be an explicit conflict kind or null");
+  const terms = query.toLowerCase().split(/\s+/u).filter((term) => term !== "");
+  return files.filter((file) => {
+    const value = requireConflictFile(file);
+    return terms.every((term) => value.path.toLowerCase().includes(term)) &&
+      (extension === null || conflictFileExtension(value) === extension) &&
+      (kind === null || conflictFileKind(value).key === kind);
+  });
+}
+
+export function conflictFileMaximumSize(file) {
+  const sizes = CONFLICT_STAGES.map((stage) => conflictStageRecord(file, stage)?.size).filter((size) => typeof size === "number" && Number.isFinite(size) && size >= 0);
+  return sizes.length === 0 ? null : Math.max(...sizes);
+}
+
+export function sortConflictFiles(files, order) {
+  if (!Array.isArray(files)) throw new TypeError("files must be provided explicitly");
+  if (!["path-asc", "path-desc", "size-desc", "size-asc"].includes(order)) throw new TypeError("order must be provided explicitly");
+  return [...files].sort((left, right) => {
+    const leftPath = requireConflictFile(left).path;
+    const rightPath = requireConflictFile(right).path;
+    const pathOrder = leftPath < rightPath ? -1 : leftPath > rightPath ? 1 : 0;
+    if (order === "path-asc") return pathOrder;
+    if (order === "path-desc") return -pathOrder;
+    const leftSize = conflictFileMaximumSize(left);
+    const rightSize = conflictFileMaximumSize(right);
+    if (leftSize === null) return rightSize === null ? pathOrder : 1;
+    if (rightSize === null) return -1;
+    return (order === "size-desc" ? rightSize - leftSize : leftSize - rightSize) || pathOrder;
+  });
+}
+
+/** Boundary navigation never wraps or changes a selection hidden by the filters. */
+export function adjacentConflictFile(files, path, direction) {
+  if (!Array.isArray(files)) throw new TypeError("files must be provided explicitly");
+  requiredString(path, "path");
+  if (direction !== -1 && direction !== 1) throw new TypeError("direction must be -1 or 1");
+  const index = files.findIndex((file) => requireConflictFile(file).path === path);
+  return index < 0 || index + direction < 0 || index + direction >= files.length ? null : files[index + direction].path;
+}
+
+export function conflictStageFacts(file) {
+  const facts = [];
+  const pairs = [[CONFLICT_STAGE_BASE, CONFLICT_STAGE_OURS], [CONFLICT_STAGE_BASE, CONFLICT_STAGE_THEIRS], [CONFLICT_STAGE_OURS, CONFLICT_STAGE_THEIRS]];
+  for (const [leftStage, rightStage] of pairs) {
+    const left = conflictStageRecord(file, leftStage);
+    const right = conflictStageRecord(file, rightStage);
+    if (left === null || right === null || typeof left.hash !== "string" || typeof right.hash !== "string") continue;
+    if (left.hash.toLowerCase() === right.hash.toLowerCase()) facts.push(`${conflictStageLabel(leftStage)}と${conflictStageLabel(rightStage)}のオブジェクトは同じです。${left.mode === right.mode ? "modeも一致しています。" : "modeは異なります。実行権限やファイル種別を確認してください。"}`);
+    else if (left.mode !== right.mode) facts.push(`${conflictStageLabel(leftStage)}と${conflictStageLabel(rightStage)}はオブジェクトとmodeが異なります。`);
+  }
+  return facts;
+}
+
+function shellArgument(value) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function markdownFence(value, language) {
+  const runs = value.match(/`+/gu);
+  const longest = runs === null ? 0 : Math.max(...runs.map((run) => run.length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `${fence}${language}\n${value}\n${fence}`;
+}
+
+/** Portable report of one retrieved snapshot, including exact object inspection commands. */
+export function conflictFileReport(path, file, snapshotKey, truncated) {
+  requiredString(path, "path");
+  requireConflictFile(file);
+  requiredString(snapshotKey, "snapshotKey");
+  if (typeof truncated !== "boolean") throw new TypeError("truncated must be provided explicitly");
+  const kind = conflictFileKind(file);
+  const metadata = CONFLICT_STAGES.map((stage) => {
+    const record = conflictStageRecord(file, stage);
+    return `${conflictStageLabel(stage)}: ${record === null ? "INDEX stageなし" : JSON.stringify({ hash: record.hash, mode: record.mode, type: record.type, kind: record.kind, size: record.size })}`;
+  }).join("\n");
+  const commands = [`git -C ${shellArgument(path)} --literal-pathspecs --no-pager ls-files --unmerged -- ${shellArgument(file.path)}`];
+  for (const stage of CONFLICT_STAGES) {
+    const hash = conflictStageHash(file, stage);
+    if (hash !== null) commands.push(`# ${conflictStageLabel(stage)}\ngit -C ${shellArgument(path)} --no-pager cat-file -p ${shellArgument(requiredHash(hash, "stage hash"))}`);
+  }
+  return [
+    "# Git conflict snapshot",
+    markdownFence(`worktree: ${JSON.stringify(path)}\nfile: ${JSON.stringify(file.path)}\nsnapshot: ${JSON.stringify(snapshotKey)}`, "text"),
+    `競合の構成: ${kind.label}\n\n${kind.description}`,
+    truncated ? "取得一覧は上限で切り詰められています。このレポートは選択した1ファイルの取得情報です。" : "取得一覧内の選択した1ファイルの情報です。",
+    markdownFence(metadata, "text"),
+    ...conflictStageFacts(file),
+    "読み取り専用の確認コマンド（INDEX一覧は実行時点、cat-fileは取得済みhashのオブジェクト）:",
+    markdownFence(commands.join("\n\n"), "sh"),
+    "OURS / THEIRSはINDEXのstage名です。rebaseなどでは現在のブランチ名との関係を確認してください。",
+  ].join("\n\n") + "\n";
+}
+
+export const CONFLICT_TEXT_MATCH_LIMIT = 2000;
+export const CONFLICT_TEXT_PAGE_LINES = 300;
+
+/** A fixed-size page containing an absolute source line, regardless of its distance from the start. */
+export function conflictTextPage(lineCount, lineNumber) {
+  if (!Number.isInteger(lineCount) || lineCount < 1) throw new TypeError("lineCount must be a positive integer");
+  if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > lineCount) throw new TypeError("lineNumber must identify a source line");
+  const start = Math.floor((lineNumber - 1) / CONFLICT_TEXT_PAGE_LINES) * CONFLICT_TEXT_PAGE_LINES;
+  return { start, end: Math.min(start + CONFLICT_TEXT_PAGE_LINES, lineCount) };
+}
+
+/** Literal per-line search with a bounded stored result set and an exact total. */
+export function findConflictTextMatches(text, query, { caseSensitive, limit }) {
+  if (typeof text !== "string" || typeof query !== "string") throw new TypeError("text and query must be provided explicitly");
+  if (typeof caseSensitive !== "boolean") throw new TypeError("caseSensitive must be provided explicitly");
+  if (!Number.isInteger(limit) || limit <= 0) throw new TypeError("limit must be a positive integer");
+  if (query === "") return { matches: [], total: 0, truncated: false };
+  const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), caseSensitive ? "gu" : "giu");
+  const matches = [];
+  let total = 0;
+  text.split("\n").forEach((line, index) => {
+    for (const match of line.matchAll(pattern)) {
+      total += 1;
+      if (matches.length < limit) matches.push({ id: `${index + 1}:${match.index}`, line: index + 1, offset: match.index, length: match[0].length });
+    }
+  });
+  return { matches, total, truncated: total > matches.length };
+}
