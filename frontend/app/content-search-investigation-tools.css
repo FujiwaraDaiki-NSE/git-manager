@@ -1,0 +1,152 @@
+.content-search-body,
+.content-search-tools,
+.content-search-file-summary,
+.content-search-file-summary-scroll,
+.content-search-table-wrap {
+  min-width: 0;
+}
+
+.content-search-tools .content-search-line-bound {
+  min-width: min(170px, 100%);
+  flex: 1 1 170px;
+}
+
+.content-search-tools label {
+  max-width: 100%;
+}
+
+.content-search-tools input[type="text"],
+.content-search-context-tools select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 12px var(--mono);
+}
+
+.content-search-tools input[type="text"]:focus,
+.content-search-context-tools select:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
+.content-search-review-tools,
+.content-search-context-tools,
+.content-search-file-summary-heading,
+.content-search-match-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.content-search-review-tools,
+.content-search-file-summary-heading {
+  color: var(--muted-on-paper);
+  font: 11px var(--sans);
+}
+
+.content-search-review-tools label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.content-search-match-actions {
+  gap: 5px;
+}
+
+.content-search-match-actions button[aria-pressed="true"],
+.content-search-context-tools button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.content-search-file-summary {
+  border: 1px solid var(--rule);
+}
+
+.content-search-file-summary > summary {
+  padding: 8px 10px;
+  background: var(--paper);
+  cursor: pointer;
+  font: 12px var(--sans);
+}
+
+.content-search-file-summary-heading {
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.content-search-file-summary-scroll {
+  max-height: 250px;
+  overflow: auto;
+}
+
+.content-search-file-summary table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.content-search-file-summary th,
+.content-search-file-summary td {
+  padding: 7px 9px;
+  border-top: 1px solid var(--rule);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.content-search-file-summary th {
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+  font: 11px var(--sans);
+}
+
+.content-search-file-summary td:first-child {
+  max-width: 280px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.content-search-context-tools {
+  align-items: flex-end;
+}
+
+.content-search-context-tools label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted-on-paper);
+  font: 11px var(--sans);
+}
+
+.content-search-context-tools .copy-control {
+  max-width: 100%;
+}
+
+.content-search-context-tools button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .content-search-context-tools,
+  .content-search-context-tools > *,
+  .content-search-context-tools select,
+  .content-search-review-tools,
+  .content-search-review-tools > *,
+  .content-search-file-summary-heading > * {
+    width: 100%;
+  }
+
+  .content-search-context-tools,
+  .content-search-review-tools {
+    align-items: stretch;
+  }
+}

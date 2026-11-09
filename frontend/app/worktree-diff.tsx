@@ -4,7 +4,9 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import CommitFiles from "./commit-files";
 import CopyButton from "./copy-button";
 import PatchView from "./patch-view";
+import WorktreeDiffCaptures from "./worktree-diff-captures";
 import type { Numstat } from "./types";
+import { appendWorktreeDiffCapture, captureWorktreeDiff } from "./worktree-diff-capture-tools.mjs";
 import {
   buildWorktreeDiffQuery,
   sameWorktreeDiffRequest,
@@ -74,6 +76,13 @@ type WorktreeDiffResponse = {
   command: string;
 };
 
+export type WorktreeDiffCapture = {
+  id: number;
+  request: WorktreeDiffRequest;
+  response: WorktreeDiffResponse;
+  received_at: string;
+};
+
 type LoadState = "loading" | "ready" | "error";
 
 function responseMessage(status: number, detail: string | null) {
@@ -124,24 +133,30 @@ function WorktreeDiffStats({ stats }: { stats: WorktreeDiffStats }) {
 export default function WorktreeDiff({ path, file, stage }: WorktreeDiffProps) {
   const titleId = `worktree-diff-title-${useId().replaceAll(":", "")}`;
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false);
-  const [data, setData] = useState<WorktreeDiffResponse | null>(null);
+  const [captures, setCaptures] = useState<WorktreeDiffCapture[]>([]);
+  const [selectedCaptureId, setSelectedCaptureId] = useState<number | null>(null);
   const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [downloadStatus, setDownloadStatus] = useState("");
   const [retry, setRetry] = useState(0);
-  const loadedRequest = useRef<WorktreeDiffRequest | null>(null);
   const requestSequence = useRef(0);
+  const captureSequence = useRef(0);
 
   const request = useMemo<WorktreeDiffRequest>(
     () => ({ path, file, stage, ignoreWhitespace }),
     [file, ignoreWhitespace, path, stage],
   );
+  const history = useMemo(
+    () => captures.filter((capture) => sameWorktreeDiffRequest(request, capture.request)),
+    [captures, request],
+  );
+  const selectedCapture = history.find((capture) => capture.id === selectedCaptureId) ?? null;
+  const data = selectedCapture === null ? null : selectedCapture.response;
+  const isHistorical = selectedCapture !== null && history.length > 0 && history[0].id !== selectedCapture.id;
 
   useEffect(() => {
     const controller = new AbortController();
     const sequence = ++requestSequence.current;
-    setData(null);
-    loadedRequest.current = null;
     setError(null);
     setDownloadStatus("");
     setState("loading");
@@ -162,8 +177,9 @@ export default function WorktreeDiff({ path, file, stage }: WorktreeDiffProps) {
       })
       .then((value) => {
         if (controller.signal.aborted || requestSequence.current !== sequence) return;
-        setData(value);
-        loadedRequest.current = request;
+        const capture = captureWorktreeDiff(++captureSequence.current, request, value, new Date().toISOString()) as WorktreeDiffCapture;
+        setCaptures((previous) => appendWorktreeDiffCapture(previous, capture));
+        setSelectedCaptureId(capture.id);
         setState("ready");
       })
       .catch((reason: unknown) => {
@@ -175,7 +191,7 @@ export default function WorktreeDiff({ path, file, stage }: WorktreeDiffProps) {
     return () => controller.abort();
   }, [request, retry]);
 
-  const resultIsCurrent = sameWorktreeDiffRequest(request, loadedRequest.current);
+  const resultMatchesInput = selectedCapture !== null && sameWorktreeDiffRequest(request, selectedCapture.request);
   const exclusionLabel = data ? worktreeExcludedLabel(data.excluded) : null;
 
   const downloadPatch = () => {
@@ -197,7 +213,7 @@ export default function WorktreeDiff({ path, file, stage }: WorktreeDiffProps) {
   };
 
   return (
-    <section className={`worktree-diff${resultIsCurrent ? "" : " is-stale"}`} aria-labelledby={titleId}>
+    <section className={`worktree-diff${resultMatchesInput && !isHistorical ? "" : " is-stale"}`} aria-labelledby={titleId}>
       <div className="worktree-diff-heading">
         <div>
           <h3 id={titleId}>{file === null ? "作業ツリーの差分" : "選択ファイルの差分"}</h3>
@@ -240,10 +256,12 @@ export default function WorktreeDiff({ path, file, stage }: WorktreeDiffProps) {
             <span>取得したスナップショット</span>
             <strong>{data.snapshot.stage_label}</strong>
             <span>{data.snapshot.scope === "all" ? "全体" : <code>{data.snapshot.file}</code>}</span>
+            {selectedCapture && <span>#{selectedCapture.id} · 応答受信 {new Date(selectedCapture.received_at).toLocaleString()}</span>}
             {data.snapshot.ignore_whitespace && <span>空白変更を無視（意味のある差分のみ）</span>}
-            {!resultIsCurrent && <span className="worktree-diff-stale">入力変更後の前回結果です。更新してください。</span>}
+            {isHistorical && <span className="worktree-diff-stale">過去の取得結果</span>}
           </div>
           <WorktreeDiffStats stats={data.stats} />
+          {selectedCapture && <WorktreeDiffCaptures capture={selectedCapture} history={history} onSelect={setSelectedCaptureId} />}
           <div className="worktree-diff-command">
             <div><span>再現コマンド（読み取り専用）</span><code>{data.command}</code></div>
             <CopyButton value={data.command} label="作業ツリー差分の再現コマンドをコピー" />

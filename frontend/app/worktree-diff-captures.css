@@ -1,0 +1,208 @@
+.worktree-diff,
+.worktree-captures,
+.worktree-capture-history,
+.worktree-capture-exclusions,
+.worktree-capture-comparison {
+  min-width: 0;
+}
+
+.worktree-captures {
+  display: grid;
+  gap: 10px;
+}
+
+.worktree-capture-history {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 7px;
+}
+
+.worktree-capture-history label,
+.worktree-capture-filters label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font: 10px/1.4 var(--sans);
+}
+
+.worktree-capture-history label {
+  flex: 1 1 260px;
+}
+
+.worktree-capture-history select,
+.worktree-capture-filters select,
+.worktree-capture-filters input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 5px 7px;
+  color: var(--ink);
+  background: var(--paper);
+  font: 11px/1.4 var(--sans);
+}
+
+.worktree-capture-history > p {
+  flex-basis: 100%;
+}
+
+.worktree-capture-note,
+.worktree-capture-historical,
+.worktree-capture-patch-comparison {
+  margin: 0;
+  color: var(--muted);
+  font: 10px/1.6 var(--sans);
+  overflow-wrap: anywhere;
+}
+
+.worktree-capture-historical {
+  color: var(--c-behind);
+}
+
+.worktree-capture-patch-comparison {
+  color: var(--ink);
+}
+
+.worktree-capture-exports,
+.worktree-capture-filters,
+.worktree-capture-pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.worktree-captures button {
+  max-width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 6px 8px;
+  color: var(--ink);
+  background: var(--paper);
+  font: 11px/1.4 var(--sans);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.worktree-captures button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.worktree-captures button:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.worktree-capture-export-status {
+  flex-basis: 100%;
+  min-height: 15px;
+  color: var(--muted);
+  font: 10px/1.5 var(--sans);
+}
+
+.worktree-capture-exclusions,
+.worktree-capture-comparison {
+  padding: 9px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+}
+
+.worktree-capture-exclusions > summary,
+.worktree-capture-comparison > summary {
+  color: var(--ink);
+  font: 600 11px/1.5 var(--sans);
+  cursor: pointer;
+}
+
+.worktree-capture-exclusions[open] > :not(summary),
+.worktree-capture-comparison[open] > :not(summary) {
+  margin-top: 8px;
+}
+
+.worktree-capture-filters label:first-child {
+  flex: 0 1 120px;
+}
+
+.worktree-capture-filters label:nth-child(2) {
+  flex: 1 1 150px;
+}
+
+.worktree-capture-count,
+.worktree-capture-pages span {
+  color: var(--muted);
+  font: 10px/1.4 var(--mono);
+}
+
+.worktree-capture-table-wrap {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto;
+}
+
+.worktree-captures table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--ink);
+  font: 10px/1.6 var(--sans);
+}
+
+.worktree-captures th,
+.worktree-captures td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.worktree-captures th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.worktree-captures code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.worktree-capture-comparison table {
+  min-width: 540px;
+}
+
+.worktree-capture-comparison h5 {
+  margin: 12px 0 0;
+  color: var(--ink);
+  font: 600 11px/1.5 var(--sans);
+}
+
+.worktree-capture-comparison h5 span {
+  margin-left: 4px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+@media (max-width: 520px) {
+  .worktree-capture-exports > button,
+  .worktree-capture-exports .copy-control,
+  .worktree-capture-exports .copy-button,
+  .worktree-capture-filters .copy-control,
+  .worktree-capture-filters .copy-button,
+  .worktree-capture-history > button {
+    width: 100%;
+  }
+
+  .worktree-capture-filters label:first-child,
+  .worktree-capture-filters label:nth-child(2) {
+    flex-basis: 100%;
+  }
+}
