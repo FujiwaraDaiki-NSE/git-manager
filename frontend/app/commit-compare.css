@@ -140,3 +140,12 @@
   .commit-compare-actions { width: 100%; }
   .commit-compare-actions button { flex: 1 1 160px; }
 }
+
+.commit-compare-evidence { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; font: 11px/1.5 var(--sans); }
+.commit-compare-evidence summary { cursor: pointer; font-weight: 700; }
+.commit-compare-evidence dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; }
+.commit-compare-evidence dd { margin: 0; }
+.commit-compare-evidence code { overflow-wrap: anywhere; }
+.commit-compare-metric-wrap { overflow: auto; }
+.commit-compare-evidence table { width: 100%; border-collapse: collapse; }
+.commit-compare-evidence th, .commit-compare-evidence td { text-align: start; padding: 4px 8px; border-bottom: 1px solid var(--rule); }

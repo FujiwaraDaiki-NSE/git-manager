@@ -7,10 +7,10 @@
  * meaningful.
  */
 
-export const COMMIT_FILE_FILTERS = ["all", "text", "binary", "renamed"];
+export const COMMIT_FILE_FILTERS = ["all", "text", "binary", "renamed", "unknown"];
 export const COMMIT_FILE_SORTS = ["path", "volume", "additions", "deletions"];
 export const COMMIT_FILE_ORDERS = ["asc", "desc"];
-export const COMMIT_FILE_DIRECTORY_ALL = "all";
+export const COMMIT_FILE_DIRECTORY_ALL = "/";
 export const COMMIT_FILE_DIRECTORY_ROOT = ".";
 export const COMMIT_FILE_EXTENSION_ALL = "all";
 export const COMMIT_FILE_EXTENSION_NONE = "none";
@@ -126,6 +126,7 @@ export function filterCommitFiles(files, filter) {
   }
   if (filter === "all") return [...files];
   if (filter === "binary") return files.filter(isBinaryFile);
+  if (filter === "unknown") return files.filter((file) => commitFileChangeVolume(file) === null);
   if (filter === "renamed") return files.filter(isRenamedFile);
   return files.filter((file) => !isBinaryFile(file));
 }
@@ -258,3 +259,38 @@ export function buildCommitFilesPathList(files) {
 }
 
 export { tsvCell as escapeTsvCell };
+
+export function narrowCommitFiles(files, { query, excluded, scope, minimum, change }) {
+  const include = query.trim().toLocaleLowerCase();
+  const exclude = excluded.trim().toLocaleLowerCase();
+  const threshold = minimum === "" ? null : Number(minimum);
+  if (threshold !== null && (!/^\d+$/.test(minimum) || !Number.isSafeInteger(threshold))) return [];
+  return files.filter((file) => {
+    const paths = (scope === "current" ? [file.path]
+      : scope === "previous" ? [file.old_path]
+      : commitFilePaths(file)).filter((path) => typeof path === "string").map((path) => path.toLocaleLowerCase());
+    if (paths.length === 0 || !paths.some((path) => path.includes(include))) return false;
+    if (exclude && paths.some((path) => path.includes(exclude))) return false;
+    const volume = commitFileChangeVolume(file);
+    if (threshold !== null && (volume === null || volume < threshold)) return false;
+    if (change === "additions") return !isBinaryFile(file) && typeof file.additions === "number" && file.additions > 0;
+    if (change === "deletions") return !isBinaryFile(file) && typeof file.deletions === "number" && file.deletions > 0;
+    return true;
+  });
+}
+
+export function summarizeCommitFileDirectories(files) {
+  const directories = new Map();
+  for (const file of files) {
+    for (const directory of new Set(commitFilePaths(file).map(pathDirectory))) {
+      if (!directories.has(directory)) directories.set(directory, []);
+      directories.get(directory).push(file);
+    }
+  }
+  return Array.from(directories, ([directory, items]) => ({ directory, ...summarizeCommitFiles(items) }))
+    .sort((left, right) => right.files - left.files || left.directory.localeCompare(right.directory));
+}
+
+export function commitFileIdentity(file) {
+  return JSON.stringify([file.old_path === undefined ? null : file.old_path, file.path]);
+}

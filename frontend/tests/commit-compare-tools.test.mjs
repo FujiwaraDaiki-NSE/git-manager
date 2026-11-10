@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildComparisonFilesCsv,
+  buildComparisonMarkdown,
+  comparisonStatChanges,
+  pinnedComparisonUrl,
   buildComparisonQuery,
   comparisonModeLabel,
   comparisonPatchDownloadName,
@@ -64,4 +67,32 @@ test("partial downloads are named and described as partial", () => {
   assert.match(comparisonPatchDownloadStatus(true), /部分/);
   assert.match(comparisonPatchDownloadStatus(false), /完全/);
   assert.equal(comparisonModeLabel("merge-base"), "共通祖先（merge-base）から比較");
+});
+
+test("fixed comparison links preserve the resolved endpoints and mode", () => {
+  const base = "a".repeat(40);
+  const target = "b".repeat(40);
+  const url = new URL(pinnedComparisonUrl("https://gitdash.example", "/work/repo & links", { base, target, mode: "merge-base" }));
+  assert.equal(url.pathname, "/project");
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    path: "/work/repo & links", tab: "info", investigation: "compare",
+    investigationBase: base, investigationTarget: target, investigationMode: "merge-base",
+  });
+});
+
+test("comparison reports preserve unknowns and escape fence characters without changing the JSON values", () => {
+  const path = "/work/`repo";
+  const stats = { files: 1, additions: null, deletions: null, binary: 1, renamed: 0 };
+  const report = buildComparisonMarkdown(path, {
+    base: "a", target: "b", comparison_base: "c", merge_base: "c", mode: "merge-base", stats,
+    patch_truncated: true, command: "git diff c b",
+  });
+  const context = JSON.parse(report.split("\n").slice(3, -2).join("\n"));
+  assert.equal(context.path, path);
+  assert.equal(context.comparison_base, "c");
+  assert.equal(context.patch_truncated, true);
+  assert.equal(context.additions, null);
+  assert.equal(context.command, comparisonReproductionCommand(path, "git diff c b"));
+  assert.equal(comparisonStatChanges(stats, { ...stats, additions: 3, binary: 2 })[1].delta, null);
+  assert.equal(comparisonStatChanges(stats, { ...stats, binary: 2 })[3].delta, 1);
 });

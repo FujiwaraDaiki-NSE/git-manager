@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  COMMIT_FILE_DIRECTORY_ALL,
+  narrowCommitFiles,
+  summarizeCommitFileDirectories,
   COMMIT_FILE_DIRECTORY_ROOT,
   COMMIT_FILE_EXTENSION_NONE,
   buildCommitFilesPathList,
@@ -127,4 +130,38 @@ test("TSV export escapes spreadsheet formulas, keeps rename data, and marks bina
   assert.match(tsv, /"'\+old\tname"\t2\t1\tfalse/);
   assert.match(tsv, /assets\/logo\.png\t\tunknown\tunknown\ttrue/);
   assert.ok(!tsv.includes("\t0\t0\ttrue"), "binary rows must not be represented as measured zero lines");
+});
+
+test("a directory literally named all can be filtered", () => {
+  const rows = [{ path: "all/a.txt" }, { path: "src/b.txt" }];
+  assert.deepEqual(filterCommitFilesByDirectory(rows, "all"), [rows[0]]);
+  assert.deepEqual(filterCommitFilesByDirectory(rows, COMMIT_FILE_DIRECTORY_ALL), rows);
+});
+
+test("path scope and exclusions respect the selected side of renames", () => {
+  const moved = textFile("new/keep.txt", 3, 0, "old/excluded.txt");
+  const other = textFile("new/other.txt", 1, 2);
+  const settings = { query: "", excluded: "excluded", scope: "both", minimum: "", change: "all" };
+  assert.deepEqual(narrowCommitFiles([moved, other], settings), [other]);
+  assert.deepEqual(narrowCommitFiles([moved, other], { ...settings, scope: "current" }), [moved, other]);
+  assert.deepEqual(narrowCommitFiles([moved, other], { ...settings, excluded: "", query: "OLD", scope: "previous" }), [moved]);
+});
+
+test("threshold and direction exclude unknown counts without treating them as zero", () => {
+  const added = textFile("a", 3, 0);
+  const deleted = textFile("d", 0, 3);
+  const unknown = { path: "b", binary: true, additions: "-", deletions: "-" };
+  const rows = [added, deleted, unknown];
+  const settings = { query: "", excluded: "", scope: "both", minimum: "3", change: "deletions" };
+  assert.deepEqual(narrowCommitFiles(rows, settings), [deleted]);
+  assert.deepEqual(narrowCommitFiles(rows, { ...settings, minimum: "1e0" }), []);
+  assert.deepEqual(filterCommitFiles(rows, "unknown"), [unknown]);
+});
+
+test("directory totals count cross-directory moves in each directory and same-directory moves once", () => {
+  const rows = [textFile("a/new", 1, 2, "a/old"), textFile("b/new", 0, 0, "a/moved")];
+  const groups = summarizeCommitFileDirectories(rows);
+  assert.deepEqual(groups.map(({ directory, files, additions, deletions }) => [directory, files, additions, deletions]), [
+    ["a", 2, 1, 2], ["b", 1, 0, 0],
+  ]);
 });

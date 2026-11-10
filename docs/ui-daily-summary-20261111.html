@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-11-11 gitdash UI改善</title>
+  <style>
+    body { max-width: 52rem; margin: 2rem auto; padding: 0 1rem; font: 16px/1.65 system-ui, sans-serif; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: .5rem; border-bottom: 1px solid #bbb; text-align: start; vertical-align: top; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>2026-11-11 gitdash UI改善</h1>
+  <p>解決済みの比較地点を固定して調査を再開できるようにし、大きな差分から確認対象のファイルを絞り込めるようにした。</p>
+  <table>
+    <thead><tr><th scope="col">分類</th><th scope="col">変更</th><th scope="col">加点</th></tr></thead>
+    <tbody>
+      <tr><td>機能追加</td><td>取得した base と target の完全ハッシュを入力欄へ反映</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>取得したパッチを逆向きに再取得できる直接比較条件の入力</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>解決済みハッシュで比較フォームを開くURLのコピー</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>取得した比較応答をJSON保存</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>比較条件、集計、再現コマンド、切り詰め有無をMarkdownでコピー</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>直前の成功結果と今回の集計を並べて増減を表示</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>変更ファイル一覧のページ切り替えと件数設定</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>ページ・絞り込みをまたいで選択したファイルのTSV保存</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>パス文字列の除外検索</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>名前変更前・現在のパスを指定した文字列検索</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>追加と削除の合計行数の下限で絞り込み</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>追加行あり・削除行ありで絞り込み</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>変更量を計測できなかったファイルで絞り込み</td><td>+5</td></tr>
+      <tr><td>機能追加</td><td>ディレクトリ別の集計と一覧への絞り込み</td><td>+5</td></tr>
+      <tr><td>バグ修正</td><td>ディレクトリ <code>all</code> と「すべて」の選択値の衝突を解消</td><td>+1</td></tr>
+    </tbody>
+  </table>
+  <h2>影響範囲</h2>
+  <p>プロジェクト情報の2地点比較と、コミット詳細・作業ツリー差分などが共有する変更ファイル一覧。比較API、Compose定義、Gitの操作権限に変更なし。</p>
+  <h2>検証</h2>
+  <p>フロントエンド362件、バックエンド302件のテストとNext.jsの本番ビルドが通過。既定のgitdash-composeで再ビルド・再起動し、バックエンドのhealthyとHTTPのヘルス応答を確認。</p>
+  <ul>
+    <li>Chromeで、名前変更、バイナリ、追加、削除を含む59件の実Git差分を取得。25・50・100件のページ表示、パス検索範囲、除外、変更行数、追加・削除、計測不能の条件を操作した。</li>
+    <li><code>all</code> ディレクトリ選択時に全59件を表示する不具合を変更前に再現し、変更後は該当する55件を表示した。ディレクトリ集計の <code>src</code> から3件に絞り込めた。</li>
+    <li>ダウンロードしたJSONはAPI応答と一致した。別ページで選んだ2件だけがTSVに含まれた。Markdownのハッシュ、切り詰め情報、集計、再現コマンドを確認した。</li>
+    <li>固定URLは比較条件を反映し、実行ボタンを押した後に取得した。共通祖先からの差分を逆方向に取得し、直前成功結果からファイル数が58件減少する表示と、取得失敗後の成功結果保持を確認した。</li>
+    <li>デスクトップと幅390pxのChromeで確認。幅390pxでもページ全体の横方向のはみ出しはなく、除外条件が動作した。</li>
+  </ul>
+  <p>今回の評価は開始30点＋機能追加70点＋バグ修正1点で101点。実測による高速化の加点は行っていない。点数は指定された加点基準に基づく。</p>
+</body>
+</html>

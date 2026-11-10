@@ -1,5 +1,7 @@
 // @ts-check
 
+import { buildInvestigationShareUrl } from "./investigation-presets-tools.mjs";
+
 /**
  * Pure helpers for the explicit commit comparison form and its downloads.
  * The backend owns ref resolution and diff facts; these helpers only format
@@ -98,4 +100,45 @@ export function comparisonModeLabel(mode) {
   if (mode === "direct") return "直接比較";
   if (mode === "merge-base") return "共通祖先（merge-base）から比較";
   throw new RangeError(`Unknown comparison mode: ${mode}`);
+}
+
+/** @param {string} origin @param {string} path @param {{base: string, target: string, mode: string}} result */
+export function pinnedComparisonUrl(origin, path, result) {
+  const url = new URL("/project", origin);
+  url.search = new URLSearchParams({ path, tab: "info" }).toString();
+  return buildInvestigationShareUrl(url.href, "compare", {
+    base: result.base, target: result.target, mode: result.mode,
+  });
+}
+
+export const COMPARISON_STAT_LABELS = /** @type {const} */ ({
+  files: "ファイル", additions: "追加行（既知）", deletions: "削除行（既知）", binary: "バイナリ", renamed: "名前変更",
+});
+
+/** @typedef {Record<keyof typeof COMPARISON_STAT_LABELS, number|null>} ComparisonStats */
+
+/** @param {ComparisonStats} previous @param {ComparisonStats} current */
+export function comparisonStatChanges(previous, current) {
+  const keys = /** @type {(keyof ComparisonStats)[]} */ (Object.keys(COMPARISON_STAT_LABELS));
+  return keys.map((key) => {
+    const before = previous[key];
+    const after = current[key];
+    return { label: COMPARISON_STAT_LABELS[key], before, after, delta: before === null || after === null ? null : after - before };
+  });
+}
+
+/** @param {string} path @param {{base: string, target: string, comparison_base: string, merge_base: string|null, mode: string, patch_truncated: boolean, stats: ComparisonStats, command: string}} result */
+export function buildComparisonMarkdown(path, result) {
+  const context = {
+    path,
+    mode: result.mode,
+    base: result.base,
+    target: result.target,
+    comparison_base: result.comparison_base,
+    merge_base: result.merge_base,
+    patch_truncated: result.patch_truncated,
+    ...result.stats,
+    command: comparisonReproductionCommand(path, result.command),
+  };
+  return `## コミット比較\n\n\`\`\`json\n${JSON.stringify(context, null, 2).replaceAll("\`", "\\u0060")}\n\`\`\`\n`;
 }

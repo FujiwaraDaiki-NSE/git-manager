@@ -8,6 +8,9 @@ import InvestigationPresets, { type ComparisonPresetValues } from "./investigati
 import type { Numstat } from "./types";
 import {
   buildComparisonFilesCsv,
+  buildComparisonMarkdown,
+  comparisonStatChanges,
+  pinnedComparisonUrl,
   buildComparisonQuery,
   comparisonModeLabel,
   comparisonPatchDownloadName,
@@ -105,7 +108,9 @@ export default function CommitCompare({ path }: CommitCompareProps) {
   const [mode, setMode] = useState<ComparisonMode>("direct");
   const [request, setRequest] = useState<ComparisonRequest | null>(null);
   const [loadedRequest, setLoadedRequest] = useState<ComparisonRequest | null>(null);
-  const [data, setData] = useState<ComparisonResponse | null>(null);
+  const [results, setResults] = useState<{ current: ComparisonResponse | null; previous: ComparisonResponse | null }>({ current: null, previous: null });
+  const { current: data, previous } = results;
+  const [origin, setOrigin] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -120,7 +125,8 @@ export default function CommitCompare({ path }: CommitCompareProps) {
     setMode("direct");
     setRequest(null);
     setLoadedRequest(null);
-    setData(null);
+    setResults({ current: null, previous: null });
+    setOrigin(window.location.origin);
     setState("idle");
     setError(null);
     setValidationError(null);
@@ -139,7 +145,7 @@ export default function CommitCompare({ path }: CommitCompareProps) {
     void fetchComparison(`/api/repo/compare?${apiQuery(path, request)}`, controller.signal)
       .then((value) => {
         if (controller.signal.aborted || requestSequence.current !== sequence) return;
-        setData(value);
+        setResults(({ current }) => ({ current: value, previous: current }));
         setLoadedRequest(request);
         setState("ready");
       })
@@ -156,7 +162,6 @@ export default function CommitCompare({ path }: CommitCompareProps) {
     const next: ComparisonRequest = { base: base.trim(), target: target.trim(), mode };
     if (next.base.length === 0 || next.target.length === 0) {
       setValidationError("base と target の両方を入力してください。比較対象は自動補完しません。");
-      setState("idle");
       return;
     }
     setValidationError(null);
@@ -208,7 +213,8 @@ export default function CommitCompare({ path }: CommitCompareProps) {
     }
   };
 
-  const resultIsCurrent = sameRequest({ base: base.trim(), target: target.trim(), mode }, loadedRequest);
+  const resultIsCurrent = sameRequest({ base: base.trim(), target: target.trim(), mode }, loadedRequest)
+    || (data !== null && sameRequest({ base: base.trim(), target: target.trim(), mode }, data));
   return (
     <details className="commit-compare" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary id={titleId}>2地点を比較する</summary>
@@ -283,12 +289,46 @@ export default function CommitCompare({ path }: CommitCompareProps) {
               </div>
             </div>
             <ComparisonStats stats={data.stats} />
+            <details className="commit-compare-evidence">
+              <summary>取得した比較の再利用・記録</summary>
+              <dl>
+                <dt>解決した base</dt><dd><code>{data.base}</code></dd>
+                <dt>解決した target</dt><dd><code>{data.target}</code></dd>
+                <dt>差分の開始地点</dt><dd><code>{data.comparison_base}</code></dd>
+              </dl>
+              <div className="commit-compare-actions">
+                <button type="button" onClick={() => applyPreset({ base: data.base, target: data.target, mode: data.mode })}>取得したハッシュを入力欄へ</button>
+                <button type="button" onClick={() => applyPreset({ base: data.target, target: data.comparison_base, mode: "direct" })}>この差分の逆方向を入力欄へ</button>
+                {origin !== null && <CopyButton value={pinnedComparisonUrl(origin, path, data)} label="ハッシュ固定の比較URLをコピー" />}
+                <CopyButton value={buildComparisonMarkdown(path, data)} label="比較レポートをMarkdownでコピー" />
+                <button type="button" onClick={() => {
+                  try {
+                    downloadBlob(JSON.stringify(data, null, 2), "application/json;charset=utf-8", `${data.base.slice(0, 12)}-${data.target.slice(0, 12)}-comparison.json`);
+                    setDownloadStatus("取得した比較結果のJSON保存を開始しました。");
+                  } catch {
+                    setDownloadStatus("比較結果のJSONを保存できませんでした。");
+                  }
+                }}>取得した比較結果をJSON保存</button>
+              </div>
+            </details>
+            {previous !== null && <details className="commit-compare-evidence">
+              <summary>直前の成功結果との集計差</summary>
+              <p>前回 {comparisonModeLabel(previous.mode)} <code>{previous.comparison_label}</code></p>
+              <div className="commit-compare-metric-wrap" tabIndex={0} role="region" aria-label="前回と今回の比較集計">
+                <table>
+                  <thead><tr><th scope="col">項目</th><th scope="col">前回</th><th scope="col">今回</th><th scope="col">増減</th></tr></thead>
+                  <tbody>{comparisonStatChanges(previous.stats, data.stats).map(({ label, before, after, delta }) => <tr key={label}>
+                    <th scope="row">{label}</th><td>{displayStat(before)}</td><td>{displayStat(after)}</td><td>{delta !== null && delta > 0 ? "+" : ""}{displayStat(delta)}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
+            </details>}
             <div className="commit-compare-command">
               <div><span>再現コマンド（読み取り専用・ハッシュ固定）</span><code>{comparisonReproductionCommand(path, data.command)}</code></div>
               <CopyButton value={comparisonReproductionCommand(path, data.command)} label="比較の再現コマンドをコピー" />
             </div>
             {downloadStatus && <p className="commit-compare-download-status" role="status" aria-live="polite">{downloadStatus}</p>}
-            <CommitFiles key={`${data.base}:${data.target}:${data.mode}`} files={data.files} downloadName={`${data.base.slice(0, 12)}-${data.target.slice(0, 12)}-files.tsv`} />
+            <CommitFiles key={`${data.comparison_base}:${data.target}:${data.mode}`} files={data.files} downloadName={`${data.base.slice(0, 12)}-${data.target.slice(0, 12)}-files.tsv`} />
             <PatchView key={`${data.comparison_base}:${data.target}`} patch={data.patch} />
             {data.patch_truncated && <p className="commit-compare-truncated" role="status">パッチ本文は上限で切り詰められています。保存したファイルも部分的な内容です。</p>}
           </section>

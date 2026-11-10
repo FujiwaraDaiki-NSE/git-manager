@@ -188,8 +188,8 @@
 .commit-files-table td { font: 12px var(--mono); }
 .commit-files-table tbody tr:hover { background: var(--hover); }
 .commit-files-table tbody tr:last-child td { border-bottom: 0; }
-.commit-files-table th:nth-child(-n+3),
-.commit-files-table td:nth-child(-n+3) { width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+.commit-files-table th:nth-child(n+2):nth-child(-n+4),
+.commit-files-table td:nth-child(n+2):nth-child(-n+4) { width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
 .commit-files-volume { color: var(--accent); }
 .commit-files-unknown { color: var(--muted); }
 
@@ -228,8 +228,8 @@
   .commit-files-sort { flex: 1 1 130px; }
   .commit-files-order { align-self: flex-end; }
   .commit-files-copy { margin-left: 0; }
-  .commit-files-table th:nth-child(-n+3),
-  .commit-files-table td:nth-child(-n+3) { width: 50px; }
+  .commit-files-table th:nth-child(n+2):nth-child(-n+4),
+  .commit-files-table td:nth-child(n+2):nth-child(-n+4) { width: 50px; }
   .commit-files-table th,
   .commit-files-table td { padding: 7px 6px; }
   .commit-files-path { align-items: flex-start; flex-direction: column; }
@@ -250,4 +250,31 @@
 
 @media (prefers-reduced-motion: reduce) {
   .commit-files * { scroll-behavior: auto; }
+}
+
+.commit-files-extra { margin: 8px 12px; border: 1px solid var(--rule); border-radius: 6px; }
+.commit-files-extra summary { cursor: pointer; padding: 8px; font: 600 12px var(--sans); }
+.commit-files-extra p, .commit-files-extra ul { margin: 6px 8px 10px; padding: 0; font: 11px/1.5 var(--sans); }
+.commit-files-extra ul { list-style: none; max-height: 18rem; overflow: auto; }
+.commit-files-extra li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 3px 0; overflow-wrap: anywhere; }
+.commit-files-extra li button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: start; }
+.commit-files-extra input, .commit-files-extra select { max-width: 100%; }
+.commit-files-selection { border-top: 1px solid var(--rule); }
+.commit-files-table-wrap { position: relative; }
+
+.commit-files-table th:first-child,
+.commit-files-table td:first-child { width: 32px; text-align: center; }
+.commit-files-table td:first-child input { margin: 0; }
+@container (max-width: 360px) {
+  .commit-files-table th:first-child,
+  .commit-files-table td:first-child { width: 26px; }
+  .commit-files-table th:nth-child(n+2):nth-child(-n+4),
+  .commit-files-table td:nth-child(n+2):nth-child(-n+4) { width: 36px; }
+}
+.commit-files-extra label, nav.commit-files-tools label {
+  display: grid; gap: 4px; min-width: 0; max-width: 100%; color: var(--muted); font: 11px var(--sans);
+}
+.commit-files-extra label input, .commit-files-extra label select, nav.commit-files-tools select {
+  min-height: 32px; padding: 5px 7px; border: 1px solid var(--rule); border-radius: 6px;
+  color: var(--ink); background: var(--panel); font: 12px var(--sans);
 }
