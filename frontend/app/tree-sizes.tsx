@@ -29,6 +29,7 @@ import {
 } from "./tree-sizes-tools.mjs";
 import "./tree-sizes.css";
 import CopyButton from "./copy-button";
+import TreeSizeWorkbook from "./tree-size-workbook";
 
 type TreeSizeEntry = {
   path: string;
@@ -385,6 +386,8 @@ export default function TreeSizes({ path }: { path: string }) {
                 <div className="tree-sizes-table-wrap" role="region" aria-label="ディレクトリ別容量一覧" tabIndex={0}><table className="tree-sizes-table"><thead><tr><th scope="col">ディレクトリ</th><th scope="col">合計</th><th scope="col">パス数</th><th scope="col">サイズ未取得</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead><tbody>{directoryAggregates.map((item) => <tr key={item.path}><th scope="row"><code>{item.path}</code></th><td>{formatTreeSizeBytes(item.totalBytes)}</td><td>{item.fileCount.toLocaleString()}</td><td>{item.unknownSizeCount.toLocaleString()}</td><td><button type="button" className="table-action" onClick={() => setDirectory(item.path)}>この範囲を見る</button></td></tr>)}</tbody></table></div>
               </>}
             </section>
+
+            <TreeSizeWorkbook key={inventory.pinned_hash} path={path} inventory={inventory} entries={visibleEntries} conditions={snapshotConditions} />
 
             <section className="tree-sizes-files" aria-labelledby="tree-sizes-files-title">
               <div className="tree-sizes-subheading"><div><h4 id="tree-sizes-files-title">ファイルインベントリ</h4><p>{visibleEntries.length.toLocaleString()}件の取得済みパスを表示 · サイズ順は不明値を最後に配置</p></div></div>
