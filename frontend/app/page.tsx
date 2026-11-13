@@ -22,7 +22,7 @@ import {
   unknownAgentSummaryKeys,
 } from "./home-overview.mjs";
 import { agentReportKey, agentStateLabel, agentTaskState, deferProjectOrder, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
-import { useRepoStream } from "./repo-stream";
+import { useProjectsLiveUpdates, useRepoStream } from "./repo-stream";
 import type { AgentRunState, ProjectSummary } from "./types";
 
 type AgentSummaryKey = "waiting_for_user" | "blocked" | "active" | "review_required" | "merge_ready";
@@ -219,6 +219,7 @@ function SkeletonGrid() {
 }
 
 export default function Page() {
+  useProjectsLiveUpdates();
   const { scanning, fetching, connected, projectSummaries: projects, projectsLoading: loading, projectsError: error, refreshProjects } = useRepoStream();
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
   const [deferredOrder, setDeferredOrder] = useState<string[] | null>(null);

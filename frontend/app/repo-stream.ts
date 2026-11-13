@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, createElement, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, createElement, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { mergeAgentSnapshot } from "./agent-overview.mjs";
 import { applyBufferedAgentEvents, mergeAgentEvents } from "./agent-timeline-tools.mjs";
 import type { AgentEvent, AgentEventEnvelope, ProjectSummary, Repo } from "./types";
@@ -18,6 +18,7 @@ export type RepoStreamState = {
   projectsLoading: boolean;
   projectsError: string | null;
   refreshProjects: () => void;
+  subscribeProjectsLiveUpdates: () => () => void;
   loadOlderEvents: () => void;
   historyHasMore: boolean;
   historyLoading: boolean;
@@ -64,6 +65,11 @@ function useRepoStreamState(): RepoStreamState {
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const projectsLiveSubscribers = useRef(0);
+  const subscribeProjectsLiveUpdates = useCallback(() => {
+    projectsLiveSubscribers.current += 1;
+    return () => { projectsLiveSubscribers.current -= 1; };
+  }, []);
   const refreshRef = useRef<() => void>(() => {});
   const olderRef = useRef<() => void>(() => {});
 
@@ -80,6 +86,7 @@ function useRepoStreamState(): RepoStreamState {
     let projectsController: AbortController | null = null;
     let olderController: AbortController | null = null;
     let projectTimer: ReturnType<typeof setTimeout> | null = null;
+    let projectTimerLiveOnly = true;
     const bufferedEvents: AgentEvent[] = [];
     const pageSize = 100;
     const message = (reason: unknown) => reason instanceof Error ? reason.message : "情報を取得できませんでした";
@@ -118,9 +125,14 @@ function useRepoStreamState(): RepoStreamState {
           if (!disposed && !controller.signal.aborted) setProjectsLoading(false);
         });
     };
-    const scheduleProjects = () => {
+    const scheduleProjects = (liveOnly: boolean) => {
+      if (liveOnly && projectsLiveSubscribers.current === 0) return;
+      projectTimerLiveOnly = projectTimer === null ? liveOnly : projectTimerLiveOnly && liveOnly;
       if (projectTimer !== null) clearTimeout(projectTimer);
-      projectTimer = setTimeout(loadProjects, 120);
+      projectTimer = setTimeout(() => {
+        projectTimer = null;
+        if (!projectTimerLiveOnly || projectsLiveSubscribers.current > 0) loadProjects();
+      }, 120);
     };
     refreshRef.current = loadProjects;
     const loadEvents = () => {
@@ -184,7 +196,7 @@ function useRepoStreamState(): RepoStreamState {
     });
     es.addEventListener("repo", (event) => {
       const repo = JSON.parse((event as MessageEvent).data) as Repo;
-      if (!scanActive) scheduleProjects();
+      if (!scanActive) scheduleProjects(true);
       setRepos((previous) => {
         const next = new Map(previous);
         next.set(repo.path, { ...next.get(repo.path), ...repo });
@@ -194,7 +206,7 @@ function useRepoStreamState(): RepoStreamState {
     es.addEventListener("removed", (event) => {
       const path = (JSON.parse((event as MessageEvent).data) as { path: string })
         .path;
-      scheduleProjects();
+      scheduleProjects(true);
       setRepos((previous) => {
         const next = new Map(previous);
         next.delete(path);
@@ -204,7 +216,7 @@ function useRepoStreamState(): RepoStreamState {
     es.addEventListener("scan", (event) => {
       const active = (JSON.parse((event as MessageEvent).data) as { active: boolean }).active;
       setScanning(active);
-      if (scanActive && !active) scheduleProjects();
+      if (scanActive && !active) scheduleProjects(false);
       scanActive = active;
     });
     es.addEventListener("fetch", (event) => {
@@ -244,7 +256,7 @@ function useRepoStreamState(): RepoStreamState {
     };
   }, []);
 
-  return { repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsError, refreshProjects: () => refreshRef.current(), loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
+  return { subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsError, refreshProjects: () => refreshRef.current(), loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
 }
 
 const RepoStreamContext = createContext<RepoStreamState | null>(null);
@@ -258,4 +270,10 @@ export function useRepoStream(): RepoStreamState {
   const state = useContext(RepoStreamContext);
   if (state === null) throw new Error("RepoStreamProvider is required");
   return state;
+}
+
+/** Register while a screen displays live Git aggregates from project summaries. */
+export function useProjectsLiveUpdates(): void {
+  const { subscribeProjectsLiveUpdates } = useRepoStream();
+  useEffect(() => subscribeProjectsLiveUpdates(), [subscribeProjectsLiveUpdates]);
 }
