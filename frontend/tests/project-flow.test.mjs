@@ -20,6 +20,7 @@ test("URL state is restored and updated without dropping the project path", () =
   assert.deepEqual(parsed, {
     path: "/workspace/repo",
     tab: "activity",
+    flowSection: "relations",
     range: "7d",
     merged: false,
     event: "abc",
@@ -87,4 +88,21 @@ test("file investigations are directly addressable without changing project iden
   assert.equal(state.path, "/workspace/repo");
   assert.deepEqual(state.invalidParams, []);
   assert.equal(updateProjectUrl("/project?path=%2Fworkspace%2Frepo&tab=files", {tab: "info"}), "/project?path=%2Fworkspace%2Frepo&tab=info");
+});
+
+test("flow sections use URL defaults, preserve context, and reject unknown values", () => {
+  assert.equal(parseProjectUrl("").flowSection, "relations");
+  for (const flowSection of ["relations", "history", "notes"]) {
+    const href = updateProjectUrl("/project?path=%2Frepo&event=abc&lane=topic", { flowSection });
+    const state = parseProjectUrl(new URL(href, "http://localhost").search);
+    assert.equal(state.flowSection, flowSection);
+    assert.equal(state.event, "abc");
+    assert.equal(state.lane, "topic");
+    assert.deepEqual(state.invalidParams, []);
+  }
+  for (const value of ["unknown", ""]) {
+    const state = parseProjectUrl(`?flowSection=${value}`);
+    assert.equal(state.flowSection, value);
+    assert.deepEqual(state.invalidParams, ["flowSection"]);
+  }
 });
