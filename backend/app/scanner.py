@@ -66,10 +66,14 @@ def git_dir(repo: str) -> str | None:
     repo = os.path.abspath(repo)
     dot_git = os.path.join(repo, ".git")
     if os.path.isdir(dot_git):
-        return os.path.realpath(dot_git)
-    if os.path.isfile(dot_git):
-        return _gitdir_from_file(dot_git, repo)
-    return None
+        actual = os.path.realpath(dot_git)
+    elif os.path.isfile(dot_git):
+        actual = _gitdir_from_file(dot_git, repo)
+    else:
+        return None
+    if actual is None or not os.path.isfile(os.path.join(actual, "HEAD")):
+        return None
+    return actual
 
 
 def common_git_dir(repo: str, actual_git_dir: str | None = None) -> str | None:
@@ -200,8 +204,8 @@ def _walk(
     except (PermissionError, OSError):
         return
 
-    # .git があればここがリポジトリ。サブモジュールまでは追わない
-    if any(e.name == ".git" for e in entries):
+    # 有効な .git があればここがリポジトリ。サブモジュールまでは追わない
+    if any(e.name == ".git" for e in entries) and git_dir(directory) is not None:
         real = os.path.realpath(directory)
         if real not in seen:
             seen.add(real)

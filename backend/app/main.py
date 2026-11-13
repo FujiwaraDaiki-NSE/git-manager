@@ -942,7 +942,7 @@ def _load_cached_state() -> dict[str, dict[str, Any]]:
         if repo.get("worktree_state") not in {"ok", "prunable", "locked", None}:
             continue
         if not (
-            os.path.isdir(paths.to_container(host_path))
+            scanner.repo_layout(paths.to_container(host_path)) is not None
             or repo.get("worktree_state") in {"prunable", "locked"}
         ):
             continue
