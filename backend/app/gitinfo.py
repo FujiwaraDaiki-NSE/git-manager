@@ -13,7 +13,7 @@ import subprocess
 import time
 from typing import Any, Mapping
 
-from app import config, paths, scanner
+from app import config, paths, scanner, project_facts
 
 GIT = shutil.which("git") or "git"
 
@@ -28,6 +28,7 @@ NON_INTERACTIVE_ENV = {
 }
 
 
+@project_facts.cached
 def _run(repo: str, args: list[str], timeout: int | None = None) -> str | None:
     try:
         proc = subprocess.run(
@@ -41,6 +42,7 @@ def _run(repo: str, args: list[str], timeout: int | None = None) -> str | None:
     return proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else None
 
 
+@project_facts.cached
 def _run_with_status(
     repo: str,
     args: list[str],
@@ -270,6 +272,7 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
     return worktrees
 
 
+@project_facts.cached
 def list_worktrees(repo: str) -> list[dict[str, Any]] | None:
     """Return worktree metadata, or ``None`` when git cannot list it."""
     raw = _run(repo, ["worktree", "list", "--porcelain", "-z"])

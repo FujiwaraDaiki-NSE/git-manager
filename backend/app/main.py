@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from app import compare, file_history, stashes, tags, reflog, repository_files, blame, worktree_diff
 from app import content_search, ignore_inspector, file_attributes
 from app import conflict_inspector, commit_containment, tree_sizes
-from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, scanner, store
+from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, project_snapshots, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
 
@@ -256,9 +256,18 @@ def _get_project_sync(
     as_of: datetime | None = None,
 ) -> dict[str, Any] | None:
     """Build one project payload while sharing the repository Git lock."""
-    github_data = github.load(repo)
-    with _repo_lock(host_path):
-        return project.build(repo, project_id, state_rows, range_name=range_name, as_of=as_of, github_data=github_data)
+    github_future = fetch_pool.submit(github.load, repo)
+    return project_snapshots.get(repo, project_id, state_rows, _repo_lock(host_path), range_name, as_of, github_future.result)
+
+
+def _refresh_project_snapshot(row: dict[str, Any]) -> None:
+    project_id = row.get("common_dir")
+    if not isinstance(project_id, str):
+        return
+    with STATE_LOCK:
+        siblings = {path: dict(item) for path, item in STATE.items() if item.get("common_dir") == project_id or path == project_id}
+    representative = next((path for path, item in siblings.items() if item.get("is_worktree") is False), row["path"])
+    project_snapshots.refresh_existing(paths.to_container(representative), project_id, siblings, _repo_lock(representative))
 
 
 def _upsert(repo: dict[str, Any]) -> None:
@@ -267,6 +276,7 @@ def _upsert(repo: dict[str, Any]) -> None:
         merged = {**existing, **repo}
         STATE[repo["path"]] = merged
     bus.publish("repo", merged)
+    _refresh_project_snapshot(merged)
 
 
 def _upsert_threadsafe(repo: dict[str, Any]) -> None:
@@ -281,6 +291,7 @@ def _upsert_threadsafe(repo: dict[str, Any]) -> None:
         merged = {**existing, **repo}
         STATE[repo["path"]] = merged
     bus.publish_threadsafe("repo", merged)
+    _refresh_project_snapshot(merged)
 
 
 def _remove_threadsafe(host_path: str) -> None:
@@ -1204,16 +1215,12 @@ async def get_project(path: str, range: str = "current", as_of: datetime | None 
         )
     repo = paths.to_container(representative)
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        pool,
-        _get_project_sync,
-        representative,
-        repo,
-        project_id,
-        siblings,
-        range,
-        as_of,
-    )
+    try:
+        result = await loop.run_in_executor(
+            pool, _get_project_sync, representative, repo, project_id, siblings, range, as_of,
+        )
+    except (RuntimeError, OSError, sqlite3.Error) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
     if result is None:
         raise HTTPException(status_code=502, detail="プロジェクトの Git 情報を取得できませんでした")
     return result
@@ -1591,6 +1598,8 @@ async def refresh(req: RefreshRequest) -> dict[str, Any]:
     """可視領域の優先取得に使う。フロントの IntersectionObserver から呼ばれる。"""
     with STATE_LOCK:
         known = [p for p in req.paths if p in STATE]
+        project_ids = {STATE[p]["common_dir"] if isinstance(STATE[p].get("common_dir"), str) else p for p in known}
+    project_snapshots.retry_failed(project_ids)
     asyncio.create_task(_refresh_many(known, fetch=req.fetch))
     return {"queued": len(known)}
 
@@ -1599,6 +1608,9 @@ async def refresh(req: RefreshRequest) -> dict[str, Any]:
 async def rescan() -> dict[str, Any]:
     if scanning["active"]:
         return {"started": False, "reason": "既に走査中です"}
+    with STATE_LOCK:
+        project_ids = {row["common_dir"] if isinstance(row.get("common_dir"), str) else path for path, row in STATE.items()}
+    project_snapshots.retry_failed(project_ids)
     asyncio.create_task(_discover())
     return {"started": True}
 

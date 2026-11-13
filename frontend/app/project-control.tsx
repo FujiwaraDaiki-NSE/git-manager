@@ -904,8 +904,18 @@ function LegacyUnavailableModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function ProjectSnapshotFreshness({ snapshot }: { snapshot: ProjectResponse["snapshot"] }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  if (!snapshot) return null;
+  return <>{` · ${Math.max(0, Math.floor((now / 1000) - snapshot.observed_at))}秒前の観測`}{snapshot.status === "failed" && ` · 更新失敗：${snapshot.error}`}</>;
+}
+
 export default function ProjectControl() {
-  const { repos, scanning, connected, latestAgentEvent } = useRepoStream();
+  const { repos, scanning, connected, latestAgentEvent, projectUpdates } = useRepoStream();
   const { state: urlState, update: updateUrl } = useProjectUrl();
   const homeQuery = useSearchParams().get("home");
   const homeHref = homeReturnHref(homeQuery);
@@ -953,15 +963,21 @@ export default function ProjectControl() {
     setProjectUrlCopyState("idle");
   }, [urlState.at, urlState.branchRow, urlState.relationRef, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder]);
 
-  const projectSnapshotKey = useMemo(() => {
+
+  const projectUpdateToken = project ? projectUpdates.get(project.id) : undefined;
+  useEffect(() => {
+    if (connected) setReloadToken((value) => value + 1);
+  }, [connected]);
+
+  // STATE fields change independently from refs. Recompose without using
+  // checked_at, which changes even when an observation has no new facts.
+  const projectStateKey = useMemo(() => {
     if (!urlState.path) return "";
-    const selected = repos.get(urlState.path);
-    const common = selected?.common_dir;
-    return [...repos.values()]
+    const common = repos.get(urlState.path)?.common_dir;
+    return JSON.stringify([...repos.values()]
       .filter((repo) => repo.path === urlState.path || (common && repo.common_dir === common))
-      .map((repo) => `${repo.path}:${repo.checked_at ?? repo.activity ?? 0}:${repo.branch ?? ""}:${repo.worktree_state ?? ""}`)
-      .sort()
-      .join("|");
+      .map(({ checked_at: _checkedAt, ...repo }) => repo)
+      .sort((a, b) => a.path.localeCompare(b.path)));
   }, [repos, urlState.path]);
 
   useEffect(() => {
@@ -983,7 +999,7 @@ export default function ProjectControl() {
       .catch((reason: unknown) => { if (controller.signal.aborted) return; setProjectState("error"); setProjectError(reason instanceof TypeError ? "サーバーとの通信を確認してから再試行してください。" : reason instanceof Error ? reason.message : "情報の取得に失敗しました。"); });
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [invalidUrlKey, projectFetchRange, projectSnapshotKey, resourceKey, reloadToken, urlState.path]);
+  }, [invalidUrlKey, projectFetchRange, projectStateKey, projectUpdateToken, resourceKey, reloadToken, urlState.path]);
 
   useEffect(() => {
     if (!project || !latestAgentEvent) return;
@@ -1146,7 +1162,7 @@ export default function ProjectControl() {
     <main className="control-shell" id="main-content" tabIndex={-1}>
       <header className="control-topbar">
         <Link className="back-link" href={homeHref}>← プロジェクト一覧</Link>
-        <div className="control-status"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{projectState === "loading" && " · 情報を更新中"}</div>
+        <div className="control-status"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{(projectState === "loading" || project?.snapshot?.status === "refreshing") && " · 情報を更新中"}<ProjectSnapshotFreshness snapshot={project?.snapshot} /></div>
         <div className="control-topbar-tools"><ProjectSwitcher currentPath={urlState.path} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /></div>
       </header>
       {projectState === "error" && <div className="project-refresh-error" role="alert"><span>最新情報を取得できませんでした。前回取得した内容を表示しています。</span><button className="subtle-button" type="button" onClick={retryProject}>再試行</button></div>}

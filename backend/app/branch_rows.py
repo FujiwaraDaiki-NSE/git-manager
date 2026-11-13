@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
-from app import branch_history, branch_ref_relations, branch_relation_events, gitinfo
+from app import branch_history, branch_ref_relations, branch_relation_events, gitinfo, project_facts
 
 
 _FETCH_CONFIG_RE = re.compile(r"^remote\.(?P<remote>.+)\.fetch$")
@@ -752,8 +752,9 @@ def connections(
     A common ancestor proves shared history, not the name of a branch's
     creator. All pairwise ancestry facts are exposed separately from events.
     """
-    ref_relations = branch_ref_relations.build(repo, rows)
-    recorded = branch_relation_events.build(repo, rows)
+    git_rows = project_facts.relation_rows(rows)
+    ref_relations = project_facts.observe("project.ref_relations", [repo, git_rows], lambda: branch_ref_relations.build(repo, rows))
+    recorded = project_facts.observe("project.reflog_relations", [repo, git_rows], lambda: branch_relation_events.build(repo, rows))
     if rows is None:
         return {**ref_relations, **recorded, "status": "unavailable"}
     current_rows = _connection_rows(rows)

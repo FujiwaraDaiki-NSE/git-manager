@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any, Mapping
 
-from app import agent_events, branch_rows, detail, github, gitinfo, graph, paths, scanner
+from app import agent_events, branch_rows, detail, github, gitinfo, graph, paths, scanner, project_facts
 
 MAX_PROJECT_COMMITS = 200
 README_MAX_CHARS = 280
@@ -40,6 +40,7 @@ def _iso_epoch(value: Any) -> float | None:
     return parsed.astimezone(timezone.utc).timestamp()
 
 
+@project_facts.cached
 def _commit_metadata(repo: str, commit_hash: str | None) -> dict[str, Any] | None:
     if not commit_hash:
         return None
@@ -135,6 +136,7 @@ def _commit_stats_many(repo: str, commit_hashes: list[str]) -> dict[str, dict[st
     return result
 
 
+@project_facts.cached
 def _count_against_default(
     repo: str,
     default_ref: str | None,
@@ -157,6 +159,7 @@ def _count_against_default(
     return int(parts[1]), int(parts[0])
 
 
+@project_facts.cached
 def _merge_base(repo: str, default_ref: str | None, branch_ref: str) -> str | None:
     if not default_ref:
         return None
@@ -164,6 +167,7 @@ def _merge_base(repo: str, default_ref: str | None, branch_ref: str) -> str | No
     return raw.strip() if raw and raw.strip() else None
 
 
+@project_facts.cached
 def _ref_hash(repo: str, ref: str) -> str | None:
     """Resolve a local/ref name to its full Git object id when available."""
     raw = gitinfo._run(repo, ["rev-parse", "--verify", "--quiet", ref])
@@ -579,6 +583,7 @@ def _unique_source_branch(
     return matches[0] if len(matches) == 1 else None
 
 
+@project_facts.cached
 def _merge_relations(
     repo: str,
     graph_rows: list[Mapping[str, Any]],
@@ -859,7 +864,8 @@ def build(
         known_worktree_paths.add(_key(path))
 
     # A project can have no local branch refs but still expose an empty graph.
-    graph_data = graph.build(repo, all_refs=True, limit=None if range_name == "all" else limit)
+    graph_limit = None if range_name == "all" else limit
+    graph_data = project_facts.observe("project.graph", [repo, graph_limit], lambda: graph.build(repo, all_refs=True, limit=graph_limit))
     observed_at = time.time()
     merge_relations: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
@@ -930,10 +936,8 @@ def build(
             for row in graph_rows
             if isinstance(row.get("hash"), str) and in_range(row)
         }
-        stats_by_hash = _commit_stats_many(
-            repo,
-            [str(row.get("hash")) for row in graph_rows if row.get("hash") in visible_hashes],
-        )
+        stats_hashes = [str(row.get("hash")) for row in graph_rows if row.get("hash")]
+        stats_by_hash = project_facts.observe("project.stats", [repo, stats_hashes], lambda: _commit_stats_many(repo, stats_hashes))
         for row in graph_rows:
             # Graph rows are intentionally metadata-only; numstat is the
             # bounded summary needed by a hover card, while the existing
