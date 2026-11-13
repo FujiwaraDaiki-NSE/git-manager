@@ -65,7 +65,7 @@ def fingerprint(repo):
             values.append((str(path), None))
         else:
             values.append((str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size))
-    return hashlib.sha256(json.dumps([1, values]).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([2, values]).encode()).hexdigest()
 
 
 def _validate(result):

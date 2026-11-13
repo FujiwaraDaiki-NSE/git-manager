@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app import gitinfo
+from app import gitinfo, project_git_batch, project_facts
 
 PAGE_SIZE = 200
 FORMAT = "%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P"
@@ -21,6 +21,7 @@ def _parse(raw: str) -> list[dict[str, Any]] | None:
     return commits
 
 
+@project_facts.cached
 def read_tips(repo: str, heads: list[str]) -> list[dict[str, Any]] | None:
     """Read all requested tips independently of their distance in history.
 
@@ -28,6 +29,9 @@ def read_tips(repo: str, heads: list[str]) -> list[dict[str, Any]] | None:
     caller compares returned hashes with each row's expected heads.
     """
     unique_heads = list(dict.fromkeys(heads))
+    batch = project_git_batch.current(repo)
+    if batch is not None and batch.commits is not None and all(head in batch.commits for head in unique_heads):
+        return [dict(batch.commits[head]) for head in unique_heads]
     requested_heads = set(unique_heads)
     commits = []
     for offset in range(0, len(unique_heads), PAGE_SIZE):
@@ -44,6 +48,7 @@ def read_tips(repo: str, heads: list[str]) -> list[dict[str, Any]] | None:
     return commits
 
 
+@project_facts.cached
 def read_page(repo: str, heads: list[str], offset: int) -> dict[str, Any] | None:
     if not heads:
         return {"commits": [], "next_offset": None}

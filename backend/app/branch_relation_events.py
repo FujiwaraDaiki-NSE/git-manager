@@ -19,7 +19,7 @@ import os
 import re
 from typing import Any, Mapping
 
-from app import branch_history, gitinfo
+from app import branch_history, gitinfo, project_git_batch
 
 
 _COMMIT_HASH_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -105,6 +105,15 @@ def _operation_time(selector: str) -> str | None:
 
 
 def _read_reflog(repo: str, ref: str) -> tuple[list[dict[str, Any]] | None, str]:
+    batch = project_git_batch.current(repo)
+    if batch is None:
+        return _read_reflog_uncached(repo, ref)
+    if ref not in batch.reflogs:
+        batch.reflogs[ref] = _read_reflog_uncached(repo, ref)
+    return batch.reflogs[ref]
+
+
+def _read_reflog_uncached(repo: str, ref: str) -> tuple[list[dict[str, Any]] | None, str]:
     """Read one ref's reflog without invoking a shell.
 
     The status is ``ok`` for a successful (possibly empty) reflog, ``missing``
@@ -764,6 +773,9 @@ def _metadata_by_hash(repo: str, hashes: list[str]) -> dict[str, dict[str, Any]]
 def _current_ref_hash(repo: str, ref: str | None) -> str | None:
     if not ref:
         return None
+    batch = project_git_batch.current(repo)
+    if batch is not None and ref.startswith(("refs/heads/", "refs/remotes/")):
+        return batch.resolve(ref)
     raw = gitinfo._run(repo, ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
     value = raw.strip() if raw else ""
     return value if _is_hash(value) else None

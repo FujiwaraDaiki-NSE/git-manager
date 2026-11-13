@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any, Mapping
 
-from app import agent_events, branch_rows, detail, github, gitinfo, graph, paths, scanner, project_facts
+from app import agent_events, branch_rows, branch_relation_events, detail, github, gitinfo, graph, paths, scanner, project_facts, project_git_batch
 
 MAX_PROJECT_COMMITS = 200
 README_MAX_CHARS = 280
@@ -44,6 +44,9 @@ def _iso_epoch(value: Any) -> float | None:
 def _commit_metadata(repo: str, commit_hash: str | None) -> dict[str, Any] | None:
     if not commit_hash:
         return None
+    batch = project_git_batch.current(repo)
+    if batch is not None and batch.commits is not None and commit_hash in batch.commits:
+        return {key: batch.commits[commit_hash][key] for key in ("hash", "short", "subject", "author", "date")}
     raw = gitinfo._run(
         repo,
         ["show", "-s", "--format=%H%x1f%h%x1f%s%x1f%an%x1f%cI", commit_hash],
@@ -149,6 +152,9 @@ def _count_against_default(
     """
     if not default_ref:
         return None, None
+    batch = project_git_batch.current(repo)
+    if batch is not None:
+        return batch.counts(default_ref, branch_ref)
     raw = gitinfo._run(repo, ["rev-list", "--left-right", "--count", f"{default_ref}...{branch_ref}"])
     if not raw:
         return None, None
@@ -163,6 +169,11 @@ def _count_against_default(
 def _merge_base(repo: str, default_ref: str | None, branch_ref: str) -> str | None:
     if not default_ref:
         return None
+    batch = project_git_batch.current(repo)
+    if batch is not None:
+        bases = batch.bases(default_ref, branch_ref)
+        if len(bases) <= 1:
+            return bases[0] if bases else None
     raw = gitinfo._run(repo, ["merge-base", default_ref, branch_ref])
     return raw.strip() if raw and raw.strip() else None
 
@@ -170,6 +181,9 @@ def _merge_base(repo: str, default_ref: str | None, branch_ref: str) -> str | No
 @project_facts.cached
 def _ref_hash(repo: str, ref: str) -> str | None:
     """Resolve a local/ref name to its full Git object id when available."""
+    batch = project_git_batch.current(repo)
+    if batch is not None:
+        return batch.resolve(ref)
     raw = gitinfo._run(repo, ["rev-parse", "--verify", "--quiet", ref])
     value = raw.strip() if raw else ""
     return value or None
@@ -473,15 +487,17 @@ def _branch_reflog(
     """Return a current local branch's complete observable ref history."""
     if branch in cache:
         return cache[branch]
+    if project_git_batch.current(repo) is not None:
+        records, status = branch_relation_events._read_reflog(repo, f"refs/heads/{branch}")
+        if status == "failed":
+            raise RuntimeError("ブランチのreflogを取得できませんでした")
+        entries = [(item["after"], int(_iso_epoch(item["occurred_at"])), item["action"])
+                   for item in records or [] if _iso_epoch(item["occurred_at"]) is not None]
+        cache[branch] = entries
+        return entries
     raw = gitinfo._run(
         repo,
-        [
-            "reflog",
-            "show",
-            "--date=unix",
-            "--format=%H%x1f%gD%x1f%gs",
-            f"refs/heads/{branch}",
-        ],
+        ["reflog", "show", "--date=unix", "--format=%H%x1f%gD%x1f%gs", f"refs/heads/{branch}"],
     )
     entries: list[ReflogEntry] = []
     for line in raw.splitlines() if raw else []:
@@ -499,13 +515,19 @@ def _history_action(action: str) -> bool:
 
 def _tracks_remote_branch(repo: str, branch: str, commit_hash: str) -> bool:
     """Confirm that a fast-forwarded local branch tracks a ref containing the merge."""
-    upstream = gitinfo._run(
-        repo,
-        ["for-each-ref", "--format=%(upstream)", f"refs/heads/{branch}"],
-    )
+    batch = project_git_batch.current(repo)
+    if batch is not None:
+        record = batch.refs.get(f"refs/heads/{branch}") if batch.refs is not None else None
+        upstream = record["upstream"] if record is not None else None
+    else:
+        upstream = gitinfo._run(repo, ["for-each-ref", "--format=%(upstream)", f"refs/heads/{branch}"])
     upstream_ref = upstream.strip() if upstream else ""
     if not upstream_ref:
         return False
+    if batch is not None:
+        reachable = batch.ancestors(batch.resolve(upstream_ref))
+        if reachable is not None and batch.commits is not None and commit_hash in batch.commits:
+            return commit_hash in reachable
     return gitinfo._run(repo, ["merge-base", "--is-ancestor", commit_hash, upstream_ref]) is not None
 
 
@@ -703,6 +725,7 @@ def _event_from_row(
     }
 
 
+@project_git_batch.scoped
 def build(
     repo: str,
     project_id: str,
