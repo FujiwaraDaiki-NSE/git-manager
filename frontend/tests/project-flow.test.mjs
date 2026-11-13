@@ -8,6 +8,13 @@ import {
   updateProjectUrl,
 } from "../app/project-flow.mjs";
 
+test("project URLs default to 24h while preserving an explicit current range", () => {
+  assert.equal(parseProjectUrl("?path=%2Fworkspace%2Frepo").range, "24h");
+  assert.equal(parseProjectUrl("?tab=flow").range, "24h");
+  assert.equal(parseProjectUrl("?tab=flow&range=current").range, "current");
+  assert.equal(parseProjectUrl("?tab=lanes&range=current").range, "current");
+});
+
 test("URL state is restored and updated without dropping the project path", () => {
   const parsed = parseProjectUrl("?path=%2Fworkspace%2Frepo&tab=activity&range=7d&event=abc&lane=branch%3Afeature&at=35");
   assert.deepEqual(parsed, {
