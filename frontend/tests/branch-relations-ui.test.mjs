@@ -96,3 +96,34 @@ test("Markdown copy contains only the displayed pair rows", () => {
   assert.match(markdown, new RegExp("`" + "a".repeat(40) + "`"));
   assert.doesNotMatch(markdown, /origin\/main/);
 });
+
+test("relation lists limit filtered/sorted results without mutating or dropping later rows", async () => {
+  const { visibleRelationRows, RELATION_PAIRS_PAGE_SIZE, RELATION_EVENTS_PAGE_SIZE, RELATION_UNRESOLVED_PAGE_SIZE } = await import("../app/branch-relations-ui-tools.mjs");
+  const items = Array.from({ length: 45 }, (_, id) => ({ id }));
+  assert.equal(visibleRelationRows(items, RELATION_PAIRS_PAGE_SIZE).length, 20);
+  assert.equal(visibleRelationRows(items, RELATION_EVENTS_PAGE_SIZE).length, 10);
+  assert.equal(visibleRelationRows(items, RELATION_UNRESOLVED_PAGE_SIZE).length, 20);
+  assert.deepEqual(visibleRelationRows(items, 40), items.slice(0, 40));
+  assert.deepEqual(visibleRelationRows(items, 60), items);
+  assert.equal(items.length, 45);
+  assert.deepEqual(visibleRelationRows([], 20), []);
+  assert.throws(() => visibleRelationRows(items, undefined), /limit/);
+  assert.throws(() => visibleRelationRows(items, 0), /limit/);
+
+  const filtered = filterVisibleReferencePairs([
+    ...Array.from({ length: 25 }, () => pair(refs[1].id, "equal", 0, 0)),
+    pair(refs[2].id, "diverged", 4, 2),
+  ], refsById, { query: "topic", relation: "diverged", otherKind: "local" });
+  assert.equal(visibleRelationRows(sortVisibleReferencePairs(filtered, refsById, "name"), 20)[0].otherRefId, refs[2].id);
+});
+
+test("URL reference beyond the first page still selects its own comparisons before limiting", async () => {
+  const { preferredReferenceId, selectReferencePairs } = await import("../app/branch-relations-tools.mjs");
+  const { visibleRelationRows } = await import("../app/branch-relations-ui-tools.mjs");
+  const manyRefs = Array.from({ length: 45 }, (_, id) => ({ id: `refs/heads/topic-${id}`, name: `topic-${id}`, kind: "local" }));
+  const selected = preferredReferenceId(manyRefs, null, null, manyRefs[40].id);
+  const pairs = manyRefs.slice(0, 40).map((ref) => ({ left_ref_id: ref.id, right_ref_id: selected, relation: "equal", left_only: 0, right_only: 0, merge_bases: [] }));
+  assert.equal(selected, manyRefs[40].id);
+  assert.equal(selectReferencePairs(pairs, selected).length, 40);
+  assert.equal(visibleRelationRows(selectReferencePairs(pairs, selected), 20).length, 20);
+});
