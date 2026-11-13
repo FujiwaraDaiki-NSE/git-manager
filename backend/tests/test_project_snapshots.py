@@ -85,7 +85,7 @@ def test_partial_connections_are_persisted_and_returned(snapshot_repo, monkeypat
 
 
 @pytest.mark.parametrize("status_key", ["ancestry_status", "reflog_status"])
-def test_unavailable_connections_are_not_persisted(snapshot_repo, monkeypatch, status_key):
+def test_unavailable_connections_are_persisted_explicitly(snapshot_repo, monkeypatch, status_key):
     repo, state = snapshot_repo
     original = project.build
     def unavailable(*args, **kwargs):
@@ -93,9 +93,9 @@ def test_unavailable_connections_are_not_persisted(snapshot_repo, monkeypatch, s
         result["branch_connections"][status_key] = "unavailable"
         return result
     monkeypatch.setattr(project, "build", unavailable)
-    with pytest.raises(RuntimeError, match="ブランチ関係のGit情報を完全に取得できませんでした"):
-        read(repo, state)
-    assert project_snapshots.load(str(repo)) is None
+    actual = read(repo, state)
+    assert actual["branch_connections"][status_key] == "unavailable"
+    assert project_snapshots.load(str(repo)) is not None
 
 
 def test_stale_is_returned_without_waiting_and_failure_is_explicit(snapshot_repo, monkeypatch):
@@ -179,3 +179,27 @@ def test_linked_refresh_uses_the_same_representative_as_project_api(snapshot_rep
     main._refresh_project_snapshot(state[str(linked)])
     assert calls[0][0] == str(repo)
     assert calls[0][1] == str(repo)
+
+
+def test_all_is_computed_lazily_and_missing_stats_are_saved(snapshot_repo, monkeypatch):
+    from app import graph
+    repo, state = snapshot_repo
+    original = graph.build
+    limits = []
+    def build(*args, **kwargs):
+        limits.append(kwargs["limit"])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(graph, "build", build)
+    monkeypatch.setattr(project, "_commit_stats_many", lambda repo, hashes: {value: None for value in hashes})
+    for period in ("current", "24h", "7d"):
+        read(repo, state, period)
+    assert limits == [200]
+    actual = read(repo, state, "all")
+    assert limits == [200, None]
+    assert actual["graph"]["rows"]
+    assert all(row["stats"] is None for row in actual["graph"]["rows"])
+    saved = project_snapshots.load(str(repo))
+    again = read(repo, state, "all")
+    assert limits == [200, None]
+    assert without_times(again) == without_times(actual)
+    assert project_snapshots.load(str(repo)) == saved

@@ -71,32 +71,17 @@ def fingerprint(repo):
 def _validate(result):
     if result is None or result["graph"] is None or result["branch_rows"] is None:
         raise RuntimeError("プロジェクトのGit情報を取得できませんでした")
-    if result["default_branch"] and result["default_hash"] is None:
-        raise RuntimeError("デフォルトブランチの参照を取得できませんでした")
-    for row in result["branch_rows"]:
-        if row["history_heads"] and (not row["history_available"] or not row["commit_metadata_available"] or not row["tip_metadata_available"]):
-            raise RuntimeError("ブランチの履歴を完全に取得できませんでした")
-    for lane in result["lanes"]:
-        if lane["head"] and lane["last_commit"] is None:
-            raise RuntimeError("ブランチ先頭のコミットを取得できませんでした")
-        if result["default_hash"] and lane["head"] and (lane["default_ahead"] is None or lane["default_behind"] is None):
-            raise RuntimeError("デフォルトブランチとの差分を取得できませんでした")
-    connections = result["branch_connections"]
-    if (result["branch_rows"] and connections["ancestry_status"] == "unavailable") or (result["branch_rows"] and connections["reflog_status"] not in {"available", "partial"}):
-        raise RuntimeError("ブランチ関係のGit情報を完全に取得できませんでした")
-    if result["range"] == "all" and any(row.get("stats") is None for row in result["graph"]["rows"]):
-        raise RuntimeError("コミットの集計を取得できませんでした")
 
 
-def _build(repo, project_id, state_rows, repo_lock):
-    # Both graph variants share the same fact map. Periods are never persisted.
+def _build(repo, project_id, state_rows, repo_lock, range_name="7d", saved=None):
+    # Extend unchanged observations only when the all graph is requested.
     for _ in range(3):
         with repo_lock:
             before = fingerprint(repo)
-            facts = {}
+            facts = deepcopy(saved["facts"]) if saved is not None and saved["fingerprint"] == before else {}
             with project_facts.using(facts):
-                for range_name in ("all", "7d"):
-                    result = project.build(repo, project_id, state_rows, range_name=range_name, github_data=github.unavailable("PR情報は未取得です"))
+                for build_range in (("7d", "all") if range_name == "all" else ("7d",)):
+                    result = project.build(repo, project_id, state_rows, range_name=build_range, github_data=github.unavailable("PR情報は未取得です"))
                     _validate(result)
             after = fingerprint(repo)
         if before == after:
@@ -158,12 +143,12 @@ def refresh_existing(repo, project_id, state_rows, repo_lock):
 
 def get(repo, project_id, state_rows, repo_lock, range_name, as_of, load_github):
     saved = load(project_id)
-    graph_key = json.dumps(["project.graph", [repo, None]], sort_keys=True, ensure_ascii=False)
+    graph_key = json.dumps(["project.graph", [repo, None if range_name == "all" else project.MAX_PROJECT_COMMITS]], sort_keys=True, ensure_ascii=False)
     if saved is None or graph_key not in saved["facts"]:
         with _lock(project_id):
             saved = load(project_id)
             if saved is None or graph_key not in saved["facts"]:
-                saved = _build(repo, project_id, state_rows, repo_lock)
+                saved = _build(repo, project_id, state_rows, repo_lock, range_name, saved)
     current = fingerprint(repo)
     stale = current != saved["fingerprint"]
     failed = stale and saved["failed_fingerprint"] == current
