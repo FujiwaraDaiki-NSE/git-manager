@@ -118,7 +118,7 @@ function ProjectCard({
   onInteractStart: () => void;
 }) {
   const target = project.main_path;
-  const href = target === null ? null : `/project?path=${encodeURIComponent(target)}&tab=flow&range=current${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`;
+  const href = target === null ? null : `/project?path=${encodeURIComponent(target)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`;
   const workHref = (filter: GitFilter, query: string | null = null) => {
     if (target === null) return null;
     const params = new URLSearchParams({ path: target, tab: "lanes", range: "current" });

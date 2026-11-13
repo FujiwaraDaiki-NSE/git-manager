@@ -8,7 +8,7 @@ const TIME_RANGES = new Set(["current", "24h", "7d", "all"]);
 export function parseProjectUrl(search) {
   const params = new URLSearchParams(search || "");
   const defaults = {
-    tab: "flow", range: "current", laneFilter: "all", laneOrder: "name",
+    tab: "flow", range: "7d", laneFilter: "all", laneOrder: "name",
     activityFilter: "all", activityOrder: "newest",
   };
   const choices = {
