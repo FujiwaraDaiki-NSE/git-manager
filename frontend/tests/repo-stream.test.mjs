@@ -6,7 +6,7 @@ import ts from "typescript";
 import * as overview from "../app/agent-overview.mjs";
 import * as timeline from "../app/agent-timeline-tools.mjs";
 
-test("stream fetches once initially, replays append cursors, pages history and aborts replacements", async () => {
+function createStream() {
   const requests = [];
   const effects = [];
   const timers = [];
@@ -14,6 +14,7 @@ test("stream fetches once initially, replays append cursors, pages history and a
   let current;
   const context = { value: null };
   const react = {
+    useCallback: (callback) => callback,
     createContext: () => context,
     createElement: (_provider, props) => { current = props.value; },
     useContext: () => context.value,
@@ -42,6 +43,11 @@ test("stream fetches once initially, replays append cursors, pages history and a
   });
   exports.RepoStreamProvider({ children: null });
   const cleanup = effects[0]();
+  return { requests, timers, stream, current, cleanup };
+}
+
+test("stream fetches once initially, replays append cursors, pages history and aborts replacements", async () => {
+  const { requests, timers, stream, current, cleanup } = createStream();
   stream.onopen();
   stream.emit("scan", { active: false });
   assert.deepEqual(requests.map((request) => request.url), ["/api/projects", "/api/agent-events?limit=100"]);
@@ -61,4 +67,36 @@ test("stream fetches once initially, replays append cursors, pages history and a
   assert.equal(requests.filter((request) => request.url.includes("agent-events")).length, 3);
   cleanup();
   assert.equal(requests.at(-1).signal.aborted, true);
+});
+
+test("Git changes refresh projects only while live subscribers are registered", () => {
+  const { requests, timers, stream, current, cleanup } = createStream();
+  const flushTimers = () => { while (timers.length > 0) timers.shift()(); };
+  const emitChanges = () => {
+    stream.emit("repo", { path: "/repo" });
+    stream.emit("removed", { path: "/repo" });
+  };
+  emitChanges();
+  assert.equal(timers.length, 0);
+  assert.equal(requests.length, 1);
+
+  const unsubscribe = current.subscribeProjectsLiveUpdates();
+  const unsubscribeSecond = current.subscribeProjectsLiveUpdates();
+  emitChanges();
+  assert.equal(timers.length, 1);
+  flushTimers();
+  assert.equal(requests.length, 2);
+
+  unsubscribe();
+  stream.emit("repo", { path: "/repo" });
+  flushTimers();
+  assert.equal(requests.length, 3);
+
+  stream.emit("repo", { path: "/repo" });
+  unsubscribeSecond();
+  flushTimers();
+  emitChanges();
+  flushTimers();
+  assert.equal(requests.length, 3);
+  cleanup();
 });
