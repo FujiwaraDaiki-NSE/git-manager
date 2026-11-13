@@ -354,7 +354,7 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
     )
 
 
-def events(*, project_id: str | None = None, worktree: str | None = None, as_of: datetime | None = None) -> list[dict[str, Any]]:
+def events(*, project_id: str | None = None, worktree: str | None = None, as_of: datetime | None = None, after_sequence: int | None = None, before_sequence: int | None = None, limit: int | None = None) -> list[dict[str, Any]]:
     initialize()
     query = "SELECT * FROM agent_events"
     values: list[Any] = []
@@ -365,18 +365,30 @@ def events(*, project_id: str | None = None, worktree: str | None = None, as_of:
     if worktree is not None:
         clauses.append("worktree = ?")
         values.append(worktree)
+    for operator, value in ((">", after_sequence), ("<", before_sequence)):
+        if value is not None:
+            clauses.append(f"sequence {operator} ?")
+            values.append(value)
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
     if as_of is not None:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("as_of must include a timezone")
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
-    query += " ORDER BY sequence"
+    query += " ORDER BY sequence" + (" DESC" if limit is not None else "")
+    if limit is not None and as_of is None:
+        query += " LIMIT ?"
+        values.append(limit)
     with _lock, sqlite3.connect(db_path()) as db:
         db.row_factory = sqlite3.Row
         result = [_row(row) for row in db.execute(query, values).fetchall()]
     if as_of is not None:
         cutoff = as_of.astimezone(timezone.utc).timestamp()
         result = [row for row in result if _epoch(row["occurred_at"]) <= cutoff]
+    if limit is not None:
+        result = result[:limit]
+        result.reverse()
     return result
 
 
