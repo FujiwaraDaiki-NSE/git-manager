@@ -22,6 +22,7 @@ const counts = (overrides = {}) => ({
   active: 0,
   review_required: 0,
   merge_ready: 0,
+  completed: 0,
   ...overrides,
 });
 
@@ -40,7 +41,7 @@ const project = (id, overrides = {}) => ({
   ...overrides,
 });
 
-test("agent summary totals remain unknown when the authoritative count is unknown", () => {
+test("agent summary totals sum published counts without converting unknown counts to zero", () => {
   const known = project("known", { agent_priority_counts: counts({ active: 2 }) });
   const unknown = project("unknown", { agent_priority_counts: { ...counts(), active: null } });
   assert.equal(agentCount(known, "active"), 2);
@@ -48,12 +49,12 @@ test("agent summary totals remain unknown when the authoritative count is unknow
   assert.deepEqual(aggregateAgentCounts([known, unknown]), {
     waiting_for_user: 0,
     blocked: 0,
-    active: null,
+    active: 2,
     review_required: 0,
     merge_ready: 0,
   });
   assert.equal(hasUnknownAgentCounts(unknown), true);
-  assert.equal(countProjectsWithUnknownAgentCounts([known, unknown]), 2);
+  assert.equal(countProjectsWithUnknownAgentCounts([known, unknown]), 1);
 });
 
 test("agent and Git filters use the published counts", () => {
@@ -133,4 +134,12 @@ test("returning to the list restores only local filter parameters", async () => 
   assert.equal(homeReturnHref("q=git&sort=name&density=compact"), "/?q=git&sort=name&density=compact");
   assert.equal(homeReturnHref("https://external.example/path"), "/");
   assert.equal(homeReturnHref("git=invalid"), "/?git=invalid");
+});
+
+test("entirely unknown totals stay unknown while published zero and empty totals are zero", () => {
+  const unknown = project("unknown", { agent_priority_counts: null });
+  assert.equal(aggregateAgentCounts([unknown]).active, null);
+  assert.equal(aggregateAgentCounts([unknown, project("zero")]).active, 0);
+  assert.equal(aggregateAgentCounts([]).active, 0);
+  assert.equal(matchesAgentFilter(unknown, "active"), false);
 });
