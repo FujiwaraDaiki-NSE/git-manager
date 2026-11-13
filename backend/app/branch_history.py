@@ -11,7 +11,9 @@ FORMAT = "%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P"
 
 def _parse(raw: str) -> list[dict[str, Any]] | None:
     commits = []
-    for line in raw.splitlines():
+    for line in raw.split("\n"):
+        if not line:
+            continue
         fields = line.split("\x1f")
         if len(fields) != 6:
             return None

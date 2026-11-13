@@ -1,4 +1,4 @@
-"""One ref register and commit walk shared by a project build.
+"""One ref register and bounded history pages shared by a project build.
 
 Git still selects a merge base when criss-cross history has multiple best
 bases; the unique-base case and exact reachability counts use the shared walk.
@@ -31,10 +31,19 @@ def _read(repo):
             refs[fields[0]] = {"hash": fields[1], "upstream": fields[2]}
     worktrees = gitinfo.list_worktrees(repo)
     heads = list(dict.fromkeys(item["head"] for item in worktrees or [] if item.get("head") and set(item["head"]) != {"0"}))
-    raw = gitinfo._run(repo, ["log", "--all", f"--format={branch_history.FORMAT}", *heads, "--"])
-    commits = branch_history._parse(raw) if raw is not None else None
-    if refs is None or commits is None or worktrees is None:
-        raise RuntimeError("Git参照・履歴の一括取得に失敗しました")
+    # Read only the first branch-history page and its pagination sentinel.
+    commits = [] if refs is not None and worktrees is not None else None
+    tips = list(dict.fromkeys([item["hash"] for item in (refs or {}).values()] + heads))
+    by_hash = {}
+    for head in tips:
+        raw = gitinfo._run(repo, ["log", "--date-order", f"--max-count={branch_history.PAGE_SIZE + 1}", f"--format={branch_history.FORMAT}", head, "--"])
+        page = branch_history._parse(raw) if raw is not None else None
+        if page is None:
+            commits = None
+            break
+        by_hash.update((item["hash"], item) for item in page)
+    if commits is not None:
+        commits = list(by_hash.values())
     return {"refs": refs, "commits": commits}
 
 
@@ -59,6 +68,8 @@ class Batch:
         if self.commits is None or head not in self.commits:
             return None
         if head not in self.reachable:
+            # A bounded page cannot establish ancestry beyond its boundary.
+            self.reachable[head] = None
             pending = [head]
             seen = set()
             while pending:
@@ -67,8 +78,9 @@ class Batch:
                     continue
                 seen.add(item)
                 commit = self.commits.get(item)
-                if commit is not None:
-                    pending.extend(commit["parents"])
+                if commit is None:
+                    return None
+                pending.extend(commit["parents"])
             self.reachable[head] = seen
         return self.reachable[head]
 
@@ -80,21 +92,25 @@ class Batch:
         upstream = self.ancestors(self.resolve(branch["upstream"]))
         local = self.ancestors(self.resolve(branch_ref))
         if upstream is None or local is None:
-            return None
+            raw = gitinfo._run(self.repo, ["rev-list", f"{branch['upstream']}..{branch_ref}", "--"])
+            return sorted(raw.splitlines()) if raw is not None else None
         return sorted(local - upstream)
 
     def counts(self, default_ref, branch_ref):
         left = self.ancestors(self.resolve(default_ref))
         right = self.ancestors(self.resolve(branch_ref))
         if left is None or right is None:
-            return None, None
+            raw = gitinfo._run(self.repo, ["rev-list", "--left-right", "--count", f"{default_ref}...{branch_ref}"])
+            parts = raw.split() if raw is not None else []
+            return (int(parts[1]), int(parts[0])) if len(parts) == 2 and all(part.isdecimal() for part in parts) else (None, None)
         return len(right - left), len(left - right)
 
     def bases(self, default_ref, branch_ref):
         left = self.ancestors(self.resolve(default_ref))
         right = self.ancestors(self.resolve(branch_ref))
         if left is None or right is None:
-            return []
+            raw = gitinfo._run(self.repo, ["merge-base", default_ref, branch_ref])
+            return raw.splitlines() if raw is not None else []
         common = left & right
         # Every common ancestor except a best base is parent of another
         # common ancestor (possibly through a chain of common ancestors).
