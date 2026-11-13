@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, createElement, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { mergeAgentSnapshot } from "./agent-overview.mjs";
 import { applyBufferedAgentEvents, mergeAgentEvents } from "./agent-timeline-tools.mjs";
 import type { AgentEvent, AgentEventEnvelope, ProjectSummary, Repo } from "./types";
@@ -16,6 +16,14 @@ export type RepoStreamState = {
   projectUpdates: Map<string, number>;
   agentDataLoading: boolean;
   agentDataError: string | null;
+  projectsLoading: boolean;
+  projectsError: string | null;
+  refreshProjects: () => void;
+  subscribeProjectsLiveUpdates: () => () => void;
+  loadOlderEvents: () => void;
+  historyHasMore: boolean;
+  historyLoading: boolean;
+  historyError: string | null;
 };
 
 type AgentEventsResponse = { events: AgentEvent[] };
@@ -54,64 +62,134 @@ function useRepoStreamState(): RepoStreamState {
   const [agentDataLoading, setAgentDataLoading] = useState(true);
   const [agentDataError, setAgentDataError] = useState<string | null>(null);
 
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const projectsLiveSubscribers = useRef(0);
+  const subscribeProjectsLiveUpdates = useCallback(() => {
+    projectsLiveSubscribers.current += 1;
+    return () => { projectsLiveSubscribers.current -= 1; };
+  }, []);
+  const refreshRef = useRef<() => void>(() => {});
+  const olderRef = useRef<() => void>(() => {});
+
   useEffect(() => {
     let disposed = false;
-    let requestSerial = 0;
-    const controllers = new Set<AbortController>();
+    let opened = false;
+    let scanActive = false;
+    let cursor: number | null = null;
+    let oldest: number | null = null;
+    let initialized = false;
+    let historyPending = false;
+    let replayPending = false;
+    let eventsController: AbortController | null = null;
+    let projectsController: AbortController | null = null;
+    let olderController: AbortController | null = null;
+    let projectTimer: ReturnType<typeof setTimeout> | null = null;
+    let projectTimerLiveOnly = true;
     const bufferedEvents: AgentEvent[] = [];
-
-    const loadAgentData = () => {
-      const requestId = ++requestSerial;
+    const pageSize = 100;
+    const message = (reason: unknown) => reason instanceof Error ? reason.message : "情報を取得できませんでした";
+    const remember = (events: AgentEvent[]) => {
+      const merged = mergeAgentEvents(bufferedEvents, events);
+      bufferedEvents.splice(0, bufferedEvents.length, ...merged);
+      setAgentEvents((previous) => mergeAgentEvents(previous, events));
+      setProjectSummaries((previous) => applyBufferedAgentEvents(previous, events));
+    };
+    const readEvents = async (url: string, controller: AbortController) => {
+      const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const value = await response.json() as AgentEventsResponse;
+      if (!Array.isArray(value.events) || !value.events.every((event) =>
+        event && typeof event.event_id === "string" && Number.isSafeInteger(event.sequence))) {
+        throw new Error("agentイベントの形式が不正です");
+      }
+      return value.events;
+    };
+    const loadProjects = () => {
+      projectsController?.abort();
       const controller = new AbortController();
-      controllers.add(controller);
-      setAgentDataLoading(true);
-      const eventsRequest = fetch("/api/agent-events", { cache: "no-store", signal: controller.signal })
+      projectsController = controller;
+      setProjectsLoading(true);
+      void fetch("/api/projects", { cache: "no-store", signal: controller.signal })
         .then(async (response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const value = await response.json() as Partial<AgentEventsResponse>;
-          if (!Array.isArray(value.events)) throw new Error("agentイベントの形式が不正です");
-          if (!value.events.every((event) => event && typeof event.event_id === "string" && event.event_id.length > 0)) {
-            throw new Error("agentイベントの識別子が不正です");
-          }
-          return value as AgentEventsResponse;
-        });
-      const projectsRequest = fetch("/api/projects", { cache: "no-store", signal: controller.signal })
-        .then(async (response) => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const value = await response.json() as Partial<ProjectsResponse>;
+          const value = await response.json() as ProjectsResponse;
           if (!Array.isArray(value.projects)) throw new Error("プロジェクト情報の形式が不正です");
-          return value as ProjectsResponse;
+          if (disposed || controller.signal.aborted) return;
+          setProjectSummaries(applyBufferedAgentEvents(value.projects, bufferedEvents));
+          setProjectsError(null);
+        }).catch((reason: unknown) => {
+          if (!disposed && !controller.signal.aborted) setProjectsError(message(reason));
+        }).finally(() => {
+          if (!disposed && !controller.signal.aborted) setProjectsLoading(false);
         });
-      void Promise.allSettled([eventsRequest, projectsRequest]).then((results) => {
-        controllers.delete(controller);
-        if (disposed || requestId !== requestSerial) return;
-        const eventsResult = results[0];
-        const projectsResult = results[1];
-        const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-        if (eventsResult.status === "fulfilled") {
-          const events = eventsResult.value.events;
-          const merged = mergeAgentEvents([...bufferedEvents], events);
-          bufferedEvents.splice(0, bufferedEvents.length, ...merged);
-          setAgentEvents((previous) => mergeAgentEvents(previous, merged));
-          setProjectSummaries((previous) => applyBufferedAgentEvents(previous, merged));
+    };
+    const scheduleProjects = (liveOnly: boolean) => {
+      if (liveOnly && projectsLiveSubscribers.current === 0) return;
+      projectTimerLiveOnly = projectTimer === null ? liveOnly : projectTimerLiveOnly && liveOnly;
+      if (projectTimer !== null) clearTimeout(projectTimer);
+      projectTimer = setTimeout(() => {
+        projectTimer = null;
+        if (!projectTimerLiveOnly || projectsLiveSubscribers.current > 0) loadProjects();
+      }, 120);
+    };
+    refreshRef.current = loadProjects;
+    const loadEvents = () => {
+      eventsController?.abort();
+      const controller = new AbortController();
+      eventsController = controller;
+      setAgentDataLoading(true);
+      replayPending = true;
+      const initial = !initialized;
+      const url = initial ? `/api/agent-events?limit=${pageSize}` : `/api/agent-events?after_sequence=${cursor}`;
+      void readEvents(url, controller).then((events) => {
+        if (disposed || controller.signal.aborted) return;
+        remember(events);
+        // Advance only after a complete replay: live events must not skip an offline gap.
+        cursor = Math.max(cursor === null ? 0 : cursor, ...bufferedEvents.map((event) => event.sequence as number));
+        replayPending = false;
+        if (initial) {
+          oldest = events.length > 0 ? Math.min(...events.map((event) => event.sequence as number)) : null;
+          setHistoryHasMore(events.length === pageSize);
+          initialized = true;
         }
-        if (projectsResult.status === "fulfilled") {
-          setProjectSummaries(applyBufferedAgentEvents(projectsResult.value.projects, bufferedEvents));
-        }
-        setAgentDataError(failures.length > 0
-          ? failures.map((failure) => failure.reason instanceof Error ? failure.reason.message : "agent情報を取得できませんでした").join(" / ")
-          : null);
-        setAgentDataLoading(false);
+        setAgentDataError(null);
+      }).catch((reason: unknown) => {
+        if (!disposed && !controller.signal.aborted) setAgentDataError(message(reason));
+      }).finally(() => {
+        if (!disposed && !controller.signal.aborted) setAgentDataLoading(false);
       });
     };
-
-    loadAgentData();
+    olderRef.current = () => {
+      if (!initialized || oldest === null || historyPending) return;
+      historyPending = true;
+      const controller = new AbortController();
+      olderController = controller;
+      setHistoryLoading(true);
+      setHistoryError(null);
+      void readEvents(`/api/agent-events?before_sequence=${oldest}&limit=${pageSize}`, controller).then((events) => {
+        if (disposed || controller.signal.aborted) return;
+        setAgentEvents((previous) => mergeAgentEvents(previous, events));
+        if (events.length > 0) oldest = Math.min(...events.map((event) => event.sequence as number));
+        setHistoryHasMore(events.length === pageSize);
+      }).catch((reason: unknown) => {
+        if (!disposed && !controller.signal.aborted) setHistoryError(message(reason));
+      }).finally(() => {
+        historyPending = false;
+        if (!disposed && !controller.signal.aborted) setHistoryLoading(false);
+      });
+    };
+    loadProjects();
     const es = new EventSource("/api/stream");
     es.onopen = () => {
       setConnected(true);
-      // The stream starts with Git state only. On every reconnect, replay the
-      // persisted agent history so events missed while offline are restored.
-      loadAgentData();
+      // Initial replay starts on open so there is no gap before SSE subscribes.
+      loadEvents();
+      if (opened) loadProjects();
+      opened = true;
     };
     es.onerror = () => setConnected(false);
     es.addEventListener("snapshot", (event) => {
@@ -120,6 +198,7 @@ function useRepoStreamState(): RepoStreamState {
     });
     es.addEventListener("repo", (event) => {
       const repo = JSON.parse((event as MessageEvent).data) as Repo;
+      if (!scanActive) scheduleProjects(true);
       setRepos((previous) => {
         const next = new Map(previous);
         next.set(repo.path, { ...next.get(repo.path), ...repo });
@@ -138,6 +217,7 @@ function useRepoStreamState(): RepoStreamState {
     es.addEventListener("removed", (event) => {
       const path = (JSON.parse((event as MessageEvent).data) as { path: string })
         .path;
+      scheduleProjects(true);
       setRepos((previous) => {
         const next = new Map(previous);
         next.delete(path);
@@ -147,7 +227,8 @@ function useRepoStreamState(): RepoStreamState {
     es.addEventListener("scan", (event) => {
       const active = (JSON.parse((event as MessageEvent).data) as { active: boolean }).active;
       setScanning(active);
-      if (!active) loadAgentData();
+      if (scanActive && !active) scheduleProjects(false);
+      scanActive = active;
     });
     es.addEventListener("fetch", (event) => {
       setFetching(
@@ -162,6 +243,9 @@ function useRepoStreamState(): RepoStreamState {
         return;
       }
       if (!value) return;
+      if (initialized && !replayPending && Number.isSafeInteger(value.sequence)) {
+        cursor = Math.max(cursor as number, value.sequence as number);
+      }
       bufferedEvents.push(value);
       const merged = mergeAgentEvents([], bufferedEvents);
       bufferedEvents.splice(0, bufferedEvents.length, ...merged);
@@ -176,11 +260,14 @@ function useRepoStreamState(): RepoStreamState {
     return () => {
       disposed = true;
       es.close();
-      for (const controller of controllers) controller.abort();
+      eventsController?.abort();
+      projectsController?.abort();
+      olderController?.abort();
+      if (projectTimer !== null) clearTimeout(projectTimer);
     };
   }, []);
 
-  return { repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, projectUpdates, agentDataLoading, agentDataError };
+  return { subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsError, refreshProjects: () => refreshRef.current(), loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
 }
 
 const RepoStreamContext = createContext<RepoStreamState | null>(null);
@@ -194,4 +281,10 @@ export function useRepoStream(): RepoStreamState {
   const state = useContext(RepoStreamContext);
   if (state === null) throw new Error("RepoStreamProvider is required");
   return state;
+}
+
+/** Register while a screen displays live Git aggregates from project summaries. */
+export function useProjectsLiveUpdates(): void {
+  const { subscribeProjectsLiveUpdates } = useRepoStream();
+  useEffect(() => subscribeProjectsLiveUpdates(), [subscribeProjectsLiveUpdates]);
 }

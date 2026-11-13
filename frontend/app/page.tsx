@@ -21,8 +21,8 @@ import {
   sortHomeProjects,
   unknownAgentSummaryKeys,
 } from "./home-overview.mjs";
-import { agentReportKey, agentStateLabel, agentTaskState, deferProjectOrder, mergeAgentSnapshot, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
-import { useRepoStream } from "./repo-stream";
+import { agentReportKey, agentStateLabel, agentTaskState, deferProjectOrder, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
+import { useProjectsLiveUpdates, useRepoStream } from "./repo-stream";
 import type { AgentRunState, ProjectSummary } from "./types";
 
 type AgentSummaryKey = "waiting_for_user" | "blocked" | "active" | "review_required" | "merge_ready";
@@ -219,19 +219,16 @@ function SkeletonGrid() {
 }
 
 export default function Page() {
-  const { repos, scanning, fetching, connected, latestAgentEvent } = useRepoStream();
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  useProjectsLiveUpdates();
+  const { scanning, fetching, connected, projectSummaries: projects, projectsLoading: loading, projectsError: error, refreshProjects } = useRepoStream();
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
   const [deferredOrder, setDeferredOrder] = useState<string[] | null>(null);
   const [interactionId, setInteractionId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<HomeView>(defaultView);
   const [invalidUrlParams, setInvalidUrlParams] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favoritesReady, setFavoritesReady] = useState(false);
   const [favoritesStorageIssue, setFavoritesStorageIssue] = useState(false);
-  const [reloadToken, setReloadToken] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -243,7 +240,6 @@ export default function Page() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-  const snapshotKey = useMemo(() => [...repos.values()].map((repo) => `${repo.path}:${repo.checked_at ?? repo.activity ?? 0}`).sort().join("|"), [repos]);
 
   useEffect(() => {
     const syncFromUrl = () => {
@@ -256,28 +252,6 @@ export default function Page() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      void fetch("/api/projects", { cache: "no-store", signal: controller.signal }).then(async (response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return (await response.json()) as { projects: ProjectSummary[] }; }).then((value) => {
-        if (controller.signal.aborted) return;
-        setProjects(value.projects);
-        setLoading(false); setError(null);
-      }).catch((reason: unknown) => { if (!controller.signal.aborted) { setLoading(false); setError(reason instanceof Error ? reason.message : "unknown error"); } });
-    }, snapshotKey ? 120 : 0);
-    return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [reloadToken, snapshotKey]);
-
-  useEffect(() => {
-    if (!latestAgentEvent) return;
-    setProjects((current) => current.map((project) => (
-      (latestAgentEvent.project_id && project.id === latestAgentEvent.project_id)
-      || project.main_path === latestAgentEvent.worktree
-        ? mergeAgentSnapshot(project, latestAgentEvent)
-        : project
-    )));
-  }, [latestAgentEvent]);
 
   useEffect(() => {
     const nextIds = sortProjects(projects).map((project) => project.id);
@@ -373,20 +347,20 @@ export default function Page() {
       setFavoritesStorageIssue(true);
     }
   };
-  const retry = () => { setError(null); setLoading(true); setReloadToken((value) => value + 1); };
+  const retry = refreshProjects;
 
   const agentSummaryQuiet = projects.length > 0 && !projects.some((project) => summaryCards.some(({ key }) => { const count = agentCount(project, key); return count !== null && count > 0; }));
   const agentSummary = (<div className="home-summary" aria-label="ブランチの作業状況サマリー">
         {invalidUrlParams.length > 0 ? <span className="filter-unavailable">URL条件を確認してから一覧を表示します。</span> : <>
-          {summaryCards.map(({ key, label }) => <button type="button" className="home-summary-card" key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "…" : totals[key] === null ? "未取得" : formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
-          <button type="button" className="home-summary-card" aria-label="ブランチ作業状況の件数不明プロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{loading && !projects.length ? "…" : unknownProjectTotal}</strong><span>件数未取得</span></button>
+          {summaryCards.filter(({ key }) => loading || error !== null || totals[key] !== null).map(({ key, label }) => <button type="button" className="home-summary-card" key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
+          <button type="button" className="home-summary-card" aria-label="agent報告がないプロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : unknownProjectTotal}</strong><span>agent報告なし</span></button>
         </>}
       </div>);
 
   return (
     <main className="home-shell" id="main-content" tabIndex={-1}>
       <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></div></header>
-      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>ブランチの作業状況{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトで件数未取得`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
+      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>ブランチの作業状況{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトでagent報告なし`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
       {invalidUrlParams.length === 0 && <section className="home-toolbar" aria-label="プロジェクト検索と絞り込み">
         <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input ref={searchRef} aria-keyshortcuts="/" value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /><kbd aria-hidden="true">/</kbd></label>
         <label>並び順<select value={view.sort} onChange={(event) => applyView({ sort: event.target.value as ProjectSort })} aria-label="プロジェクトの並び順"><option value="priority">優先度</option><option value="name">名前</option><option value="latest">最新更新</option></select></label>
@@ -398,7 +372,7 @@ export default function Page() {
       {hasActiveFilters && invalidUrlParams.length === 0 && <div className="active-filters" aria-label="選択中の検索条件">
         <span>絞り込み</span>
         {view.query.trim() && <button type="button" onClick={() => applyView({ query: "" })} aria-label="検索キーワードを解除">検索: {view.query}<span aria-hidden="true">×</span></button>}
-        {view.agentFilter !== "all" && <button type="button" onClick={() => applyView({ agentFilter: "all" })} aria-label="ブランチ作業状況の絞り込みを解除">{view.agentFilter === "unknown" ? "件数未取得" : AGENT_SUMMARY_LABELS[view.agentFilter]}<span aria-hidden="true">×</span></button>}
+        {view.agentFilter !== "all" && <button type="button" onClick={() => applyView({ agentFilter: "all" })} aria-label="ブランチ作業状況の絞り込みを解除">{view.agentFilter === "unknown" ? "agent報告なし" : AGENT_SUMMARY_LABELS[view.agentFilter]}<span aria-hidden="true">×</span></button>}
         {view.gitFilter !== "all" && <button type="button" onClick={() => applyView({ gitFilter: "all" })} aria-label="Gitの絞り込みを解除">{gitFilters.find((item) => item.key === view.gitFilter)?.label}<span aria-hidden="true">×</span></button>}
         {view.favoritesOnly && <button type="button" onClick={() => applyView({ favoritesOnly: false })} aria-label="お気に入りの絞り込みを解除">★ お気に入り<span aria-hidden="true">×</span></button>}
       </div>}

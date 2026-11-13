@@ -16,7 +16,7 @@ import CommitCompare from "./commit-compare";
 import FileHistoryExplorer from "./file-history-explorer";
 import WorktreeExplorer from "./worktree-explorer";
 import PrExplorer from "./pr-explorer";
-import BranchHistoryExplorer from "./branch-history-explorer";
+import BranchFlowSections from "./branch-flow-sections";
 import { commitHeader } from "./branch-history-tools.mjs";
 import CommitFiles from "./commit-files";
 import GitGuide from "./git-guide";
@@ -229,6 +229,7 @@ function projectFromSearch(search: string) {
   return {
     path: parsed.path,
     tab: parsed.tab as ControlTab,
+    flowSection: parsed.flowSection,
     range: parsed.range as TimeRange,
     merged: parsed.merged,
     event: parsed.event,
@@ -1182,7 +1183,7 @@ export default function ProjectControl() {
       </nav>
       <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
-          {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} relationRef={urlState.relationRef} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /><BranchHistoryExplorer key={project.main_path} project={project} onSelect={selectEvent} /></>}
+          {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} renderSections={(notes) => <BranchFlowSections key={project.main_path} project={project} section={urlState.flowSection} onSectionChange={(flowSection) => updateUrl({ flowSection })} relationRef={urlState.relationRef} selectedLane={selectedLane} selectedRowId={urlState.branchRow} onSelect={selectEvent}>{notes}</BranchFlowSections>} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /></>}
           {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルを調べる</h3><p className="section-copy">指定した版の内容や変更元を確認し、無視ルール・改行・Git属性の扱いを調べられます。</p></div></div><ConflictInspector key={`conflicts:${project.main_path}`} path={project.main_path} /><TreeSizes key={`sizes:${project.main_path}`} path={project.main_path} /><ContentSearch key={`content:${project.main_path}`} path={project.main_path} /><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /><IgnoreInspector key={`ignore:${project.main_path}`} path={project.main_path} /><FileAttributes key={`attributes:${project.main_path}`} path={project.main_path} /></section>}

@@ -8,11 +8,11 @@ const TIME_RANGES = new Set(["current", "24h", "7d", "all"]);
 export function parseProjectUrl(search) {
   const params = new URLSearchParams(search || "");
   const defaults = {
-    tab: "flow", range: "7d", laneFilter: "all", laneOrder: "name",
+    flowSection: "relations", tab: "flow", range: "7d", laneFilter: "all", laneOrder: "name",
     activityFilter: "all", activityOrder: "newest",
   };
   const choices = {
-    tab: CONTROL_TABS, range: TIME_RANGES,
+    flowSection: new Set(["relations", "history", "notes"]), tab: CONTROL_TABS, range: TIME_RANGES,
     laneFilter: new Set(["all", "dirty", "conflict", "ahead", "behind", "worktree"]),
     laneOrder: new Set(["name", "latest", "attention"]),
     activityFilter: new Set(["all", "commit", "edit", "test", "review", "input"]),
@@ -32,6 +32,7 @@ export function parseProjectUrl(search) {
   return {
     path: params.get("path"),
     tab: values.tab,
+    flowSection: values.flowSection,
     range: values.range,
     laneFilter: values.laneFilter,
     laneOrder: values.laneOrder,

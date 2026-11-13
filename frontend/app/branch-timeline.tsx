@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, MutableRefObject, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, MutableRefObject, SetStateAction, ReactNode } from "react";
 import {
   aggregateTimelineConnectionChips,
   groupTimelineEventsByRow,
@@ -25,7 +25,8 @@ import {
 } from "./project-flow.mjs";
 import { agentStateLabel, agentTaskState } from "./agent-overview.mjs";
 import { uniqueLocalForCommit } from "./project-flow.mjs";
-import BranchRelations from "./branch-relations";
+import CopyButton from "./copy-button";
+import { timelineRowGeometry, agentFreshness, rowAgentReports, isUnpushedTip } from "./branch-timeline-presentation.mjs";
 import { connectionEventTime, edgeDisplayLabel, evidenceLabel, operationLabel, referenceDisplayName } from "./branch-relations-tools.mjs";
 import type {
   ProjectBranchCommit,
@@ -38,7 +39,7 @@ import type {
 
 type TimeRange = "current" | "24h" | "7d" | "all";
 type TimelineRow = ProjectBranchRow;
-type TimelineCommit = ProjectBranchCommit & { is_head: boolean; is_merge: boolean };
+type TimelineCommit = ProjectBranchCommit & { is_head: boolean; is_merge: boolean; is_unpushed: boolean };
 type TimelineEvent = {
   row: TimelineCommit;
   lane: TimelineRow;
@@ -154,6 +155,14 @@ function rowStatus(row: TimelineRow, defaultBranch: string | null) {
   return ["状態未取得", "lane-state-muted"];
 }
 
+
+function statusExplanation(status: string) {
+  const descriptions: Record<string, string> = {
+    synchronized: "ローカルと追跡先の先端が一致しています。", local_ahead: "追跡先にないローカルのコミットがあります。", remote_ahead: "ローカルにない追跡先のコミットがあります。", diverged: "ローカルと追跡先の両方に固有のコミットがあります。", remote_only: "リモート参照のみ存在します。", local_only: "追跡先のないローカルブランチです。", upstream_deleted: "設定された追跡先が削除されています。", mixed: "複数のローカルで追跡状態が異なります。", detached: "ブランチに属さないHEADです。", historical_deleted: "削除済みブランチのPR履歴です。", remote_unavailable: "リモート参照を取得できませんでした。", tracking_unavailable: "追跡状態を取得できませんでした。", tracking_inconsistent: "追跡情報に不整合があります。",
+  };
+  return Object.hasOwn(descriptions, status) ? descriptions[status] : "状態の意味を取得できませんでした。";
+}
+
 function isDefaultRow(row: TimelineRow, defaultBranch: string | null) {
   return Boolean(defaultBranch) && row.name === defaultBranch;
 }
@@ -257,7 +266,9 @@ function FlowEventPopover({
       <span>{shortHash(event.row.hash)} · {event.row.author || "作成者未取得"}</span>
       <time dateTime={event.row.date ?? undefined}>{relativeTime(event.row.date)} · {exactDate(event.row.date)}</time>
       <span>branch {rowLabel(event.lane)} · {event.row.is_head ? "HEAD" : "履歴"}</span>
+      <span>{event.row.is_unpushed ? "未push（追跡先に未到達のローカル先端）" : ""}</span>
       <span>親 {event.row.parents.length ? event.row.parents.map(shortHash).join(", ") : "未取得"}</span>
+      <code>git show {shortHash(event.row.hash)}</code><CopyButton value={`git show ${shortHash(event.row.hash)}`} label="git showをコピー" />
       <button type="button" onClick={onSelect}>詳細を開く</button>
     </div>,
     document.body,
@@ -330,7 +341,7 @@ function FlowEventButton({
         onBlur={(focusEvent) => { const next = focusEvent.relatedTarget; const popover = typeof document === "undefined" ? null : document.getElementById(flowPopoverId(event.id)); if (!(next instanceof Node) || (!focusEvent.currentTarget.parentElement?.contains(next) && !popover?.contains(next))) closePreview(); }}
         type="button"
       >
-        <span className={`flow-event-point${event.row.is_merge ? " is-merge" : ""}${event.row.is_head ? " is-head" : ""}`} aria-hidden="true" />
+        <span className={`flow-event-point${event.row.is_merge ? " is-merge" : ""}${event.row.is_head ? " is-head" : ""}${event.row.is_unpushed ? " is-unpushed" : ""}`} aria-hidden="true" />
       </button>
       {preview && <FlowEventPopover buttonRef={buttonRef} event={event} onPreviewEnter={keepPreview} onPreviewLeave={closePreview} onSelect={select} popoverBelow={popoverBelow} />}
     </div>
@@ -401,7 +412,7 @@ function FlowDenseEventButton({
         title={`${shortHash(event.row.hash)} · ${event.row.subject || "コミット"}`}
         type="button"
       >
-        <span className={`flow-event-point${event.row.is_merge ? " is-merge" : ""}${event.row.is_head ? " is-head" : ""}`} aria-hidden="true" />
+        <span className={`flow-event-point${event.row.is_merge ? " is-merge" : ""}${event.row.is_head ? " is-head" : ""}${event.row.is_unpushed ? " is-unpushed" : ""}`} aria-hidden="true" />
       </button>
       {preview && <FlowEventPopover buttonRef={buttonRef} event={event} onPreviewEnter={keepPreview} onPreviewLeave={closePreview} onSelect={select} popoverBelow={popoverBelow} />}
     </div>
@@ -452,7 +463,7 @@ export default function BranchTimeline({
   selectedKey,
   selectedRowId,
   selectedLane,
-  relationRef,
+  renderSections,
   showMerged,
   onTimelineChange,
   onRangeChange,
@@ -467,7 +478,7 @@ export default function BranchTimeline({
   selectedKey: string | null;
   selectedRowId: string | null;
   selectedLane: string | null;
-  relationRef: string | null;
+  renderSections: (notes: ReactNode) => ReactNode;
   showMerged: boolean;
   onTimelineChange: (value: number) => void;
   onRangeChange: (range: TimeRange) => void;
@@ -489,7 +500,9 @@ export default function BranchTimeline({
   useEffect(() => () => {
     if (densePreviewCloseTimer.current) clearTimeout(densePreviewCloseTimer.current);
   }, []);
-  const [historyOpen, setHistoryOpen] = useState(timeline < 100);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [clock, setClock] = useState<number | null>(null);
+  useEffect(() => { setClock(Date.now()); const timer = setInterval(() => setClock(Date.now()), 60000); return () => clearInterval(timer); }, []);
   const [history, setHistory] = useState<Record<string, LoadedHistory>>({});
   const historyRequestKeys = useRef(new Map<string, string>());
   const flowScrollRef = useRef<HTMLDivElement>(null);
@@ -520,7 +533,7 @@ export default function BranchTimeline({
   }, [project.id]);
   const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
   const firstLabelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (timeline < 100) setHistoryOpen(true); }, [timeline]);
+
   const connectionEdges = useMemo(
     () => project.branch_connections === null ? EMPTY_CONNECTION_EDGES : project.branch_connections.edges,
     [project.branch_connections],
@@ -608,7 +621,7 @@ export default function BranchTimeline({
   const positioned = rows.flatMap((row) => (rowCommits.get(row.id) ?? []).flatMap((commit) => {
     const time = eventDate(commit);
     if (time === null || time > observationTime) return [];
-    return [{ row: { ...commit, is_head: row.tip_commits.some((tip) => tip.hash === commit.hash), is_merge: commit.parents.length > 1 }, lane: row, x: recentTimePosition(time, minTime, now), hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(row.id, commit.hash) }];
+    return [{ row: { ...commit, is_head: row.tip_commits.some((tip) => tip.hash === commit.hash), is_merge: commit.parents.length > 1, is_unpushed: isUnpushedTip(row, commit.hash) }, lane: row, x: recentTimePosition(time, minTime, now), hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(row.id, commit.hash) }];
   }));
   const positionedByRow = new Map<string, typeof positioned>();
   positioned.forEach((event) => {
@@ -620,6 +633,7 @@ export default function BranchTimeline({
   const trackWidth = Math.max(minimumTrackWidth, availableTrackWidth);
   const events = rows.flatMap((row) => layoutFlowEvents(positionedByRow.get(row.id) ?? [], trackWidth));
   const eventsByRow = groupTimelineEventsByRow(events) as Map<string, TimelineEvent[]>;
+  const geometry = timelineRowGeometry(rows, eventsByRow);
   const denseEventMode = events.length > DENSE_EVENT_THRESHOLD;
   const refs = useMemo(
     () => project.branch_connections?.refs ?? EMPTY_CONNECTION_REFS,
@@ -642,6 +656,10 @@ export default function BranchTimeline({
     else {
       const next = rows[rowIndex + (key === "ArrowUp" ? -1 : 1)];
       target = next ? [...(eventsByRow.get(next.id) ?? [])].sort((a, b) => Math.abs(a.x - current.x) - Math.abs(b.x - current.x))[0] : undefined;
+    }
+    if (!target && (key === "ArrowUp" || key === "ArrowDown")) {
+      const next = rows[rowIndex + (key === "ArrowUp" ? -1 : 1)];
+      if (next) flowScrollRef.current?.querySelector<HTMLElement>(`[data-flow-row="${CSS.escape(next.id)}"]`)?.focus();
     }
     if (target) {
       setActiveRowId(target.lane.id);
@@ -666,7 +684,7 @@ export default function BranchTimeline({
         const x1 = parentEvent.hitX * trackWidth / 100;
         const x2 = child.hitX * trackWidth / 100;
         if (x1 > x2) return;
-        const y = (rowIndex + 0.5) * 88;
+        const y = geometry.rows[rowIndex].center;
         links.push({ kind: "commit", path: `M ${x1} ${y} H ${x2}`, arrow: null, outside: false, label: `${shortHash(parent)} → ${shortHash(child.row.hash)}` });
       }));
     });
@@ -691,8 +709,8 @@ export default function BranchTimeline({
       if (sourceIndex === undefined || targetIndex === undefined) return;
       const x1 = sourceX * trackWidth / 100;
       const x2 = targetX * trackWidth / 100;
-      const y1 = (sourceIndex + 0.5) * 88;
-      const y2 = (targetIndex + 0.5) * 88;
+      const y1 = geometry.rows[sourceIndex].center;
+      const y2 = geometry.rows[targetIndex].center;
       const outside = operationTime < minTime || sourceTime < minTime || targetTime < minTime;
       const kind = edge.kind === "merge" ? "merge" : "branch";
       const rowDistance = Math.abs(targetIndex - sourceIndex);
@@ -777,19 +795,19 @@ export default function BranchTimeline({
   const hiddenConnectionCount = connectionSelection.hidden.length;
   const observationX = recentTimePosition(observationTime, minTime, now);
   return (
-    <section className="flow-section" aria-labelledby="flow-map-title">
+    <><section className="flow-section" aria-labelledby="flow-map-title">
       <div className="flow-controls">
         <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチを選ぶと作業の詳細、点を選ぶとコミットの詳細を開けます。</p></div><span className="flow-direction">過去を圧縮 → 直近を詳しく</span></div>
         <div className="flow-toolbar">
-          <div className="range-tabs" role="group" aria-label="表示するコミット"><span className="flow-control-label">表示範囲</span>{ranges.map((item) => <button aria-pressed={range === item.id} className="range-tab" key={item.id} type="button" onClick={() => onRangeChange(item.id)}>{item.label}</button>)}</div>
-          <div className="flow-branch-count" role="group" aria-label="表示するブランチ数"><span>表示行数</span>{[5, 10, 20, null].map(limit => <button key={limit ?? "all"} type="button" className="range-tab" aria-pressed={branchLimit === limit} onClick={() => changeBranchLimit(limit)}>{limit === null ? "すべて" : `${limit}件`}</button>)}<span>＋既定ブランチ · {rows.length}/{selection.total}行</span></div>
-          <div className="flow-row-order" role="group" aria-label="行の並び順"><span>行の並び</span><button type="button" className="range-tab" aria-pressed={rowOrder === "parent"} onClick={() => setRowOrder("parent")}>親子順</button><button type="button" className="range-tab" aria-pressed={rowOrder === "updated"} onClick={() => setRowOrder("updated")}>更新順</button></div>
+          <label>表示範囲<select aria-label="表示するコミット" value={range} onChange={(event) => onRangeChange(event.target.value as TimeRange)}>{ranges.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+          <label>表示行数<select aria-label="表示するブランチ数" value={branchLimit === null ? "all" : String(branchLimit)} onChange={(event) => changeBranchLimit(event.target.value === "all" ? null : Number(event.target.value))}>{[5, 10, 20, null].map((limit) => <option key={limit ?? "all"} value={limit === null ? "all" : String(limit)}>{limit === null ? "すべて" : `${limit}件 ＋既定`}</option>)}</select><span>{rows.length}/{selection.total}行</span></label>
+          <label>行の並び<select aria-label="行の並び順" value={rowOrder} onChange={(event) => setRowOrder(event.target.value as "parent" | "updated")}><option value="parent">親子順</option><option value="updated">更新順</option></select></label>
           <div className="flow-control-actions"><label className="flow-branch-jump"><span>ブランチへ移動</span><select aria-label="グラフのブランチへ移動" value={rows.some((row) => row.id === navigationRow) ? navigationRow : ""} onChange={(event) => { setNavigationRow(event.target.value); document.querySelector(`[data-flow-row="${CSS.escape(event.target.value)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }}><option value="">ブランチを選択</option>{rows.map((row) => <option key={row.id} value={row.id}>{rowLabel(row)}</option>)}</select></label>{mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}<button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: "smooth" })}>右端へ移動 →</button></div>
         </div>
       </div>
       <details className="flow-history" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}><summary>履歴をたどる <span>{timeline === 100 ? "最新の観測" : "過去を表示中"} · {exactDate(new Date(observationTime).toISOString())}</span></summary><div className="flow-observation"><label className="timeline-control"><span>表示時点</span><input aria-label="過去の観測時点" max="100" min="0" onChange={(event) => onTimelineChange(100 * (recentTimeAt(Number(event.target.value), minTime, now) - minTime) / (now - minTime))} step="1" type="range" value={observationX} /><output>{timeline === 100 ? "最新の観測" : "選択日時"} · {exactDate(new Date(observationTime).toISOString())}</output></label><button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button></div></details>
       {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・ブランチ作業履歴を表示中。ブランチ名とGit作業状態は現在の情報です。</p>}
-      {routeLinks.routes.length > 0 && <div className="flow-connection-controls">
+      {routeLinks.routes.length > 0 && <details className="flow-connection-details"><summary>接続を1本ずつ確認 ({routeLinks.routes.length}件)</summary><div className="flow-connection-controls">
         <label><span>接続を1本ずつ確認</span><select aria-label="強調する接続" value={focusedRoute?.id ?? ""} onChange={event => setFocusedConnection(event.target.value || null)}>
           <option value="">すべての接続 ({routeLinks.routes.length}件)</option>
           {routeLinks.routes.map((route: TimelineRoute, index: number) => <option key={route.id} value={route.id}>{index + 1}. {route.label}</option>)}
@@ -797,13 +815,15 @@ export default function BranchTimeline({
         <div className="flow-connection-buttons"><button type="button" className="subtle-button" onClick={() => stepConnection(-1)} disabled={!focusedRoute}>前の接続</button><button type="button" className="subtle-button" onClick={() => stepConnection(1)}>次の接続</button><button type="button" className="subtle-button" onClick={() => setFocusedConnection(null)} disabled={!focusedRoute}>選択を解除</button><button type="button" className="subtle-button" onClick={() => setPinnedRowId(null)} disabled={pinnedRowId === null}>固定を解除</button></div>
         <div className="flow-connection-toggle"><button aria-pressed={showAllConnections} className="subtle-button" type="button" onClick={() => setShowAllConnections((current) => !current)}>{showAllConnections ? "既定の線だけ表示" : "すべての線を表示"}</button><span>既定表示 {defaultVisibleConnectionCount}/{routeLinks.routes.length}件</span></div>
         <p className="flow-connection-status" role="status">{pinnedRow ? `${rowLabel(pinnedRow)} の関係を固定表示中（${pinnedConnectionCount}件）。チップを再クリックまたは Esc で解除` : focusedRoute ? <><strong>{focusedIndex + 1} / {routeLinks.routes.length} · {focusedRoute.endpoints}</strong><span>{focusedRoute.label}</span></> : showAllConnections ? "すべての関係を表示中です。時刻が逆転した関係は理由付きで線を描きません。○ が元、▶ が先です。" : "○ が元、▶ が先。時間の左から右へ進むS字で表示し、実線は操作の記録、破線は推定です。遠い行の関係はスタブとチップで示します。"}</p>
-      </div>}
+      </div></details>}
+      <div className="flow-legend" role="group" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージコミット</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 青=分岐</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 緑=マージ</span><span><i className="legend-line legend-line-estimate" aria-hidden="true" /> 推定の関係（破線）</span><span><i className="legend-dot legend-dot-unpushed" aria-hidden="true" /> 未push（判定できる先端のみ）</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
+      {selectedKey !== null && selectedRowId !== null && events.some((event) => event.row.hash === selectedKey && event.lane.id === selectedRowId) && <div className="flow-selected-command"><span>選択コミット</span><code>git show {shortHash(selectedKey)}</code><CopyButton value={`git show ${shortHash(selectedKey)}`} label="git showをコピー" /></div>}
       {rows.length === 0 ? <div className="empty-flow">{project.branch_rows === null ? "ブランチ行の取得に失敗しました。" : "表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。"}</div> : <div className="flow-scroll" role="region" aria-label="Gitフローマップ（横スクロール可能）" ref={flowScrollRef} style={{ "--flow-popover-space": previewId ? "360px" : "0px" } as CSSProperties} tabIndex={0} onKeyDown={(event) => { if (event.key === "Escape") setPinnedRowId(null); }}>
         <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}><span>ブランチ / 現在の作業状態</span><div className="flow-axis-track">{ticks.map((tick) => <span className={`flow-time-tick${tick.edge ? ` is-${tick.edge}` : ""}`} key={tick.time} style={{ left: `${tick.position}%` }}><span className="flow-tick-date">{tick.dateLabel}</span><span>{tick.timeLabel}</span></span>)}<span className="flow-current-label" style={{ left: `${observationX * trackWidth / 100}px` }}>{timeline === 100 ? "最新の観測" : "選択日時"}</span></div></div>
-        <div className="flow-rows" style={{ "--flow-row-height": "88px", "--flow-lanes": rows.length, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}>
-          <svg aria-hidden="true" className="flow-connections" preserveAspectRatio="none" viewBox={`0 0 ${trackWidth} ${rows.length * 88}`}>
-            {ticks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={rows.length * 88} />)}<line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={rows.length * 88} />
-            {rows.map((row, index) => <line key={`guide:${row.id}`} className={`flow-row-guide${row.name === project.default_branch ? " is-default" : ""}`} x1="0" x2={trackWidth} y1={(index + .5) * 88} y2={(index + .5) * 88}><title>{row.name} · ブランチ行のガイド（コミットの親子関係ではありません）</title></line>)}
+        <div className="flow-rows" style={{ "--flow-total-height": `${geometry.height}px`, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}>
+          <svg aria-hidden="true" className="flow-connections" preserveAspectRatio="none" viewBox={`0 0 ${trackWidth} ${geometry.height}`}>
+            {ticks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={geometry.height} />)}<line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={geometry.height} />
+            {rows.map((row, index) => <line key={`guide:${row.id}`} className={`flow-row-guide${row.name === project.default_branch ? " is-default" : ""}`} x1="0" x2={trackWidth} y1={geometry.rows[index].center} y2={geometry.rows[index].center}><title>{row.name} · ブランチ行のガイド（コミットの親子関係ではありません）</title></line>)}
             {routeLinks.links.map((link, index) => <path key={index} className="flow-lane-line" d={link.path}><title>{link.label}</title></path>)}
             {[...routeLinks.routes]
               .filter((route) => isRoutePresented(route))
@@ -827,7 +847,7 @@ export default function BranchTimeline({
             {rows.map((row, index) => {
               const rowChips = connectionChips.filter((chip) => chip.rowId === row.id);
               if (!rowChips.length) return null;
-              return <div className="flow-connection-chip-row" key={`chips:${row.id}`} style={{ top: `${index * 88}px` }}>
+              return <div className="flow-connection-chip-row" key={`chips:${row.id}`} style={{ top: `${geometry.rows[index].top}px` }}>
                 {(["source", "target"] as const).map((side) => {
                   const sideChips = rowChips.filter((chip) => chip.side === side);
                   return <div className={`flow-connection-chip-side is-${side}`} key={`${row.id}:${side}`}>
@@ -856,6 +876,8 @@ export default function BranchTimeline({
           </div>
           {rows.map((row, index) => {
             const laneEvents = eventsByRow.get(row.id) ?? [];
+            const reports = rowAgentReports(row, project.agent_tasks);
+            const commands = row.locals.filter((lane) => lane.next_command !== null);
             const [status, statusClass] = rowStatus(row, project.default_branch);
             const defaultRow = isDefaultRow(row, project.default_branch);
             const local = rowLocal(row);
@@ -864,7 +886,20 @@ export default function BranchTimeline({
             const tipRefs = tipRefsByRow.get(row.id) ?? [];
             return <article
               aria-labelledby={`flow-row-label-${row.id}`}
-              className={`flow-row${defaultRow ? " is-default" : ""}${selectedRowId === row.id ? " is-selected" : ""}${activeRowId === row.id || pinnedRowId === row.id ? " is-connection-active" : ""}`}
+              style={{ "--flow-row-height": `${geometry.rows[index].height}px` } as CSSProperties}
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+                event.preventDefault();
+                const next = rows[index + (event.key === "ArrowUp" ? -1 : 1)];
+                if (!next) return;
+                const first = eventsByRow.get(next.id)?.[0];
+                if (first) eventButtonRefs.current.get(first.id)?.focus();
+                else flowScrollRef.current?.querySelector<HTMLElement>(`[data-flow-row="${CSS.escape(next.id)}"]`)?.focus();
+              }}
+              onFocus={() => setActiveRowId(row.id)}
+              onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setActiveRowId(null); }}
+              className={`flow-row${geometry.rows[index].compact ? " is-compact" : ""}${defaultRow ? " is-default" : ""}${selectedRowId === row.id || row.locals.some((lane) => lane.id === selectedLane) ? " is-selected" : ""}${activeRowId === row.id || pinnedRowId === row.id ? " is-connection-active" : ""}`}
               data-flow-row={row.id}
               key={row.id}
               onMouseEnter={() => setActiveRowId(row.id)}
@@ -873,8 +908,8 @@ export default function BranchTimeline({
                 if (!(focused instanceof Node) || !event.currentTarget.contains(focused)) setActiveRowId((current) => current === row.id ? null : current);
               }}
             >
-              <div className="flow-lane-label" title={row.locals.length > 1 ? `ローカルブランチ ${row.locals.length}件` : row.tracking_ref ?? "履歴と親子関係を表示"} ref={index === 0 ? firstLabelRef : undefined}><div className="flow-lane-title" id={`flow-row-label-${row.id}`}><span className="lane-shape" aria-hidden="true" />{local || rowEvent ? <button className="flow-lane-button" aria-pressed={selectedLane === local?.id || selectedRowId === row.id} type="button" onClick={() => { if (local) onSelectLane(local); else if (rowEvent) onSelect(commitEvent(project, row, rowEvent), row.id); }}>{rowLabel(row)}</button> : <strong className="flow-lane-button">{rowLabel(row)}</strong>}</div><div className="flow-lane-meta"><span className={`lane-state ${statusClass}`}>{status}</span>{defaultRow && <span className="lane-state lane-state-default">既定</span>}<span>{row.locals.length ? `ローカル ${row.locals.length}件` : "リモートのみ"}</span></div><div className="flow-lane-refs" role="group" aria-label="現在のref"><span>現在の先端:</span>{tipRefs.length ? tipRefs.map((ref) => <code key={ref.id} title={ref.hash ?? undefined}>{tipRefLabel(ref)}</code>) : <span>ローカル / リモート ref 未取得</span>}</div><div className="flow-lane-actions">{row.locals.length > 0 && <details className="flow-lane-locals"><summary>ローカル {row.locals.length}件</summary><div>{row.locals.map((lane) => <div key={lane.id}><button type="button" className="flow-lane-button" aria-pressed={selectedLane === lane.id} onClick={() => onSelectLane(lane)}>{lane.branch ?? lane.name}</button>{lane.path && <button type="button" className="subtle-button" onClick={() => onOpenGit(lane)}>Git詳細</button>}</div>)}</div></details>}{range !== "current" && history[row.id]?.offset !== null && <button className="flow-history-more" type="button" onClick={() => loadMore(row)} disabled={history[row.id]?.loading}>{history[row.id]?.loading ? "履歴を取得中…" : "さらに履歴"}</button>}{history[row.id]?.error && <span className="flow-history-note" role="alert">履歴取得失敗</span>}</div></div>
-              <div className="flow-track">{laneEvents.length === 0 && <span className="flow-track-empty">{history[row.id]?.loading ? "履歴を取得中…" : row.history_available ? "この表示範囲にコミットなし" : "履歴未取得"}</span>}{laneEvents.map((event) => denseEventMode ? <FlowDenseEventButton event={event} key={event.id} onClosePreview={closeDensePreview} onNavigate={navigate} onPreview={keepDensePreview} onRegister={register} onSelect={eventSelect} popoverBelow={index < 2} preview={previewId === event.id} selected={selectedRowId === event.lane.id && selectedKey === event.row.hash} trackWidth={trackWidth} /> : <FlowEventButton event={event} key={event.id} onPreview={setPreviewId} onRegister={register} onNavigate={navigate} onSelect={eventSelect} popoverBelow={index < 2} preview={previewId === event.id} selected={selectedRowId === event.lane.id && selectedKey === event.row.hash} trackWidth={trackWidth} />)}{laneEvents.length > 0 && <div className="flow-latest-visible"><span className="flow-latest-caption">最新</span><span title={laneEvents[laneEvents.length - 1].row.subject}>{laneEvents[laneEvents.length - 1].row.subject}</span><time dateTime={laneEvents[laneEvents.length - 1].row.date ?? undefined}>{exactDate(laneEvents[laneEvents.length - 1].row.date)}</time></div>}</div>
+              <div className="flow-lane-label" title={row.locals.length > 1 ? `ローカルブランチ ${row.locals.length}件` : row.tracking_ref ?? "履歴と親子関係を表示"} ref={index === 0 ? firstLabelRef : undefined}><div className="flow-lane-title" id={`flow-row-label-${row.id}`}><span className="lane-shape" aria-hidden="true" />{local || rowEvent ? <button className="flow-lane-button" aria-pressed={selectedLane === local?.id || selectedRowId === row.id} type="button" onClick={() => { if (local) onSelectLane(local); else if (rowEvent) onSelect(commitEvent(project, row, rowEvent), row.id); }}>{rowLabel(row)}</button> : <strong className="flow-lane-button">{rowLabel(row)}</strong>}</div><div className="flow-lane-meta"><span className="flow-state-help" tabIndex={0}><span className={`lane-state ${statusClass}`}>{status}</span><span className="flow-state-explanation"><span>{statusExplanation(row.status)}</span>{commands.length ? commands.map((lane) => <span key={lane.id}><strong>{lane.branch}</strong><code>{lane.next_command!.command}</code><CopyButton value={lane.next_command!.command} label="コマンドをコピー" /><small>{lane.next_command!.reason}</small></span>) : <span>対応コマンド未取得</span>}</span></span>{defaultRow && <span className="lane-state lane-state-default">既定</span>}</div><div className="flow-row-details"><span>ローカル {row.locals.length}件</span><div className="flow-lane-refs" role="group" aria-label="現在のref"><span>現在の先端:</span>{tipRefs.length ? tipRefs.map((ref) => <code key={ref.id} title={ref.hash ?? undefined}>{tipRefLabel(ref)}</code>) : <span>ローカル / リモート ref 未取得</span>}</div><div className="flow-lane-actions">{row.locals.length > 0 && <details className="flow-lane-locals"><summary>ローカル {row.locals.length}件</summary><div>{row.locals.map((lane) => <div key={lane.id}><button type="button" className="flow-lane-button" aria-pressed={selectedLane === lane.id} onClick={() => onSelectLane(lane)}>{lane.branch ?? lane.name}</button>{lane.path && <button type="button" className="subtle-button" onClick={() => onOpenGit(lane)}>Git詳細</button>}</div>)}</div></details>}{range !== "current" && history[row.id]?.offset !== null && <button className="flow-history-more" type="button" onClick={() => loadMore(row)} disabled={history[row.id]?.loading}>{history[row.id]?.loading ? "履歴を取得中…" : "さらに履歴"}</button>}{history[row.id]?.error && <span className="flow-history-note" role="alert">履歴取得失敗</span>}</div></div></div>
+              <div className="flow-track">{project.agent_tasks === null && <span className="flow-agent-report">agent状態未取得</span>}{reports.map((task) => <span key={`${task.branch}:${task.worktree}`} className={`flow-agent-report freshness-${agentFreshness(task.occurred_at, clock)}`} title={`${task.branch} · ${task.summary ?? "説明なし"} · ${exactDate(task.occurred_at)}`}><span>{agentStateLabel(agentTaskState(task))}</span> · 最終報告 {clock === null ? "時刻未取得" : relativeTime(task.occurred_at)}</span>)}{laneEvents.length === 0 && <span className="flow-track-empty">{history[row.id]?.loading ? "履歴を取得中…" : history[row.id]?.error ? "履歴取得失敗" : row.history_available ? "範囲内にコミットなし" : "履歴未取得"}</span>}{laneEvents.map((event) => denseEventMode ? <FlowDenseEventButton event={event} key={event.id} onClosePreview={closeDensePreview} onNavigate={navigate} onPreview={keepDensePreview} onRegister={register} onSelect={eventSelect} popoverBelow={index < 2} preview={previewId === event.id} selected={selectedRowId === event.lane.id && selectedKey === event.row.hash} trackWidth={trackWidth} /> : <FlowEventButton event={event} key={event.id} onPreview={setPreviewId} onRegister={register} onNavigate={navigate} onSelect={eventSelect} popoverBelow={index < 2} preview={previewId === event.id} selected={selectedRowId === event.lane.id && selectedKey === event.row.hash} trackWidth={trackWidth} />)}{laneEvents.length > 0 && <div className="flow-latest-visible"><span className="flow-latest-caption">最新</span><span title={laneEvents[laneEvents.length - 1].row.subject}>{laneEvents[laneEvents.length - 1].row.subject}</span><time dateTime={laneEvents[laneEvents.length - 1].row.date ?? undefined}>{exactDate(laneEvents[laneEvents.length - 1].row.date)}</time></div>}</div>
             </article>;
           })}
         </div>
@@ -883,8 +918,9 @@ export default function BranchTimeline({
       {selection.total <= rows.length && hiddenConnectionCount > 0 && <p className="flow-pr-status">{hiddenConnectionCount} 件の関係は表示行の外にあります。参照を選んだ全関係一覧で確認できます。</p>}
       {hiddenRelationCount > 0 && <p className="flow-pr-status">{showAllConnections ? "すべての関係を表示しています。" : `既定では ${defaultVisibleConnectionCount}/${routeLinks.routes.length} 件の関係を表示しています。行間が遠い関係はスタブです。残りは行にカーソルを合わせる・キーボードで行をフォーカスする・接続を選ぶ、または「すべての線を表示」で確認できます。`}</p>}
       {sameRowConnectionEdges.length > 0 && <details className="flow-help flow-connection-note"><summary>同じブランチ行にある参照間イベント ({sameRowConnectionEdges.length}件)</summary><p>取り込み元と取り込み先が同じ行に重なるため、グラフ上で矢印を分けて描画できません。下の全関係一覧ではローカル・リモートなどの参照 ID を分けて確認できます。</p><ul>{sameRowConnectionEdges.map((edge) => <li key={`same-row:${edge.id}`}>{edgeDisplayLabel(edge, refs)} · {edge.label || "関係イベント"} · {evidenceLabel(edge.evidence)}{edge.operation ? ` · ${operationLabel(edge.operation)}` : ""} · グラフ未描画（同一行）</li>)}</ul></details>}
-      <BranchRelations project={project} relationRef={relationRef} selectedLane={selectedLane} selectedRowId={selectedRowId} />
-      <div className="flow-legend" role="group" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージコミット</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 青=分岐</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 緑=マージ</span><span><i className="legend-line legend-line-estimate" aria-hidden="true" /> 推定の関係（破線）</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
+    </section>
+    {renderSections(<>
+
       {((project.branch_connections?.unresolved.length ?? 0) > 0 || connectionEdges.some((edge) => !hasEdgeEvidence(edge))) && <details className="flow-help"><summary>未解決のブランチ関係 ({(project.branch_connections?.unresolved.length ?? 0) + connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).length})</summary><p role="status">未解決の操作と関係は、上の「ブランチ・参照の全関係と関連履歴」で対象の参照ごとに確認できます。取得できない参照を含む全件表示にも切り替えられます。</p><a href="#branch-relations-title">全関係一覧を開く</a>{connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).map((edge) => <p key={`missing:${edge.id}`} role="status">{edge.label || "関係イベント"} · 接続元または接続先コミットのハッシュ・日時の証拠が未取得のため、線を描画できません。</p>)}</details>}
       <details className="flow-help"><summary>グラフの見方・キーボード操作</summary><p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進み、直近ほど広く表示します。左右キーで同じ行のコミット、上下キーで別の行へ移動し、Enterで詳細を開きます。</p><p>薄い横線はブランチ行のガイドです。コミット間の線は実際の親子関係を表します。関係線は分岐を青、マージを緑で表示し、操作の記録は実線、推定は破線です。接続元は白抜きの丸、接続先は塗りつぶした矢印です。関係線は時間を逆走しないS字で描き、時刻が逆転した関係は線を描かず端点と理由を表示します。行間が遠い関係は短いスタブと相手名のチップで示し、チップまたは上の選択欄から1本ずつ確認できます。複数のチップは行上部で集約され、集約チップを押すとその行を固定できます。</p></details>
       <div className="branch-row-notes" role="status">
@@ -895,6 +931,7 @@ export default function BranchTimeline({
         {project.github.status === "available" && <span>PR情報: GitHubから取得済み · {exactDate(project.github.checked_at === null ? null : new Date(project.github.checked_at * 1000).toISOString())}</span>}
         {project.github.status === "unavailable" && <span>PR情報は取得できませんでした。{project.github.reason ?? "GitHubの認証または接続を確認してください。"}</span>}
       </div>
-    </section>
+    </>)}
+    </>
   );
 }

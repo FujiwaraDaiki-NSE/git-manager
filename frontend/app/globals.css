@@ -4413,3 +4413,38 @@ html[data-theme="dark"] {
 .flow-legend .legend-line-branch { background: var(--control-blue); height: 2px; }
 .flow-legend .legend-line-merge { background: var(--control-green); height: 2px; }
 .flow-legend .legend-line-estimate { background: transparent; height: 0; border-top: 2px dashed var(--control-green); }
+
+/* Branch timeline: keep the graph and its state close to the first screen. */
+.flow-toolbar { justify-content: flex-start; gap: 8px 12px; margin-top: 8px; padding-bottom: 8px; }
+.flow-toolbar > label, .flow-toolbar .flow-branch-jump { display: flex; align-items: center; gap: 5px; font-size: 11px; }
+.flow-toolbar select { max-width: 180px; min-height: 30px; font-size: 12px; }
+.flow-toolbar .flow-control-actions { flex-wrap: wrap; gap: 6px; }
+.flow-history, .flow-connection-details { margin: 6px 0; font-size: 12px; }
+.flow-connection-details > summary { cursor: pointer; }
+.flow-section > .flow-legend { margin: 8px 0; padding: 6px 0; font-size: 11px; }
+.flow-connections, .flow-connection-stub-layer { height: var(--flow-total-height); }
+.flow-lane-label { position: sticky; }
+.flow-row-details { display: none; position: absolute; left: 0; top: 100%; width: 100%; padding: 8px; background: var(--control-panel); border: 1px solid var(--control-border); box-shadow: 0 4px 12px #0002; z-index: 25; font-size: 11px; }
+.flow-row:hover .flow-row-details, .flow-row:focus-within .flow-row-details, .flow-row.is-selected .flow-row-details { display: block; }
+.flow-row:hover, .flow-row:focus-within, .flow-row.is-selected { position: relative; z-index: 6; }
+.flow-row.is-compact .flow-lane-label { padding-block: 2px; display: flex; align-items: center; gap: 6px; }
+.flow-row.is-compact .flow-lane-title { min-width: 0; flex: 1; }
+.flow-row.is-compact .flow-lane-meta { margin: 0; height: auto; }
+.flow-row.is-compact .lane-state { font-size: 9px; }
+.flow-state-help { position: relative; }
+.flow-state-explanation { display: none; position: absolute; left: 0; top: 100%; width: 260px; white-space: normal; background: var(--control-panel); color: var(--control-ink); padding: 10px; border: 1px solid var(--control-border); box-shadow: 0 4px 12px #0002; z-index: 30; }
+.flow-state-explanation > span, .flow-state-explanation code, .flow-state-explanation small { display: block; }
+.flow-state-help:hover .flow-state-explanation, .flow-state-help:focus-within .flow-state-explanation { display: block; }
+.flow-agent-report { position: relative; z-index: 2; display: inline-block; margin: 2px 4px; padding: 1px 5px; border: 1px solid var(--control-blue); border-radius: 4px; background: var(--control-panel); color: var(--control-blue); font-size: 10px; }
+.flow-agent-report.freshness-fresh { background: var(--control-blue-soft); }
+.flow-agent-report.freshness-recent { border-style: dashed; }
+.flow-agent-report.freshness-old { color: var(--control-muted); border-color: var(--control-border); }
+.flow-agent-report.freshness-unknown { border-style: dotted; }
+.flow-row.is-compact .flow-agent-report { margin-top: 0; font-size: 9px; }
+.flow-row.is-compact .flow-track-empty { left: auto; right: 8px; }
+.flow-event-point.is-unpushed, .legend-dot-unpushed { background: #b7791f; border-color: var(--control-panel); box-shadow: 0 0 0 2px #b7791f; }
+.flow-row.is-compact .flow-track-empty { top: 26px; }
+
+.flow-lane-meta, .flow-lane-meta > .flow-state-help:last-child { overflow: visible; }
+.flow-row:focus-visible, .flow-state-help:focus-visible { outline: 2px solid var(--control-blue); outline-offset: -2px; }
+.flow-selected-command { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0; font-size: 12px; }

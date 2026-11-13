@@ -1146,12 +1146,17 @@ async def list_agent_events(
     project_id: str | None = None,
     worktree: str | None = None,
     as_of: datetime | None = None,
+    after_sequence: int | None = None,
+    before_sequence: int | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Read the append-only agent history, optionally replayed as-of a time."""
     if as_of is not None and (as_of.tzinfo is None or as_of.utcoffset() is None):
         raise HTTPException(status_code=422, detail="as_of must include a timezone")
+    if limit is not None and limit < 1:
+        raise HTTPException(status_code=422, detail="limit must be positive")
     try:
-        rows = agent_events.events(project_id=project_id, worktree=worktree, as_of=as_of)
+        rows = agent_events.events(project_id=project_id, worktree=worktree, as_of=as_of, after_sequence=after_sequence, before_sequence=before_sequence, limit=limit)
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail="agent event persistence unavailable") from exc
     return {"events": rows}
