@@ -21,7 +21,7 @@ import {
   sortHomeProjects,
   unknownAgentSummaryKeys,
 } from "./home-overview.mjs";
-import { agentReportKey, agentStateLabel, agentTaskState, deferProjectOrder, mergeAgentSnapshot, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
+import { agentReportKey, agentStateLabel, agentTaskState, deferProjectOrder, projectLatestTime, sortProjects, topAgentTasks } from "./agent-overview.mjs";
 import { useRepoStream } from "./repo-stream";
 import type { AgentRunState, ProjectSummary } from "./types";
 
@@ -219,19 +219,15 @@ function SkeletonGrid() {
 }
 
 export default function Page() {
-  const { repos, scanning, fetching, connected, latestAgentEvent } = useRepoStream();
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const { scanning, fetching, connected, projectSummaries: projects, projectsLoading: loading, projectsError: error, refreshProjects } = useRepoStream();
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
   const [deferredOrder, setDeferredOrder] = useState<string[] | null>(null);
   const [interactionId, setInteractionId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<HomeView>(defaultView);
   const [invalidUrlParams, setInvalidUrlParams] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favoritesReady, setFavoritesReady] = useState(false);
   const [favoritesStorageIssue, setFavoritesStorageIssue] = useState(false);
-  const [reloadToken, setReloadToken] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -243,7 +239,6 @@ export default function Page() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-  const snapshotKey = useMemo(() => [...repos.values()].map((repo) => `${repo.path}:${repo.checked_at ?? repo.activity ?? 0}`).sort().join("|"), [repos]);
 
   useEffect(() => {
     const syncFromUrl = () => {
@@ -256,28 +251,6 @@ export default function Page() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      void fetch("/api/projects", { cache: "no-store", signal: controller.signal }).then(async (response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return (await response.json()) as { projects: ProjectSummary[] }; }).then((value) => {
-        if (controller.signal.aborted) return;
-        setProjects(value.projects);
-        setLoading(false); setError(null);
-      }).catch((reason: unknown) => { if (!controller.signal.aborted) { setLoading(false); setError(reason instanceof Error ? reason.message : "unknown error"); } });
-    }, snapshotKey ? 120 : 0);
-    return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [reloadToken, snapshotKey]);
-
-  useEffect(() => {
-    if (!latestAgentEvent) return;
-    setProjects((current) => current.map((project) => (
-      (latestAgentEvent.project_id && project.id === latestAgentEvent.project_id)
-      || project.main_path === latestAgentEvent.worktree
-        ? mergeAgentSnapshot(project, latestAgentEvent)
-        : project
-    )));
-  }, [latestAgentEvent]);
 
   useEffect(() => {
     const nextIds = sortProjects(projects).map((project) => project.id);
@@ -373,7 +346,7 @@ export default function Page() {
       setFavoritesStorageIssue(true);
     }
   };
-  const retry = () => { setError(null); setLoading(true); setReloadToken((value) => value + 1); };
+  const retry = refreshProjects;
 
   const agentSummaryQuiet = projects.length > 0 && !projects.some((project) => summaryCards.some(({ key }) => { const count = agentCount(project, key); return count !== null && count > 0; }));
   const agentSummary = (<div className="home-summary" aria-label="ブランチの作業状況サマリー">

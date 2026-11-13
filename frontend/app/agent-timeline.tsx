@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRepoStream } from "./repo-stream";
 import { useMemo, useState, type ReactNode } from "react";
 import {
   agentReportKey,
@@ -213,6 +214,7 @@ export default function AgentTimelineSidebar({
   loading = false,
   error = null,
 }: AgentTimelineProps) {
+  const { loadOlderEvents, historyHasMore, historyLoading, historyError } = useRepoStream();
   const [isPaused, setIsPaused] = useState(false);
   const [frozenSnapshot, setFrozenSnapshot] = useState<TimelineSnapshot>({
     events: agentEvents,
@@ -350,6 +352,8 @@ export default function AgentTimelineSidebar({
           {history.length === 0 && !displaySnapshot.loading && !displaySnapshot.error && !historyDetails.dateWindow.error && events.length === 0 && <p className="agent-timeline-empty" role="status">保存されたagentイベントはありません。</p>}
           {history.length === 0 && !displaySnapshot.loading && !displaySnapshot.error && !historyDetails.dateWindow.error && events.length > 0 && <p className="agent-timeline-empty" role="status">条件に一致する取得済み履歴はありません。</p>}
           {history.length > 0 && <ol className="agent-timeline-list agent-timeline-history-list">{history.map((event) => <HistoryRow key={event.event_id} event={event} project={event.project_id ? projectById.get(event.project_id) || null : null} />)}</ol>}
+          {historyError && <p className="agent-timeline-empty agent-timeline-error" role="alert">古い履歴を取得できませんでした。{historyError}</p>}
+          {historyHasMore && <button type="button" disabled={historyLoading || isPaused} onClick={loadOlderEvents}>{historyLoading ? "履歴を取得中…" : "さらに読み込む"}</button>}
           <div className="agent-timeline-history-actions">
             <button type="button" className="agent-timeline-export" disabled={history.length === 0} onClick={() => downloadTimelineCsv(history, setExportStatus)} aria-label="絞り込み済み履歴をCSV保存">絞り込み済み履歴をCSV保存</button>
             <span className="agent-timeline-export-status" role={exportStatus === "CSVを保存できませんでした。" ? "alert" : "status"} aria-live="polite">{exportStatus}</span>

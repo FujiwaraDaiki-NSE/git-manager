@@ -660,3 +660,18 @@ def test_project_local_mcp_config_and_hooks_shape() -> None:
     assert set(server) == {"url", "enabled"}
     assert server["url"] == "http://127.0.0.1:8762/mcp"
     assert server["enabled"] is False
+
+
+def test_history_sequence_cursors_and_legacy_unpaged_response(event_context):
+    worktree, _ = event_context
+    # Append order differs from occurrence order: the late event must be replayed.
+    for event_id, day in (("first", 2), ("second", 3), ("late", 1)):
+        assert post("/api/agent-events", status_payload(worktree, event_id, occurred_at=ts(day).isoformat())).status_code == 200
+    all_rows = get("/api/agent-events").json()["events"]
+    assert [row["event_id"] for row in all_rows] == ["first", "second", "late"]
+    boundary = all_rows[1]["sequence"]
+    assert [row["event_id"] for row in get("/api/agent-events", {"after_sequence": boundary}).json()["events"]] == ["late"]
+    assert [row["event_id"] for row in get("/api/agent-events", {"before_sequence": boundary, "limit": 2}).json()["events"]] == ["first"]
+    assert [row["event_id"] for row in get("/api/agent-events", {"limit": 2}).json()["events"]] == ["second", "late"]
+    assert get("/api/agent-events", {"after_sequence": all_rows[-1]["sequence"]}).json()["events"] == []
+    assert get("/api/agent-events", {"limit": 0}).status_code == 422
