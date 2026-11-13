@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRepoStream } from "./repo-stream";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   agentReportKey,
   agentStateLabel,
@@ -11,6 +11,8 @@ import {
   isExplicitAgentStatus,
 } from "./agent-overview.mjs";
 import {
+  AGENT_DECISION_STATUSES,
+  classifyCurrentAgentRows,
   currentAgentTasks,
   hasUnknownCurrentTasks,
 } from "./agent-timeline-tools.mjs";
@@ -135,7 +137,7 @@ function currentStatus(task: AgentTask) {
   return agentStateLabel(agentTaskState(task));
 }
 
-function CurrentRow({ project, task }: { project: TimelineProject; task: AgentTask }) {
+function CurrentRow({ project, task, oldDecision = false }: { project: TimelineProject; task: AgentTask; oldDecision?: boolean }) {
   const projectId = typeof task.project_id === "string" ? task.project_id : project.id;
   return (
     <li className={`agent-timeline-current-row status-${statusClass(agentTaskState(task))}`}>
@@ -143,6 +145,7 @@ function CurrentRow({ project, task }: { project: TimelineProject; task: AgentTa
         <span className="agent-timeline-row-head"><strong>{projectLabel(project, projectId)}</strong><span>{branchLabel(task.branch)}</span></span>
         <span className="agent-timeline-status-line"><span className="agent-timeline-status">{currentStatus(task)}</span>{task.attention && <span className="agent-timeline-attention">注意: {agentStateLabel(task.attention)}</span>}</span>
         <span className="agent-timeline-summary">{task.summary || "報告内容なし"}</span>
+        {oldDecision && <span className="agent-timeline-freshness">{relativeTime(task.occurred_at)}から（古い報告）</span>}
         <TimeValue value={task.occurred_at} />
       </ProjectBranch>
     </li>
@@ -215,6 +218,11 @@ export default function AgentTimelineSidebar({
   error = null,
 }: AgentTimelineProps) {
   const { loadOlderEvents, historyHasMore, historyLoading, historyError } = useRepoStream();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [isPaused, setIsPaused] = useState(false);
   const [frozenSnapshot, setFrozenSnapshot] = useState<TimelineSnapshot>({
     events: agentEvents,
@@ -239,11 +247,7 @@ export default function AgentTimelineSidebar({
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
   const currentRows = useMemo(
-    () => sortCurrentRows((currentAgentTasks(projects) as CurrentRow[])
-      .filter(({ task }) => {
-        const status = agentTaskState(task);
-        return status !== "completed" && status !== "stopped";
-      })),
+    () => sortCurrentRows(currentAgentTasks(projects) as CurrentRow[]),
     [projects],
   );
   const unknownCurrent = useMemo(() => hasUnknownCurrentTasks(projects), [projects]);
@@ -262,6 +266,14 @@ export default function AgentTimelineSidebar({
     () => filterTimelineCurrentRows(currentRows, filterOptions),
     [currentRows, filterOptions],
   );
+  const currentGroups = useMemo(
+    () => classifyCurrentAgentRows(filteredCurrentRows, now),
+    [filteredCurrentRows, now],
+  );
+  const renderCurrentRows = (rows: CurrentRow[], oldDecision = false) => (
+    <ul className="agent-timeline-list agent-timeline-current-list">{rows.map(({ project, task }) => <CurrentRow key={agentReportKey(task)} project={project} task={task} oldDecision={oldDecision} />)}</ul>
+  );
+  const decisionCount = AGENT_DECISION_STATUSES.reduce((sum, status) => sum + currentGroups.decisionCounts[status], 0);
   const historyDetails = useMemo(
     () => timelineHistoryDetails(events, filterOptions, projectById),
     [events, filterOptions, projectById],
@@ -334,12 +346,23 @@ export default function AgentTimelineSidebar({
 
         <section className="agent-timeline-current" aria-labelledby="agent-timeline-current-title">
           <div className="agent-timeline-section-heading"><h3 id="agent-timeline-current-title">現在の注意・状態</h3><span>{filteredCurrentRows.length}件</span></div>
-          <p className="agent-timeline-caption">明示された現在の状態です。履歴やライフサイクルからは補いません。</p>
+          <p className="agent-timeline-caption">最新の明示状態を表示。直近は24時間未満です。古い報告も状態は変えていません。</p>
           {currentLoading && <p className="agent-timeline-empty" role="status">現在の状態を取得中…</p>}
           {!currentLoading && filteredCurrentRows.length === 0 && unknownCurrent && <p className="agent-timeline-empty" role="status">現在の状態を取得できないプロジェクトがあります。</p>}
           {!currentLoading && filteredCurrentRows.length === 0 && !unknownCurrent && projects.length > 0 && <p className="agent-timeline-empty" role="status">条件に一致する明示された現在の状態はありません。</p>}
           {!currentLoading && filteredCurrentRows.length === 0 && !unknownCurrent && projects.length === 0 && !displaySnapshot.error && <p className="agent-timeline-empty" role="status">明示された現在の状態はありません。</p>}
-          {filteredCurrentRows.length > 0 && <ul className="agent-timeline-list agent-timeline-current-list">{filteredCurrentRows.map(({ project, task }) => <CurrentRow key={agentReportKey(task) || `${project.id}:${task.branch || "unknown"}`} project={project} task={task} />)}</ul>}
+          {filteredCurrentRows.length > 0 && <>
+            <div className="agent-timeline-current-group">
+              <h4>判断待ち · {decisionCount}件<span className="agent-timeline-decision-counts">{AGENT_DECISION_STATUSES.map((status) => `${statusLabels[status]} ${currentGroups.decisionCounts[status]}件`).join(" · ")}</span></h4>
+              {currentGroups.decision.recent.length > 0 && <><h5>直近 · {currentGroups.decision.recent.length}件</h5>{renderCurrentRows(currentGroups.decision.recent)}</>}
+              {currentGroups.decision.old.length > 0 && <details className="agent-timeline-old-reports"><summary>古い判断待ち · {currentGroups.decision.old.length}件</summary>{renderCurrentRows(currentGroups.decision.old, true)}</details>}
+              {currentGroups.decision.unknown.length > 0 && <><h5>報告時刻未取得 · {currentGroups.decision.unknown.length}件</h5>{renderCurrentRows(currentGroups.decision.unknown)}</>}
+            </div>
+            <div className="agent-timeline-current-group"><h4>いま動いている · {currentGroups.active.length}件</h4>{renderCurrentRows(currentGroups.active)}</div>
+            {currentGroups.finished.length > 0 && <div className="agent-timeline-current-group"><h4>直近の完了・中断 · {currentGroups.finished.length}件</h4>{renderCurrentRows(currentGroups.finished)}</div>}
+            {currentGroups.old.length > 0 && <details className="agent-timeline-old-reports"><summary>古い報告 · {currentGroups.old.length}件</summary>{renderCurrentRows(currentGroups.old)}</details>}
+            {currentGroups.unknown.length > 0 && <div className="agent-timeline-current-group"><h4>報告時刻未取得 · {currentGroups.unknown.length}件</h4>{renderCurrentRows(currentGroups.unknown)}</div>}
+          </>}
           {filteredCurrentRows.length > 0 && unknownCurrent && <p className="agent-timeline-unknown-note" role="status">一部のプロジェクトは現在状態未取得です。</p>}
         </section>
 
