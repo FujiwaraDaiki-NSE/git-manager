@@ -68,3 +68,37 @@ test("late replay cannot replace a live completed report with older attention", 
   const restored = applyBufferedAgentEvents(projects, [waiting]);
   assert.equal(currentAgentTasks(restored)[0].task.status, "completed");
 });
+
+test("freshness partitions explicit reports at 24h without changing status", async () => {
+  const { AGENT_REPORT_RECENT_MS, AGENT_DECISION_STATUSES, classifyCurrentAgentRows } = await import("../app/agent-timeline-tools.mjs");
+  const now = Date.parse("2026-11-13T12:00:00Z");
+  const row = (status, age) => ({ project: { id: "project" }, task: event(status, new Date(now - age).toISOString(), { status }) });
+  const recent = AGENT_DECISION_STATUSES.map((status) => row(status, AGENT_REPORT_RECENT_MS - 1));
+  const old = AGENT_DECISION_STATUSES.map((status) => row(status, AGENT_REPORT_RECENT_MS));
+  const active = ["investigating", "implementing", "testing", "reviewing"].map((status) => row(status, 0));
+  const finished = [row("completed", 0), row("stopped", 0)];
+  const oldActive = row("implementing", AGENT_REPORT_RECENT_MS);
+  const rows = [...recent, ...old, ...active, ...finished, oldActive];
+  const before = structuredClone(rows);
+  const groups = classifyCurrentAgentRows(rows, now);
+  assert.deepEqual(groups.decision.recent, recent);
+  assert.deepEqual(groups.decision.old, old);
+  assert.deepEqual(groups.decisionCounts, Object.fromEntries(AGENT_DECISION_STATUSES.map((status) => [status, 2])));
+  assert.deepEqual(groups.active, active);
+  assert.deepEqual(groups.finished, finished);
+  assert.deepEqual(groups.old, [oldActive]);
+  assert.deepEqual(rows, before);
+});
+
+test("missing and invalid report timestamps remain unknown rather than recent or old", async () => {
+  const { classifyCurrentAgentRows } = await import("../app/agent-timeline-tools.mjs");
+  const rows = [
+    { task: event("waiting", null, { status: "waiting_for_user" }) },
+    { task: event("active", "invalid", { status: "implementing" }) },
+  ];
+  const groups = classifyCurrentAgentRows(rows, Date.now());
+  assert.deepEqual(groups.decision.unknown, [rows[0]]);
+  assert.deepEqual(groups.unknown, [rows[1]]);
+  assert.deepEqual(groups.active, []);
+  assert.deepEqual(groups.old, []);
+});
