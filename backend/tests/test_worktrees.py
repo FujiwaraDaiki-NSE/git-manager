@@ -39,6 +39,7 @@ def test_linked_layout_and_activity_use_private_logs_head(
     repo_with_worktree: tuple[Path, Path],
 ) -> None:
     repo, worktree = repo_with_worktree
+    assert set(scanner.find_repos([str(repo.parent)])) == {str(repo), str(worktree)}
     layout = scanner.repo_layout(str(worktree))
     assert layout is not None
     assert layout.is_worktree is True
@@ -140,6 +141,7 @@ def test_separate_git_dir_is_a_normal_repository(tmp_path: Path) -> None:
     git(repo, "config", "user.email", "test@example.com")
     git(repo, "commit", "--allow-empty", "-qm", "initial")
 
+    assert list(scanner.find_repos([str(repo)])) == [str(repo)]
     layout = scanner.repo_layout(str(repo))
     result = gitinfo.collect(str(repo))
     records = gitinfo.list_worktrees(str(repo))
@@ -675,3 +677,34 @@ def test_fetch_round_fetches_once_per_common_repository(
     assert "/linked" not in main.STATE
     assert main.STATE["/repo"]["fetched_at"] == 123.0
     main.STATE.clear()
+
+
+def test_empty_git_dir_is_excluded_from_scan_and_cached_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid = tmp_path / "invalid"
+    (invalid / ".git").mkdir(parents=True)
+    nested = invalid / "nested"
+    nested.mkdir()
+    git(nested, "init", "-q", "-b", "main")
+    monkeypatch.setattr(main.paths, "to_container", lambda path: path)
+    monkeypatch.setattr(main.paths, "to_host", lambda path: path)
+    monkeypatch.setattr(main.config, "SCAN_ROOT", str(invalid))
+    monkeypatch.setattr(main.config, "FETCH_ENABLED", False)
+    monkeypatch.setattr(main, "watcher", None)
+    monkeypatch.setattr(main, "STATE", {})
+    monkeypatch.setattr(main.store, "save", lambda _state: None)
+    cached = {
+        str(path): {"common_dir": str(path), "is_worktree": False,
+                    "worktree_state": None}
+        for path in (invalid, nested)
+    }
+    monkeypatch.setattr(main.store, "load", lambda: cached)
+
+    assert scanner.git_dir(str(invalid)) is None
+    assert list(scanner.find_repos([str(invalid)])) == [str(nested)]
+    assert set(main._load_cached_state()) == {str(nested)}
+
+    main.STATE.update(cached)
+    asyncio.run(main._discover())
+    assert set(main.STATE) == {str(nested)}
