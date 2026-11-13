@@ -8,9 +8,9 @@ import {
   updateProjectUrl,
 } from "../app/project-flow.mjs";
 
-test("project URLs default to 24h while preserving an explicit current range", () => {
-  assert.equal(parseProjectUrl("?path=%2Fworkspace%2Frepo").range, "24h");
-  assert.equal(parseProjectUrl("?tab=flow").range, "24h");
+test("project URLs default to 7d while preserving an explicit current range", () => {
+  assert.equal(parseProjectUrl("?path=%2Fworkspace%2Frepo").range, "7d");
+  assert.equal(parseProjectUrl("?tab=flow").range, "7d");
   assert.equal(parseProjectUrl("?tab=flow&range=current").range, "current");
   assert.equal(parseProjectUrl("?tab=lanes&range=current").range, "current");
 });

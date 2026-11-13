@@ -98,7 +98,7 @@ function projectPath(project: TimelineProject | null | undefined) {
 function projectHref(project: TimelineProject | null | undefined, branch: string | null | undefined) {
   const path = projectPath(project);
   if (!path) return null;
-  const params = new URLSearchParams({ path, tab: "flow", range: "24h" });
+  const params = new URLSearchParams({ path, tab: "flow", range: "7d" });
   if (branch) params.set("lane", `branch:${branch}`);
   return `/project?${params.toString()}`;
 }
