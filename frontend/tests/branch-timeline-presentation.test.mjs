@@ -23,12 +23,14 @@ test('only explicit reports for exact row or local branches appear', () => {
   assert.deepEqual(rowAgentReports(row,null), []);
 });
 
-import { isUnpushedTip } from '../app/branch-timeline-presentation.mjs';
-test('unpush marking requires a known ahead count for the exact upstream and local tip', () => {
-  const lane = {head:'abc',upstream:'origin/main',upstream_ahead:2};
+import { isUnpushedCommit } from '../app/branch-timeline-presentation.mjs';
+test('unpush marking includes older commits and requires known reachability for the exact upstream', () => {
+  const lane = {head:'abc',upstream:'origin/main',unpushed_commits:['abc','parent']};
   const row = {tracking_ref:'origin/main',locals:[lane]};
-  assert.equal(isUnpushedTip(row,'abc'),true);
-  assert.equal(isUnpushedTip(row,'parent'),false);
-  assert.equal(isUnpushedTip({...row,locals:[{...lane,upstream_ahead:null}]},'abc'),false);
-  assert.equal(isUnpushedTip({...row,tracking_ref:'other'},'abc'),false);
+  assert.equal(isUnpushedCommit(row,'abc'),true);
+  assert.equal(isUnpushedCommit(row,'parent'),true);
+  assert.equal(isUnpushedCommit({...row,locals:[{...lane,unpushed_commits:null}]},'abc'),false);
+  assert.equal(isUnpushedCommit({...row,locals:[{...lane,unpushed_commits:[]}]},'abc'),false);
+  assert.equal(isUnpushedCommit(row,'pushed'),false);
+  assert.equal(isUnpushedCommit({...row,tracking_ref:'other'},'abc'),false);
 });

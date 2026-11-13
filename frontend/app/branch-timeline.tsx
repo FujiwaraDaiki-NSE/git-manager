@@ -26,7 +26,7 @@ import {
 import { agentStateLabel, agentTaskState } from "./agent-overview.mjs";
 import { uniqueLocalForCommit } from "./project-flow.mjs";
 import CopyButton from "./copy-button";
-import { timelineRowGeometry, agentFreshness, rowAgentReports, isUnpushedTip } from "./branch-timeline-presentation.mjs";
+import { timelineRowGeometry, agentFreshness, rowAgentReports, isUnpushedCommit } from "./branch-timeline-presentation.mjs";
 import { connectionEventTime, edgeDisplayLabel, evidenceLabel, operationLabel, referenceDisplayName } from "./branch-relations-tools.mjs";
 import type {
   ProjectBranchCommit,
@@ -266,7 +266,7 @@ function FlowEventPopover({
       <span>{shortHash(event.row.hash)} · {event.row.author || "作成者未取得"}</span>
       <time dateTime={event.row.date ?? undefined}>{relativeTime(event.row.date)} · {exactDate(event.row.date)}</time>
       <span>branch {rowLabel(event.lane)} · {event.row.is_head ? "HEAD" : "履歴"}</span>
-      <span>{event.row.is_unpushed ? "未push（追跡先に未到達のローカル先端）" : ""}</span>
+      <span>{event.row.is_unpushed ? "未push（git push で送られます）" : ""}</span>
       <span>親 {event.row.parents.length ? event.row.parents.map(shortHash).join(", ") : "未取得"}</span>
       <code>git show {shortHash(event.row.hash)}</code><CopyButton value={`git show ${shortHash(event.row.hash)}`} label="git showをコピー" />
       <button type="button" onClick={onSelect}>詳細を開く</button>
@@ -621,7 +621,7 @@ export default function BranchTimeline({
   const positioned = rows.flatMap((row) => (rowCommits.get(row.id) ?? []).flatMap((commit) => {
     const time = eventDate(commit);
     if (time === null || time > observationTime) return [];
-    return [{ row: { ...commit, is_head: row.tip_commits.some((tip) => tip.hash === commit.hash), is_merge: commit.parents.length > 1, is_unpushed: isUnpushedTip(row, commit.hash) }, lane: row, x: recentTimePosition(time, minTime, now), hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(row.id, commit.hash) }];
+    return [{ row: { ...commit, is_head: row.tip_commits.some((tip) => tip.hash === commit.hash), is_merge: commit.parents.length > 1, is_unpushed: isUnpushedCommit(row, commit.hash) }, lane: row, x: recentTimePosition(time, minTime, now), hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(row.id, commit.hash) }];
   }));
   const positionedByRow = new Map<string, typeof positioned>();
   positioned.forEach((event) => {
@@ -816,7 +816,7 @@ export default function BranchTimeline({
         <div className="flow-connection-toggle"><button aria-pressed={showAllConnections} className="subtle-button" type="button" onClick={() => setShowAllConnections((current) => !current)}>{showAllConnections ? "既定の線だけ表示" : "すべての線を表示"}</button><span>既定表示 {defaultVisibleConnectionCount}/{routeLinks.routes.length}件</span></div>
         <p className="flow-connection-status" role="status">{pinnedRow ? `${rowLabel(pinnedRow)} の関係を固定表示中（${pinnedConnectionCount}件）。チップを再クリックまたは Esc で解除` : focusedRoute ? <><strong>{focusedIndex + 1} / {routeLinks.routes.length} · {focusedRoute.endpoints}</strong><span>{focusedRoute.label}</span></> : showAllConnections ? "すべての関係を表示中です。時刻が逆転した関係は理由付きで線を描きません。○ が元、▶ が先です。" : "○ が元、▶ が先。時間の左から右へ進むS字で表示し、実線は操作の記録、破線は推定です。遠い行の関係はスタブとチップで示します。"}</p>
       </div></details>}
-      <div className="flow-legend" role="group" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージコミット</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 青=分岐</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 緑=マージ</span><span><i className="legend-line legend-line-estimate" aria-hidden="true" /> 推定の関係（破線）</span><span><i className="legend-dot legend-dot-unpushed" aria-hidden="true" /> 未push（判定できる先端のみ）</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
+      <div className="flow-legend" role="group" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージコミット</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 青=分岐</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 緑=マージ</span><span><i className="legend-line legend-line-estimate" aria-hidden="true" /> 推定の関係（破線）</span><span><i className="legend-dot legend-dot-unpushed" aria-hidden="true" /> 未push（upstreamなし・参照なしは判定不能のため強調なし）</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
       {selectedKey !== null && selectedRowId !== null && events.some((event) => event.row.hash === selectedKey && event.lane.id === selectedRowId) && <div className="flow-selected-command"><span>選択コミット</span><code>git show {shortHash(selectedKey)}</code><CopyButton value={`git show ${shortHash(selectedKey)}`} label="git showをコピー" /></div>}
       {rows.length === 0 ? <div className="empty-flow">{project.branch_rows === null ? "ブランチ行の取得に失敗しました。" : "表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。"}</div> : <div className="flow-scroll" role="region" aria-label="Gitフローマップ（横スクロール可能）" ref={flowScrollRef} style={{ "--flow-popover-space": previewId ? "360px" : "0px" } as CSSProperties} tabIndex={0} onKeyDown={(event) => { if (event.key === "Escape") setPinnedRowId(null); }}>
         <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}><span>ブランチ / 現在の作業状態</span><div className="flow-axis-track">{ticks.map((tick) => <span className={`flow-time-tick${tick.edge ? ` is-${tick.edge}` : ""}`} key={tick.time} style={{ left: `${tick.position}%` }}><span className="flow-tick-date">{tick.dateLabel}</span><span>{tick.timeLabel}</span></span>)}<span className="flow-current-label" style={{ left: `${observationX * trackWidth / 100}px` }}>{timeline === 100 ? "最新の観測" : "選択日時"}</span></div></div>

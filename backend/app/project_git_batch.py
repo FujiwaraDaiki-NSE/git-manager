@@ -72,6 +72,17 @@ class Batch:
             self.reachable[head] = seen
         return self.reachable[head]
 
+    def unpushed_commits(self, branch_ref):
+        """Exact upstream..branch hashes from the shared persisted walk."""
+        branch = self.refs.get(branch_ref) if self.refs is not None else None
+        if branch is None or not branch["upstream"]:
+            return None
+        upstream = self.ancestors(self.resolve(branch["upstream"]))
+        local = self.ancestors(self.resolve(branch_ref))
+        if upstream is None or local is None:
+            return None
+        return sorted(local - upstream)
+
     def counts(self, default_ref, branch_ref):
         left = self.ancestors(self.resolve(default_ref))
         right = self.ancestors(self.resolve(branch_ref))

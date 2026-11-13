@@ -201,6 +201,7 @@ export type ProjectLane = {
   detached: boolean | null;
   upstream: string | null;
   upstream_ahead: number | null;
+  unpushed_commits: string[] | null;
   upstream_behind: number | null;
   branch_line: string | null;
   last_commit: Commit & { short?: string } | null;

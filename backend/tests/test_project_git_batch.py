@@ -47,3 +47,33 @@ def test_shallow_counts_and_bases_match_git(tmp_path):
     actual = project.build(str(repo), str(repo))
     expected = project.build.__wrapped__(str(repo), str(repo))
     assert without_times(actual) == without_times(expected)
+
+
+def test_unpushed_hashes_match_git_and_ahead_with_unknown_distinct_from_empty(tmp_path):
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    git(repo, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    git(repo, "update-ref", "refs/remotes/origin/main", "main")
+    git(repo, "branch", "--set-upstream-to=origin/main", "main")
+    git(repo, "branch", "synced")
+    git(repo, "branch", "--set-upstream-to=origin/main", "synced")
+    git(repo, "branch", "local-only")
+    commit(repo, "first unpushed")
+    git(repo, "switch", "-qc", "side")
+    commit(repo, "side unpushed")
+    git(repo, "switch", "-q", "main")
+    commit(repo, "second unpushed")
+    git(repo, "merge", "--no-ff", "-qm", "unpushed merge", "side")
+    git(repo, "branch", "missing")
+    git(repo, "config", "branch.missing.remote", "origin")
+    git(repo, "config", "branch.missing.merge", "refs/heads/deleted")
+    result = project.build(str(repo), str(repo))
+    lanes = {lane["branch"]: lane for lane in result["lanes"]}
+    expected = set(git(repo, "rev-list", "origin/main..main").splitlines())
+    assert set(lanes["main"]["unpushed_commits"]) == expected
+    assert len(expected) == lanes["main"]["upstream_ahead"] == 4
+    assert lanes["synced"]["unpushed_commits"] == []
+    assert lanes["local-only"]["unpushed_commits"] is None
+    assert lanes["missing"]["unpushed_commits"] is None
+    row_lane = next(lane for row in result["branch_rows"] for lane in row["locals"] if lane["branch"] == "main")
+    assert set(row_lane["unpushed_commits"]) == expected

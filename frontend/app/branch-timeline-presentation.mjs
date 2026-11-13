@@ -27,8 +27,7 @@ export function rowAgentReports(row, tasks) {
   return tasks.filter((task) => branches.has(task.branch) && agentTaskState(task) !== null);
 }
 
-// Ahead counts prove the local tip is unreachable from its configured upstream.
-// Older commits have no per-ref reachability evidence in the project API.
-export function isUnpushedTip(row, hash) {
-  return row.locals.some((lane) => lane.head === hash && lane.upstream !== null && lane.upstream === row.tracking_ref && lane.upstream_ahead !== null && lane.upstream_ahead > 0);
+// Per-branch reachability is authoritative; null means it cannot be judged.
+export function isUnpushedCommit(row, hash) {
+  return row.locals.some((lane) => lane.upstream !== null && lane.upstream === row.tracking_ref && lane.unpushed_commits !== null && lane.unpushed_commits.includes(hash));
 }

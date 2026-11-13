@@ -41,6 +41,16 @@ def _iso_epoch(value: Any) -> float | None:
 
 
 @project_facts.cached
+def _unpushed_commits(repo: str, branch_ref: str) -> list[str] | None:
+    batch = project_git_batch.current(repo)
+    if batch is not None:
+        return batch.unpushed_commits(branch_ref)
+    branch_name = branch_ref.removeprefix("refs/heads/")
+    raw = gitinfo._run(repo, ["rev-list", f"{branch_name}@{{upstream}}..{branch_ref}", "--"])
+    return sorted(raw.splitlines()) if raw is not None else None
+
+
+@project_facts.cached
 def _commit_metadata(repo: str, commit_hash: str | None) -> dict[str, Any] | None:
     if not commit_hash:
         return None
@@ -814,6 +824,7 @@ def build(
                 "detached": status["detached"],
                 "upstream": status["upstream"],
                 "upstream_ahead": status["upstream_ahead"],
+                "unpushed_commits": _unpushed_commits(repo, branch_ref),
                 "upstream_behind": status["upstream_behind"],
                 "branch_line": status["branch_line"],
                 "last_commit": commit,
@@ -871,6 +882,7 @@ def build(
                 "detached": worktree["detached"],
                 "upstream": status["upstream"],
                 "upstream_ahead": status["upstream_ahead"],
+                "unpushed_commits": None,
                 "upstream_behind": status["upstream_behind"],
                 "branch_line": status["branch_line"],
                 "last_commit": commit,
