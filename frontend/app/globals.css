@@ -4448,3 +4448,5 @@ html[data-theme="dark"] {
 .flow-lane-meta, .flow-lane-meta > .flow-state-help:last-child { overflow: visible; }
 .flow-row:focus-visible, .flow-state-help:focus-visible { outline: 2px solid var(--control-blue); outline-offset: -2px; }
 .flow-selected-command { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0; font-size: 12px; }
+
+.branch-relations-pagination { align-items: center; color: var(--control-muted); display: flex; flex-wrap: wrap; font: 10px var(--control-mono); gap: 8px 12px; padding-top: 6px; }

@@ -211,3 +211,14 @@ export function visiblePairsMarkdown({ repository, selectedRef, coverage, filter
   if (!pairs.length) lines.push("| （表示できるペアなし） | | | | | | ");
   return `${lines.join("\n")}\n`;
 }
+
+// Each list grows independently after filtering and sorting.
+export const RELATION_PAIRS_PAGE_SIZE = 20;
+export const RELATION_EVENTS_PAGE_SIZE = 10;
+export const RELATION_UNRESOLVED_PAGE_SIZE = 20;
+
+export function visibleRelationRows(items, limit) {
+  if (!Array.isArray(items)) throw new TypeError("items must be an explicit array");
+  if (!Number.isInteger(limit) || limit < 1) throw new RangeError("limit must be a positive integer");
+  return items.slice(0, limit);
+}

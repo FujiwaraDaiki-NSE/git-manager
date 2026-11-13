@@ -17,6 +17,10 @@ import {
   syncSelectedReferenceId,
 } from "./branch-relations-tools.mjs";
 import {
+  RELATION_PAIRS_PAGE_SIZE,
+  RELATION_EVENTS_PAGE_SIZE,
+  RELATION_UNRESOLVED_PAGE_SIZE,
+  visibleRelationRows,
   filterHistoricalEdges,
   filterVisibleReferencePairs,
   sortVisibleReferencePairs,
@@ -111,6 +115,23 @@ const RELATION_FILTERS = ["equal", "ahead", "behind", "diverged", "unrelated", "
 const REF_KIND_FILTERS = ["local", "remote", "detached"] as const;
 const EVIDENCE_FILTERS = ["pull_request", "merge_base", "reflog"] as const;
 const OPERATION_FILTERS = ["fast_forward", "merge", "branch_create", "pull_request"] as const;
+
+function useVisibleRows<T>(items: T[], context: string, pageSize: number) {
+  const [page, setPage] = useState({ context, limit: pageSize });
+  if (page.context !== context) setPage({ context, limit: pageSize });
+  const limit = page.context === context ? page.limit : pageSize;
+  return {
+    rows: visibleRelationRows(items, limit) as T[],
+    showMore: () => setPage({ context, limit: limit + pageSize }),
+  };
+}
+
+function MoreRelations({ total, shown, label, onMore }: { total: number; shown: number; label: string; onMore: () => void }) {
+  return <div className="branch-relations-pagination">
+    <span role="status" aria-live="polite">{total}件中{shown}件を表示</span>
+    {shown < total && <button type="button" className="subtle-button" onClick={onMore} aria-label={label + "をさらに表示"}>さらに表示</button>}
+  </div>;
+}
 
 function RefName({ reference: ref }: { reference: ProjectBranchConnectionRef | undefined }) {
   if (!ref) return <span className="branch-relation-ref-missing">参照未取得</span>;
@@ -246,6 +267,11 @@ export default function BranchRelations({
       return terms.every((term) => haystack.includes(term));
     });
   }, [historyEvidence, historyOperation, query, selectedRefId, showAllUnresolved, unresolved]);
+  const pageContext = JSON.stringify([project.id, project.main_path, selectedRefId, selectionContext, query]);
+  const pairPage = useVisibleRows<ReturnType<typeof selectReferencePairs>[number]>(filteredPairs, JSON.stringify([pageContext, pairRelation, pairKind, pairSort]), RELATION_PAIRS_PAGE_SIZE);
+  const historyContext = JSON.stringify([pageContext, historyEvidence, historyOperation]);
+  const eventPage = useVisibleRows<ProjectBranchConnectionEdge>(filteredEdges, historyContext, RELATION_EVENTS_PAGE_SIZE);
+  const unresolvedPage = useVisibleRows(filteredUnresolved, JSON.stringify([historyContext, showAllUnresolved]), RELATION_UNRESOLVED_PAGE_SIZE);
   const counts: Record<string, number> = useMemo(() => (oriented as Array<{ relation: string }>).reduce<Record<string, number>>((result, item) => {
     result[item.relation] = (result[item.relation] ?? 0) + 1;
     return result;
@@ -276,7 +302,7 @@ export default function BranchRelations({
   const selectedRef = selectedRefId ? refsById.get(selectedRefId) : undefined;
   const exportCurrentPairs = () => {
     downloadText(
-      visiblePairsJson({ repository: project.main_path, selectedRef, coverage: exportCoverage, filters: exportFilters, pairs: filteredPairs, refsById }),
+      visiblePairsJson({ repository: project.main_path, selectedRef, coverage: exportCoverage, filters: exportFilters, pairs: pairPage.rows, refsById }),
       "application/json;charset=utf-8",
       "gitdash-branch-relations.json",
     );
@@ -288,7 +314,7 @@ export default function BranchRelations({
       return;
     }
     try {
-      await navigator.clipboard.writeText(visiblePairsMarkdown({ repository: project.main_path, selectedRef, coverage: exportCoverage, filters: exportFilters, pairs: filteredPairs, refsById }));
+      await navigator.clipboard.writeText(visiblePairsMarkdown({ repository: project.main_path, selectedRef, coverage: exportCoverage, filters: exportFilters, pairs: pairPage.rows, refsById }));
       setExportStatus("表示中の関係をMarkdownでコピーしました。");
     } catch {
       setExportStatus("Markdownをコピーできませんでした。");
@@ -327,7 +353,8 @@ export default function BranchRelations({
               <div className="branch-relations-export-actions"><button type="button" className="subtle-button" disabled={!filteredPairs.length} onClick={exportCurrentPairs} aria-label="表示中の関係をJSON保存">JSON保存</button><button type="button" className="subtle-button" disabled={!filteredPairs.length} onClick={copyCurrentPairs} aria-label="表示中の関係をMarkdownコピー">Markdownコピー</button></div>
             </div>
             {exportStatus && <p className="branch-relations-export-status" role="status" aria-live="polite">{exportStatus}</p>}
-            {pairs.length === 0 ? <p className="branch-relations-empty">現在の参照比較は未取得です。ペア情報が返るまでGitの意味を推測しません。</p> : filteredPairs.length === 0 ? <p className="branch-relations-empty">検索条件に一致する関係はありません。</p> : <ul className="branch-relations-pairs" tabIndex={0} aria-label="現在の比較結果（スクロール可能）">{filteredPairs.map((item: ReturnType<typeof selectReferencePairs>[number]) => <RelationPairRow item={item} key={`${item.pair.left_ref_id}:${item.pair.right_ref_id}`} refsById={refsById} selectedRef={refsById.get(selectedRefId)} />)}</ul>}
+            {pairs.length === 0 ? <p className="branch-relations-empty">現在の参照比較は未取得です。ペア情報が返るまでGitの意味を推測しません。</p> : filteredPairs.length === 0 ? <p className="branch-relations-empty">検索条件に一致する関係はありません。</p> : <ul className="branch-relations-pairs" tabIndex={0} aria-label="現在の比較結果（スクロール可能）">{pairPage.rows.map((item: ReturnType<typeof selectReferencePairs>[number]) => <RelationPairRow item={item} key={`${item.pair.left_ref_id}:${item.pair.right_ref_id}`} refsById={refsById} selectedRef={refsById.get(selectedRefId)} />)}</ul>}
+            <MoreRelations total={filteredPairs.length} shown={pairPage.rows.length} label="現在の関係" onMore={pairPage.showMore} />
           </div>}
 
           <div className="branch-relations-history-section">
@@ -336,11 +363,12 @@ export default function BranchRelations({
               <label><span>根拠</span><select aria-label="過去イベントの根拠で絞り込み" value={historyEvidence} onChange={(event) => setHistoryEvidence(event.target.value)}><option value="">すべて</option>{EVIDENCE_FILTERS.map((evidence) => <option key={evidence} value={evidence}>{evidenceLabel(evidence)}</option>)}</select></label>
               <label><span>操作</span><select aria-label="過去イベントの操作で絞り込み" value={historyOperation} onChange={(event) => setHistoryOperation(event.target.value)}><option value="">すべて</option>{OPERATION_FILTERS.map((operation) => <option key={operation} value={operation}>{operationLabel(operation)}</option>)}</select></label>
             </div>
-            {filteredEdges.length === 0 ? <p className="branch-relations-empty">表示できる操作イベントはありません。根拠が未取得の履歴は推測していません。</p> : <ul className="branch-relations-events">{filteredEdges.map((edge: ProjectBranchConnectionEdge) => <ConnectionEventRow edge={edge} key={edge.id} refs={refs} rows={rows} selectedRefId={selectedRefId} />)}</ul>}
+            {filteredEdges.length === 0 ? <p className="branch-relations-empty">表示できる操作イベントはありません。根拠が未取得の履歴は推測していません。</p> : <ul className="branch-relations-events">{eventPage.rows.map((edge: ProjectBranchConnectionEdge) => <ConnectionEventRow edge={edge} key={edge.id} refs={refs} rows={rows} selectedRefId={selectedRefId} />)}</ul>}
+            <MoreRelations total={filteredEdges.length} shown={eventPage.rows.length} label="過去イベント" onMore={eventPage.showMore} />
             {selectedRefId && unknownHistoryEdges > 0 && <p className="branch-relations-note" role="status">{unknownHistoryEdges}件の過去イベントは取り込み元・先の参照 ID が未取得のため、対象の参照には自動追加していません。対象を解除すると全件を確認できます。</p>}
           </div>
 
-          {unresolved.length > 0 && <details className="branch-relations-unresolved"><summary>未解決の関係 ({unresolved.length}件・表示 {filteredUnresolved.length}件)</summary><div className="branch-relations-unresolved-controls"><label><input type="checkbox" checked={showAllUnresolved} onChange={(event) => setShowAllUnresolved(event.target.checked)} /> 対象の参照を特定できない履歴も全件表示</label>{selectedRefId && unknownUnresolved > 0 && <span>{unknownUnresolved}件は取り込み元・先の参照 ID が未取得です。</span>}</div>{filteredUnresolved.length > 0 ? <ul>{filteredUnresolved.map((item) => <li key={item.id}><strong>{item.source_ref_id ? refName(refs, item.source_ref_id, item.source || "操作元の参照未取得") : item.source || "操作元の参照未取得"} → {item.target_ref_id ? refName(refs, item.target_ref_id, item.target || "操作先の参照未取得") : item.target || "操作先の参照未取得"}</strong>{item.evidence && <span>{evidenceLabel(item.evidence)}</span>}{item.operation && <span>{operationLabel(item.operation)}</span>}<span>{item.occurred_at ? `操作時刻 ${exactDate(item.occurred_at)}` : "操作時刻未取得"}</span><span>{reasonLabel(item.reason)}</span>{item.pr_number !== null && item.pr_number !== undefined && (item.pr_url ? <a href={item.pr_url} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <span>PR #{item.pr_number}</span>)}{(item.source_commit_hash || item.target_commit_hash || item.commit_hash) && <span>根拠ハッシュ: {shortHash(item.source_commit_hash ?? item.target_commit_hash ?? item.commit_hash)}</span>}</li>)}</ul> : <p className="branch-relations-empty">この対象と検索条件に一致する未解決履歴はありません。「対象の参照を特定できない履歴も全件表示」を選ぶと全件を確認できます。</p>}</details>}
+          {unresolved.length > 0 && <details className="branch-relations-unresolved"><summary>未解決の関係 ({unresolved.length}件・一致 {filteredUnresolved.length}件)</summary><div className="branch-relations-unresolved-controls"><label><input type="checkbox" checked={showAllUnresolved} onChange={(event) => setShowAllUnresolved(event.target.checked)} /> 対象の参照を特定できない履歴も全件表示</label>{selectedRefId && unknownUnresolved > 0 && <span>{unknownUnresolved}件は取り込み元・先の参照 ID が未取得です。</span>}</div>{filteredUnresolved.length > 0 ? <ul>{unresolvedPage.rows.map((item) => <li key={item.id}><strong>{item.source_ref_id ? refName(refs, item.source_ref_id, item.source || "操作元の参照未取得") : item.source || "操作元の参照未取得"} → {item.target_ref_id ? refName(refs, item.target_ref_id, item.target || "操作先の参照未取得") : item.target || "操作先の参照未取得"}</strong>{item.evidence && <span>{evidenceLabel(item.evidence)}</span>}{item.operation && <span>{operationLabel(item.operation)}</span>}<span>{item.occurred_at ? `操作時刻 ${exactDate(item.occurred_at)}` : "操作時刻未取得"}</span><span>{reasonLabel(item.reason)}</span>{item.pr_number !== null && item.pr_number !== undefined && (item.pr_url ? <a href={item.pr_url} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <span>PR #{item.pr_number}</span>)}{(item.source_commit_hash || item.target_commit_hash || item.commit_hash) && <span>根拠ハッシュ: {shortHash(item.source_commit_hash ?? item.target_commit_hash ?? item.commit_hash)}</span>}</li>)}</ul> : <p className="branch-relations-empty">この対象と検索条件に一致する未解決履歴はありません。「対象の参照を特定できない履歴も全件表示」を選ぶと全件を確認できます。</p>}<MoreRelations total={filteredUnresolved.length} shown={unresolvedPage.rows.length} label="未解決の関係" onMore={unresolvedPage.showMore} /></details>}
           <p className="branch-relations-coverage-note">reflog は期限切れ・削除済みになるため、過去のブランチ識別情報を完全に復元できないことがあります。取得状態が「一部取得」「未取得」の関係は、Gitの意味を補って表示していません。</p>
         </>}
       </div>
