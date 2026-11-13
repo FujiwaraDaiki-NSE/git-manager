@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
-from app import branch_history, branch_ref_relations, branch_relation_events, gitinfo
+from app import branch_history, branch_ref_relations, branch_relation_events, gitinfo, project_facts, project_git_batch
 
 
 _FETCH_CONFIG_RE = re.compile(r"^remote\.(?P<remote>.+)\.fetch$")
@@ -111,6 +111,9 @@ def _is_remote_tracking_name(
 def _hash(repo: str, ref: str | None) -> str | None:
     if not ref:
         return None
+    batch = project_git_batch.current(repo)
+    if batch is not None:
+        return batch.resolve(ref)
     raw = gitinfo._run(repo, ["rev-parse", "--verify", "--quiet", ref])
     value = raw.strip() if raw else ""
     return value or None
@@ -159,6 +162,11 @@ def _historical_row_key(number: int) -> str:
 
 
 def _ref_contains(repo: str, ref: str, commit_hash: str) -> bool:
+    batch = project_git_batch.current(repo)
+    if batch is not None:
+        reachable = batch.ancestors(batch.resolve(ref))
+        if reachable is not None and batch.commits is not None and commit_hash in batch.commits:
+            return commit_hash in reachable
     return gitinfo._run(repo, ["merge-base", "--is-ancestor", commit_hash, ref]) is not None
 
 
@@ -723,6 +731,11 @@ def _pr_target_candidates(
 
 
 def _ancestor_status(repo: str, ancestor: str, descendant: str) -> bool | None:
+    batch = project_git_batch.current(repo)
+    if batch is not None:
+        reachable = batch.ancestors(descendant)
+        if reachable is not None and batch.commits is not None and ancestor in batch.commits:
+            return ancestor in reachable
     _output, status = gitinfo._run_with_status(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
     if status == 0:
         return True
@@ -732,6 +745,9 @@ def _ancestor_status(repo: str, ancestor: str, descendant: str) -> bool | None:
 
 
 def _object_available(repo: str, commit_hash: str) -> bool | None:
+    batch = project_git_batch.current(repo)
+    if batch is not None and batch.commits is not None and commit_hash in batch.commits:
+        return True
     _output, status = gitinfo._run_with_status(repo, ["cat-file", "-e", f"{commit_hash}^{{commit}}"])
     if status == 0:
         return True
@@ -752,8 +768,9 @@ def connections(
     A common ancestor proves shared history, not the name of a branch's
     creator. All pairwise ancestry facts are exposed separately from events.
     """
-    ref_relations = branch_ref_relations.build(repo, rows)
-    recorded = branch_relation_events.build(repo, rows)
+    git_rows = project_facts.relation_rows(rows)
+    ref_relations = project_facts.observe("project.ref_relations", [repo, git_rows], lambda: branch_ref_relations.build(repo, rows))
+    recorded = project_facts.observe("project.reflog_relations", [repo, git_rows], lambda: branch_relation_events.build(repo, rows))
     if rows is None:
         return {**ref_relations, **recorded, "status": "unavailable"}
     current_rows = _connection_rows(rows)

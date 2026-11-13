@@ -13,6 +13,7 @@ export type RepoStreamState = {
   agentEvents: AgentEvent[];
   latestAgentEvent: AgentEvent | null;
   projectSummaries: ProjectSummary[];
+  projectUpdates: Map<string, number>;
   agentDataLoading: boolean;
   agentDataError: string | null;
   projectsLoading: boolean;
@@ -57,6 +58,7 @@ function useRepoStreamState(): RepoStreamState {
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [latestAgentEvent, setLatestAgentEvent] = useState<AgentEvent | null>(null);
   const [projectSummaries, setProjectSummaries] = useState<ProjectSummary[]>([]);
+  const [projectUpdates, setProjectUpdates] = useState<Map<string, number>>(new Map());
   const [agentDataLoading, setAgentDataLoading] = useState(true);
   const [agentDataError, setAgentDataError] = useState<string | null>(null);
 
@@ -203,6 +205,15 @@ function useRepoStreamState(): RepoStreamState {
         return next;
       });
     });
+    es.addEventListener("project", (event) => {
+      const update = JSON.parse((event as MessageEvent).data) as { id: string };
+      setProjectUpdates((previous) => {
+        const next = new Map(previous);
+        const sequence = previous.get(update.id);
+        next.set(update.id, sequence === undefined ? 1 : sequence + 1);
+        return next;
+      });
+    });
     es.addEventListener("removed", (event) => {
       const path = (JSON.parse((event as MessageEvent).data) as { path: string })
         .path;
@@ -256,7 +267,7 @@ function useRepoStreamState(): RepoStreamState {
     };
   }, []);
 
-  return { subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsError, refreshProjects: () => refreshRef.current(), loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
+  return { subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsError, refreshProjects: () => refreshRef.current(), loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
 }
 
 const RepoStreamContext = createContext<RepoStreamState | null>(null);
