@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, MutableRefObject, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, MutableRefObject, SetStateAction, ReactNode } from "react";
 import {
   aggregateTimelineConnectionChips,
   groupTimelineEventsByRow,
@@ -27,7 +27,6 @@ import { agentStateLabel, agentTaskState } from "./agent-overview.mjs";
 import { uniqueLocalForCommit } from "./project-flow.mjs";
 import CopyButton from "./copy-button";
 import { timelineRowGeometry, agentFreshness, rowAgentReports, isUnpushedTip } from "./branch-timeline-presentation.mjs";
-import BranchRelations from "./branch-relations";
 import { connectionEventTime, edgeDisplayLabel, evidenceLabel, operationLabel, referenceDisplayName } from "./branch-relations-tools.mjs";
 import type {
   ProjectBranchCommit,
@@ -464,7 +463,7 @@ export default function BranchTimeline({
   selectedKey,
   selectedRowId,
   selectedLane,
-  relationRef,
+  renderSections,
   showMerged,
   onTimelineChange,
   onRangeChange,
@@ -479,7 +478,7 @@ export default function BranchTimeline({
   selectedKey: string | null;
   selectedRowId: string | null;
   selectedLane: string | null;
-  relationRef: string | null;
+  renderSections: (notes: ReactNode) => ReactNode;
   showMerged: boolean;
   onTimelineChange: (value: number) => void;
   onRangeChange: (range: TimeRange) => void;
@@ -796,7 +795,7 @@ export default function BranchTimeline({
   const hiddenConnectionCount = connectionSelection.hidden.length;
   const observationX = recentTimePosition(observationTime, minTime, now);
   return (
-    <section className="flow-section" aria-labelledby="flow-map-title">
+    <><section className="flow-section" aria-labelledby="flow-map-title">
       <div className="flow-controls">
         <div className="flow-heading"><div><h3 id="flow-map-title">ブランチの分岐と合流</h3><p>ブランチを選ぶと作業の詳細、点を選ぶとコミットの詳細を開けます。</p></div><span className="flow-direction">過去を圧縮 → 直近を詳しく</span></div>
         <div className="flow-toolbar">
@@ -919,7 +918,8 @@ export default function BranchTimeline({
       {selection.total <= rows.length && hiddenConnectionCount > 0 && <p className="flow-pr-status">{hiddenConnectionCount} 件の関係は表示行の外にあります。参照を選んだ全関係一覧で確認できます。</p>}
       {hiddenRelationCount > 0 && <p className="flow-pr-status">{showAllConnections ? "すべての関係を表示しています。" : `既定では ${defaultVisibleConnectionCount}/${routeLinks.routes.length} 件の関係を表示しています。行間が遠い関係はスタブです。残りは行にカーソルを合わせる・キーボードで行をフォーカスする・接続を選ぶ、または「すべての線を表示」で確認できます。`}</p>}
       {sameRowConnectionEdges.length > 0 && <details className="flow-help flow-connection-note"><summary>同じブランチ行にある参照間イベント ({sameRowConnectionEdges.length}件)</summary><p>取り込み元と取り込み先が同じ行に重なるため、グラフ上で矢印を分けて描画できません。下の全関係一覧ではローカル・リモートなどの参照 ID を分けて確認できます。</p><ul>{sameRowConnectionEdges.map((edge) => <li key={`same-row:${edge.id}`}>{edgeDisplayLabel(edge, refs)} · {edge.label || "関係イベント"} · {evidenceLabel(edge.evidence)}{edge.operation ? ` · ${operationLabel(edge.operation)}` : ""} · グラフ未描画（同一行）</li>)}</ul></details>}
-      <BranchRelations project={project} relationRef={relationRef} selectedLane={selectedLane} selectedRowId={selectedRowId} />
+    </section>
+    {renderSections(<>
 
       {((project.branch_connections?.unresolved.length ?? 0) > 0 || connectionEdges.some((edge) => !hasEdgeEvidence(edge))) && <details className="flow-help"><summary>未解決のブランチ関係 ({(project.branch_connections?.unresolved.length ?? 0) + connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).length})</summary><p role="status">未解決の操作と関係は、上の「ブランチ・参照の全関係と関連履歴」で対象の参照ごとに確認できます。取得できない参照を含む全件表示にも切り替えられます。</p><a href="#branch-relations-title">全関係一覧を開く</a>{connectionEdges.filter((edge) => !hasEdgeEvidence(edge)).map((edge) => <p key={`missing:${edge.id}`} role="status">{edge.label || "関係イベント"} · 接続元または接続先コミットのハッシュ・日時の証拠が未取得のため、線を描画できません。</p>)}</details>}
       <details className="flow-help"><summary>グラフの見方・キーボード操作</summary><p>ブランチ名で作業詳細、点でコミット詳細を開きます。時間は左から右へ進み、直近ほど広く表示します。左右キーで同じ行のコミット、上下キーで別の行へ移動し、Enterで詳細を開きます。</p><p>薄い横線はブランチ行のガイドです。コミット間の線は実際の親子関係を表します。関係線は分岐を青、マージを緑で表示し、操作の記録は実線、推定は破線です。接続元は白抜きの丸、接続先は塗りつぶした矢印です。関係線は時間を逆走しないS字で描き、時刻が逆転した関係は線を描かず端点と理由を表示します。行間が遠い関係は短いスタブと相手名のチップで示し、チップまたは上の選択欄から1本ずつ確認できます。複数のチップは行上部で集約され、集約チップを押すとその行を固定できます。</p></details>
@@ -931,6 +931,7 @@ export default function BranchTimeline({
         {project.github.status === "available" && <span>PR情報: GitHubから取得済み · {exactDate(project.github.checked_at === null ? null : new Date(project.github.checked_at * 1000).toISOString())}</span>}
         {project.github.status === "unavailable" && <span>PR情報は取得できませんでした。{project.github.reason ?? "GitHubの認証または接続を確認してください。"}</span>}
       </div>
-    </section>
+    </>)}
+    </>
   );
 }
