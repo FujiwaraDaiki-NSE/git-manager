@@ -82,7 +82,7 @@ def _validate(result):
         if result["default_hash"] and lane["head"] and (lane["default_ahead"] is None or lane["default_behind"] is None):
             raise RuntimeError("デフォルトブランチとの差分を取得できませんでした")
     connections = result["branch_connections"]
-    if (result["branch_rows"] and connections["ancestry_status"] in {"partial", "unavailable"}) or (result["branch_rows"] and connections["reflog_status"] != "available"):
+    if (result["branch_rows"] and connections["ancestry_status"] == "unavailable") or (result["branch_rows"] and connections["reflog_status"] not in {"available", "partial"}):
         raise RuntimeError("ブランチ関係のGit情報を完全に取得できませんでした")
     if result["range"] == "all" and any(row.get("stats") is None for row in result["graph"]["rows"]):
         raise RuntimeError("コミットの集計を取得できませんでした")
