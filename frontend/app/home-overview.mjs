@@ -82,12 +82,14 @@ export function aggregateAgentCounts(projects) {
   return Object.fromEntries(
     AGENT_SUMMARY_KEYS.map((key) => {
       let total = 0;
+      let known = projects.length === 0;
       for (const project of projects) {
         const value = agentCount(project, key);
-        if (value === null) return [key, null];
+        if (value === null) continue;
+        known = true;
         total += value;
       }
-      return [key, total];
+      return [key, known ? total : null];
     }),
   );
 }
