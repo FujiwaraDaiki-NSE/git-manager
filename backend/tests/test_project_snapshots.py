@@ -64,6 +64,40 @@ def test_failed_build_is_not_persisted(snapshot_repo, monkeypatch):
     assert project_snapshots.load(str(repo)) is None
 
 
+@pytest.mark.parametrize("ancestry_status,reflog_status", [("partial", "available"), ("available", "partial"), ("partial", "partial")])
+def test_partial_connections_are_persisted_and_returned(snapshot_repo, monkeypatch, ancestry_status, reflog_status):
+    repo, state = snapshot_repo
+    original = project.build
+    def partial(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result["branch_connections"]["ancestry_status"] = ancestry_status
+        result["branch_connections"]["reflog_status"] = reflog_status
+        return result
+    monkeypatch.setattr(project, "build", partial)
+    actual = read(repo, state)
+    assert project_snapshots.load(str(repo)) is not None
+    again = read(repo, state)
+    for result in (actual, again):
+        assert result["snapshot"]["status"] == "ready"
+        assert result["branch_connections"]["ancestry_status"] == ancestry_status
+        assert result["branch_connections"]["reflog_status"] == reflog_status
+    assert again["snapshot"] == actual["snapshot"]
+
+
+@pytest.mark.parametrize("status_key", ["ancestry_status", "reflog_status"])
+def test_unavailable_connections_are_not_persisted(snapshot_repo, monkeypatch, status_key):
+    repo, state = snapshot_repo
+    original = project.build
+    def unavailable(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result["branch_connections"][status_key] = "unavailable"
+        return result
+    monkeypatch.setattr(project, "build", unavailable)
+    with pytest.raises(RuntimeError, match="ブランチ関係のGit情報を完全に取得できませんでした"):
+        read(repo, state)
+    assert project_snapshots.load(str(repo)) is None
+
+
 def test_stale_is_returned_without_waiting_and_failure_is_explicit(snapshot_repo, monkeypatch):
     repo, state = snapshot_repo
     before = read(repo, state)
