@@ -1,6 +1,7 @@
 "use client";
 
 import "./project-switcher.css";
+import { useRepoStream } from "./repo-stream";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -15,7 +16,6 @@ import {
   serializeRecentProjectPaths,
   sortProjectSwitcherProjects,
 } from "./project-switcher-tools.mjs";
-import type { ProjectSummary } from "./types";
 
 type ProjectSwitcherOrder = "recent" | "name";
 
@@ -32,10 +32,9 @@ function focusResult(dialog: HTMLDialogElement | null, index: number) {
 export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPath: string | null; homeQuery: string | null }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
-  const [reload, setReload] = useState(0);
+  const { projectSummaries: projects, projectsLoading: loading, projectsError, refreshProjects, subscribeProjectsLiveUpdates } = useRepoStream();
+  const error = !loading && projectsError !== null;
+  const initialLoading = loading && projects.length === 0;
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favoritesStorageIssue, setFavoritesStorageIssue] = useState(false);
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
@@ -78,15 +77,9 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
-    setError(false);
-    const controller = new AbortController();
-    void fetch("/api/projects", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => { if (!response.ok) throw new Error(); return await response.json() as { projects: ProjectSummary[] }; })
-      .then((value) => { if (!controller.signal.aborted) { setProjects(value.projects); setLoading(false); } })
-      .catch(() => { if (!controller.signal.aborted) { setError(true); setLoading(false); } });
-    return () => controller.abort();
-  }, [open, reload]);
+    refreshProjects();
+    return subscribeProjectsLiveUpdates();
+  }, [open, refreshProjects, subscribeProjectsLiveUpdates]);
 
   useEffect(() => {
     if (!open) return;
@@ -213,8 +206,8 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
       <p className="project-switch-local-note">お気に入りと最近見た履歴は、このブラウザにのみ保存されます。</p>
       {favoritesStorageIssue && <div className="project-switch-storage-issue" role="alert">お気に入りの保存データを読み込めません。ホーム画面で保存を再設定できます。</div>}
       {recentStorageIssue && <div className="project-switch-storage-issue" role="alert">最近見た履歴を保存できないため、この画面では一時的に表示しています。</div>}
-      <div className="project-switch-count" role="status">{loading ? "プロジェクトを読み込み中…" : error ? "" : `${matches.length} プロジェクト`}</div>
-      {error ? <div className="project-switch-empty" role="alert">プロジェクト一覧を取得できませんでした。<button className="subtle-button" type="button" onClick={() => setReload((value) => value + 1)}>再試行</button></div> : !loading && <div className="project-switch-results">
+      <div className="project-switch-count" role="status">{initialLoading ? "プロジェクトを読み込み中…" : error ? "" : `${matches.length} プロジェクト${loading ? " · 更新中" : ""}`}</div>
+      {error ? <div className="project-switch-empty" role="alert">プロジェクト一覧を取得できませんでした。<button className="subtle-button" type="button" onClick={refreshProjects}>再試行</button></div> : !initialLoading && <div className="project-switch-results">
         {matches.map((project) => project.main_path === null ? <div className="project-switch-unavailable" key={project.id} aria-disabled="true">{project.name}<span>作業パス未取得</span></div> : <Link prefetch={false} href={`/project?path=${encodeURIComponent(project.main_path)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`} key={project.id} data-project-switch-result="true" aria-current={project.main_path === currentPath ? "page" : undefined} onClick={() => { rememberRecentPath(project.main_path); closeSwitcher(); }} onKeyDown={handleResultKeyDown}><span><strong>{project.name}</strong><code>{project.main_path}</code></span><span>{project.main_path === currentPath ? "表示中" : "→"}</span></Link>)}
         {matches.length === 0 && <div className="project-switch-empty">{emptyMessage}<button className="subtle-button" type="button" onClick={() => { setQuery(""); input.current?.focus(); }}>検索をクリア</button></div>}
       </div>}

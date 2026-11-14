@@ -1,8 +1,10 @@
 "use client";
 
+import { homeDocumentTitle } from "./agent-attention.mjs";
 import Link from "next/link";
 import GitGuide from "./git-guide";
 import WorkspaceExport from "./workspace-export";
+import ShortcutHelp from "./shortcut-help";
 import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
@@ -308,6 +310,10 @@ export default function Page() {
   const ordered = useMemo(() => view.sort === "priority" ? orderedByPriority : sortHomeProjects(projects, view.sort), [orderedByPriority, projects, view.sort]);
   const visible = useMemo(() => invalidUrlParams.length > 0 ? [] : ordered.filter((project) => projectMatchesView(project, view, favorites)), [favorites, invalidUrlParams.length, ordered, view]);
   const totals = useMemo(() => aggregateAgentCounts(projects), [projects]);
+  useEffect(() => {
+    document.title = homeDocumentTitle(totals.waiting_for_user);
+    return () => { document.title = "gitdash"; };
+  }, [totals.waiting_for_user]);
   const unknownProjectTotal = useMemo(() => countProjectsWithUnknownAgentCounts(projects), [projects]);
   const gitTotals = useMemo(() => ({ conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0), dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0), lanes: projects.every((item) => item.lane_count !== null) ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0) : null }), [projects]);
   const hasActiveFilters = Boolean(view.query.trim() || view.agentFilter !== "all" || view.gitFilter !== "all" || view.favoritesOnly || invalidUrlParams.length);
@@ -355,11 +361,12 @@ export default function Page() {
           {summaryCards.filter(({ key }) => loading || error !== null || totals[key] !== null).map(({ key, label }) => <button type="button" className="home-summary-card" key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
           <button type="button" className="home-summary-card" aria-label="agent報告がないプロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : unknownProjectTotal}</strong><span>agent報告なし</span></button>
         </>}
+        <p className="home-summary-note">集計とタブタイトルの入力待ち件数は、確認済みを含む最新の報告件数です。</p>
       </div>);
 
   return (
     <main className="home-shell" id="main-content" tabIndex={-1}>
-      <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></div></header>
+      <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><ShortcutHelp /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}{fetching && <span> · fetch 中</span>}</div></div></header>
       <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>ブランチの作業状況{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトでagent報告なし`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
       {invalidUrlParams.length === 0 && <section className="home-toolbar" aria-label="プロジェクト検索と絞り込み">
         <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input ref={searchRef} aria-keyshortcuts="/" value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /><kbd aria-hidden="true">/</kbd></label>

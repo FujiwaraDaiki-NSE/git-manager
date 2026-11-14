@@ -70,7 +70,7 @@ test("late replay cannot replace a live completed report with older attention", 
 });
 
 test("freshness partitions explicit reports at 24h without changing status", async () => {
-  const { AGENT_REPORT_RECENT_MS, AGENT_DECISION_STATUSES, classifyCurrentAgentRows } = await import("../app/agent-timeline-tools.mjs");
+  const { AGENT_REPORT_RECENT_MS, AGENT_DECISION_STATUSES, classifyCurrentAgentRows, agentReportFreshness } = await import("../app/agent-timeline-tools.mjs");
   const now = Date.parse("2026-11-13T12:00:00Z");
   const row = (status, age) => ({ project: { id: "project" }, task: event(status, new Date(now - age).toISOString(), { status }) });
   const recent = AGENT_DECISION_STATUSES.map((status) => row(status, AGENT_REPORT_RECENT_MS - 1));
@@ -82,6 +82,9 @@ test("freshness partitions explicit reports at 24h without changing status", asy
   const before = structuredClone(rows);
   const groups = classifyCurrentAgentRows(rows, now);
   assert.deepEqual(groups.decision.recent, recent);
+  assert.equal(agentReportFreshness(recent[0].task.occurred_at, now), "recent");
+  assert.equal(agentReportFreshness(old[0].task.occurred_at, now), "old");
+  assert.equal(agentReportFreshness(null, now), "unknown");
   assert.deepEqual(groups.decision.old, old);
   assert.deepEqual(groups.decisionCounts, Object.fromEntries(AGENT_DECISION_STATUSES.map((status) => [status, 2])));
   assert.deepEqual(groups.active, active);

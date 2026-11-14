@@ -421,3 +421,46 @@
   outline: 2px solid var(--control-blue);
   outline-offset: 2px;
 }
+
+/* The attention strip always uses live state, even while history is paused. */
+.agent-sidebar-controls { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px 0; color: var(--control-muted); font: 12px var(--control-sans); }
+.workspace-agent-sidebar { min-width: 0; position: sticky; top: 16px; }
+.workspace-agent-sidebar[hidden] { display: none; }
+.workspace-agent-layout { row-gap: 8px; }
+.workspace-agent-layout.is-sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+.desktop-notifications { padding: 8px 16px; border-bottom: 1px solid var(--control-border); }
+.desktop-notifications > span { display: block; margin-top: 4px; color: var(--control-muted); font-size: 11px; }
+@media (max-width: 900px) {
+  .workspace-agent-layout { padding-top: 0; }
+  .agent-sidebar-controls { position: sticky; top: 0; z-index: 41; padding: 8px 16px; background: var(--control-bg); border-bottom: 1px solid var(--control-border); }
+  .workspace-agent-sidebar { position: static; }
+  .workspace-agent-sidebar .agent-timeline-sidebar { position: relative; top: auto; margin: 8px 16px; max-height: 45dvh; }
+}
+@media (max-width: 900px) {
+  .workspace-agent-layout { display: flex; flex-direction: column; }
+  .agent-sidebar-controls { order: 0; width: 100%; box-sizing: border-box; }
+  .workspace-agent-sidebar { order: 1; width: 100%; }
+  .workspace-primary { order: 2; width: 100%; }
+}
+
+/* 名前は通常省略し、ポインターとキーボードの両方で全文を展開する。 */
+.agent-timeline-project-link:hover .agent-timeline-row-head,
+.agent-timeline-project-link:focus .agent-timeline-row-head { flex-direction: column; gap: 4px; }
+.agent-timeline-project-link:hover .agent-timeline-row-head > *,
+.agent-timeline-project-link:focus .agent-timeline-row-head > * { max-width: 100%; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.agent-timeline-project-link:focus-visible { outline: 2px solid var(--control-blue); outline-offset: -2px; }
+.agent-timeline-card-actions { display: flex; flex-wrap: wrap; align-items: start; gap: 8px; padding: 0 10px 10px; }
+.agent-timeline-card-actions .copy-button { min-height: 28px; font-size: 10px; }
+.agent-timeline-card-actions .copy-feedback { max-width: 280px; }
+.agent-timeline-acknowledged { margin-block: 12px; }
+.agent-timeline-acknowledged > summary { cursor: pointer; color: var(--control-muted); font-size: 12px; padding-block: 6px; }
+.agent-timeline-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; }
+.agent-timeline-scope > span { min-width: 0; overflow-wrap: anywhere; font-size: 11px; color: var(--control-muted); }
+.agent-timeline-scope [aria-pressed="true"] { background: var(--control-blue-soft); border-color: var(--control-blue); }
+
+.agent-timeline-age { width: fit-content; padding: 2px 6px; border: 1px solid var(--control-border); border-radius: 4px; color: var(--control-muted); font: 10px/1.4 var(--control-sans); }
+.agent-timeline-age.age-old { border-color: var(--control-amber); background: var(--control-amber-soft); color: var(--control-ink); }
+.agent-timeline-age.age-unknown { border-style: dashed; }
+.report-age-old .agent-timeline-time { font-weight: 600; }
+.agent-timeline-bulk-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.agent-timeline-bulk-actions > span { color: var(--control-muted); font: 10px/1.5 var(--control-sans); }

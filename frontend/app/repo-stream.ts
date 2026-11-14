@@ -1,11 +1,13 @@
 "use client";
 
 import { createContext, createElement, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createAttentionTracker } from "./agent-attention.mjs";
 import { mergeAgentSnapshot } from "./agent-overview.mjs";
 import { applyBufferedAgentEvents, mergeAgentEvents } from "./agent-timeline-tools.mjs";
 import type { AgentEvent, AgentEventEnvelope, ProjectSummary, Repo } from "./types";
 
 export type RepoStreamState = {
+  subscribeAgentAttention: (listener: (event: AgentEvent) => void) => () => void;
   repos: Map<string, Repo>;
   scanning: boolean;
   fetching: boolean;
@@ -67,6 +69,11 @@ function useRepoStreamState(): RepoStreamState {
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const attentionListeners = useRef(new Set<(event: AgentEvent) => void>());
+  const subscribeAgentAttention = useCallback((listener: (event: AgentEvent) => void) => {
+    attentionListeners.current.add(listener);
+    return () => { attentionListeners.current.delete(listener); };
+  }, []);
   const projectsLiveSubscribers = useRef(0);
   const subscribeProjectsLiveUpdates = useCallback(() => {
     projectsLiveSubscribers.current += 1;
@@ -74,9 +81,12 @@ function useRepoStreamState(): RepoStreamState {
   }, []);
   const refreshRef = useRef<() => void>(() => {});
   const olderRef = useRef<() => void>(() => {});
+  const refreshProjects = useCallback(() => refreshRef.current(), []);
 
   useEffect(() => {
     let disposed = false;
+    let projectsInitialized = false;
+    const observeAttention = createAttentionTracker();
     let opened = false;
     let scanActive = false;
     let cursor: number | null = null;
@@ -86,6 +96,7 @@ function useRepoStreamState(): RepoStreamState {
     let replayPending = false;
     let eventsController: AbortController | null = null;
     let projectsController: AbortController | null = null;
+    let projectsPending = false;
     let olderController: AbortController | null = null;
     let projectTimer: ReturnType<typeof setTimeout> | null = null;
     let projectTimerLiveOnly = true;
@@ -93,6 +104,7 @@ function useRepoStreamState(): RepoStreamState {
     const pageSize = 100;
     const message = (reason: unknown) => reason instanceof Error ? reason.message : "情報を取得できませんでした";
     const remember = (events: AgentEvent[]) => {
+      events.forEach(observeAttention);
       const merged = mergeAgentEvents(bufferedEvents, events);
       bufferedEvents.splice(0, bufferedEvents.length, ...merged);
       setAgentEvents((previous) => mergeAgentEvents(previous, events));
@@ -109,7 +121,12 @@ function useRepoStreamState(): RepoStreamState {
       return value.events;
     };
     const loadProjects = () => {
-      projectsController?.abort();
+      if (disposed) return;
+      if (projectTimer !== null) { clearTimeout(projectTimer); projectTimer = null; }
+      // Aborting HTTP does not stop the backend's Git computation. Complete
+      // one request, then consume every intervening invalidation in one read.
+      if (projectsController !== null) { projectsPending = true; return; }
+      projectsPending = false;
       const controller = new AbortController();
       projectsController = controller;
       setProjectsLoading(true);
@@ -119,16 +136,23 @@ function useRepoStreamState(): RepoStreamState {
           const value = await response.json() as ProjectsResponse;
           if (!Array.isArray(value.projects)) throw new Error("プロジェクト情報の形式が不正です");
           if (disposed || controller.signal.aborted) return;
-          setProjectSummaries(applyBufferedAgentEvents(value.projects, bufferedEvents));
+          const projects = applyBufferedAgentEvents(value.projects, bufferedEvents);
+          for (const project of projects) project.agent_tasks?.forEach(observeAttention);
+          projectsInitialized = true;
+          setProjectSummaries(projects);
           setProjectsError(null);
         }).catch((reason: unknown) => {
           if (!disposed && !controller.signal.aborted) setProjectsError(message(reason));
         }).finally(() => {
-          if (!disposed && !controller.signal.aborted) setProjectsLoading(false);
+          projectsController = null;
+          if (disposed) return;
+          if (projectsPending) loadProjects();
+          else setProjectsLoading(false);
         });
     };
     const scheduleProjects = (liveOnly: boolean) => {
       if (liveOnly && projectsLiveSubscribers.current === 0) return;
+      if (projectsController !== null) { projectsPending = true; return; }
       projectTimerLiveOnly = projectTimer === null ? liveOnly : projectTimerLiveOnly && liveOnly;
       if (projectTimer !== null) clearTimeout(projectTimer);
       projectTimer = setTimeout(() => {
@@ -243,6 +267,10 @@ function useRepoStreamState(): RepoStreamState {
         return;
       }
       if (!value) return;
+      const attentionTransition = observeAttention(value);
+      if (initialized && projectsInitialized && attentionTransition) {
+        for (const listener of attentionListeners.current) listener(value);
+      }
       if (initialized && !replayPending && Number.isSafeInteger(value.sequence)) {
         cursor = Math.max(cursor as number, value.sequence as number);
       }
@@ -267,7 +295,7 @@ function useRepoStreamState(): RepoStreamState {
     };
   }, []);
 
-  return { subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsError, refreshProjects: () => refreshRef.current(), loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
+  return { subscribeAgentAttention, subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsError, refreshProjects, loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
 }
 
 const RepoStreamContext = createContext<RepoStreamState | null>(null);

@@ -141,6 +141,18 @@ def _parse_ref_line(line: str) -> dict[str, Any] | None:
     }
 
 
+def count_local_branches(repo: str) -> int | None:
+    """Count the same local rows as get_branches without merge-status reads."""
+    refs = gitinfo._run(repo, ["for-each-ref", f"--format={REF_FORMAT}", "refs/heads", "refs/remotes"])
+    if refs is None:
+        return None
+    # Retain the exact parser, including malformed-row and remote exclusions.
+    return sum(
+        1 for line in refs.splitlines()
+        if (branch := _parse_ref_line(line)) is not None and not branch["remote"]
+    )
+
+
 def get_branches(repo: str) -> dict[str, Any] | None:
     """ローカル/リモート ref と origin/HEAD 基準の merged 状態を返す。"""
     refs = gitinfo._run(repo, ["for-each-ref", f"--format={REF_FORMAT}", "refs/heads", "refs/remotes"])

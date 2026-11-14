@@ -156,6 +156,7 @@ def test_branch_fact_failure_is_unavailable_instead_of_zero_lanes(tmp_path: Path
         }
     }
     monkeypatch.setattr(detail, "get_branches", lambda _repo: None)
+    monkeypatch.setattr(detail, "count_local_branches", lambda _repo: None)
 
     assert project.build(str(repo), str(repo), state) is None
     summary = project.summary_rows(state)
@@ -846,3 +847,77 @@ def test_unborn_branch_is_not_reported_as_detached(tmp_path: Path) -> None:
     assert created["lanes"][0]["id"] == lane["id"]
     assert created["lanes"][0]["head"] == git(repo, "rev-parse", "HEAD").strip()
     assert not created["lanes"][0].get("unborn", False)
+
+
+def test_summary_parallel_comparisons_match_serial_and_read_changed_refs(tmp_path: Path, monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from app import agent_events
+
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    base = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "update-ref", "refs/remotes/origin/main", base)
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    commit(repo, "first")
+    git(repo, "branch", "first")
+    commit(repo, "second")
+    git(repo, "branch", "second")
+    git(repo, "branch", "tied")
+    state = {}
+    for index, branch in enumerate(["main", "first", "second", "tied", "missing", None, ""]):
+        path = str(repo) if index == 0 else str(tmp_path / f"worktree-{index}")
+        state[path] = {
+            "path": path, "common_dir": str(repo), "is_worktree": index != 0,
+            "branch": branch, "entries": [],
+        }
+    monkeypatch.setattr(agent_events, "snapshots", lambda **kwargs: {})
+    monkeypatch.setattr(agent_events, "project_events", lambda *args, **kwargs: [])
+
+    def compare():
+        actual = project.summary_rows(state)
+        # One worker executes every comparison serially in input order, as
+        # before the optimization; compare the entire ordered response.
+        with monkeypatch.context() as serial:
+            serial.setattr(project, "ThreadPoolExecutor", lambda **kwargs: ThreadPoolExecutor(max_workers=1))
+            expected = project.summary_rows(state)
+        assert actual == expected
+        return actual
+
+    before = compare()
+    assert before[0]["largest_difference_lane"] == "second"
+    commit(repo, "third")
+    git(repo, "branch", "-f", "first", "HEAD")
+    after = compare()
+    assert after[0]["largest_difference_lane"] == "first"
+    git(repo, "pack-refs", "--all", "--prune")
+    assert compare() == after
+    git(repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    assert compare()[0]["largest_difference_lane"] is None
+
+
+def test_summary_branch_count_matches_full_reader_after_ref_changes(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.com")
+    state = {str(repo): {"path": str(repo), "common_dir": str(repo), "is_worktree": False}}
+
+    def compare():
+        actual = project.summary_rows(state)
+        with monkeypatch.context() as original:
+            original.setattr(detail, "count_local_branches", lambda path: len(detail.get_branches(path)["local"]))
+            assert actual == project.summary_rows(state)
+        return actual[0]["lane_count"]
+
+    assert compare() == 0
+    commit(repo, "base")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    git(repo, "branch", "topic")
+    assert compare() == 2
+    git(repo, "pack-refs", "--all", "--prune")
+    assert compare() == 2
+    git(repo, "branch", "-D", "topic")
+    assert compare() == 1
+    assert detail.count_local_branches(str(tmp_path / "missing")) is None

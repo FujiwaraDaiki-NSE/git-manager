@@ -1,5 +1,6 @@
 "use client";
 
+import { snapshotAge } from "./agent-attention.mjs";
 import PatchView from "./patch-view";
 import StashExplorer from "./stash-explorer";
 import TagExplorer from "./tag-explorer";
@@ -31,6 +32,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import CopyButton from "./copy-button";
 import "./activity-explorer.css";
 import "./lane-explorer.css";
+import ShortcutHelp from "./shortcut-help";
 import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
@@ -908,11 +910,11 @@ function LegacyUnavailableModal({ onClose }: { onClose: () => void }) {
 function ProjectSnapshotFreshness({ snapshot }: { snapshot: ProjectResponse["snapshot"] }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
   if (!snapshot) return null;
-  return <>{` · ${Math.max(0, Math.floor((now / 1000) - snapshot.observed_at))}秒前の観測`}{snapshot.status === "failed" && ` · 更新失敗：${snapshot.error}`}</>;
+  return <>{` · Git情報の取得：${snapshotAge(snapshot.observed_at, now)}`}{snapshot.status === "failed" && ` · 更新失敗：${snapshot.error}`}</>;
 }
 
 export default function ProjectControl() {
@@ -921,6 +923,10 @@ export default function ProjectControl() {
   const homeQuery = useSearchParams().get("home");
   const homeHref = homeReturnHref(homeQuery);
   const [project, setProject] = useState<ProjectResponse | null>(null);
+  useEffect(() => {
+    document.title = project ? `${project.name} · gitdash` : "gitdash";
+    return () => { document.title = "gitdash"; };
+  }, [project?.name]);
   const [projectState, setProjectState] = useState<LoadState>("idle");
   const [projectError, setProjectError] = useState<string | null>(null);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
@@ -998,7 +1004,9 @@ export default function ProjectControl() {
       .then(async (response) => { if (!response.ok) throw new Error(response.status === 404 ? "指定されたプロジェクトが見つかりません。一覧から選び直してください。" : `サーバーから情報を取得できませんでした（HTTP ${response.status}）。`); return (await response.json()) as ProjectResponse; })
       .then((value) => { if (controller.signal.aborted) return; setProject(value); setLoadedKey(resourceKey); setProjectState("ready"); })
       .catch((reason: unknown) => { if (controller.signal.aborted) return; setProjectState("error"); setProjectError(reason instanceof TypeError ? "サーバーとの通信を確認してから再試行してください。" : reason instanceof Error ? reason.message : "情報の取得に失敗しました。"); });
-    }, 180);
+    // Explicit project/range navigation should start immediately. Debounce
+    // background observations only, where several SSE updates can coalesce.
+    }, loadedKey === resourceKey ? 180 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [invalidUrlKey, projectFetchRange, projectStateKey, projectUpdateToken, resourceKey, reloadToken, urlState.path]);
 
@@ -1164,7 +1172,7 @@ export default function ProjectControl() {
       <header className="control-topbar">
         <Link className="back-link" href={homeHref}>← プロジェクト一覧</Link>
         <div className="control-status"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{(projectState === "loading" || project?.snapshot?.status === "refreshing") && " · 情報を更新中"}<ProjectSnapshotFreshness snapshot={project?.snapshot} /></div>
-        <div className="control-topbar-tools"><ProjectSwitcher currentPath={urlState.path} homeQuery={homeQuery} /><ThemeControl /><RescanControl scanning={scanning} /></div>
+        <div className="control-topbar-tools"><ProjectSwitcher currentPath={urlState.path} homeQuery={homeQuery} /><ThemeControl /><ShortcutHelp /><RescanControl scanning={scanning} /></div>
       </header>
       {projectState === "error" && <div className="project-refresh-error" role="alert"><span>最新情報を取得できませんでした。前回取得した内容を表示しています。</span><button className="subtle-button" type="button" onClick={retryProject}>再試行</button></div>}
       <section className="control-hero" aria-labelledby="project-title">

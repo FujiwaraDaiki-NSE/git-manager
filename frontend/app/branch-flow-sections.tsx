@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import BranchRelations from "./branch-relations";
 import BranchHistoryExplorer from "./branch-history-explorer";
 import type { ProjectEvent, ProjectResponse } from "./types";
@@ -21,6 +21,12 @@ export default function BranchFlowSections({ project, section, onSectionChange, 
   onSelect: (event: ProjectEvent, branchRowId?: string) => void;
   children: ReactNode;
 }) {
+  // Mount a section on first use, then retain it so filters and selections
+  // survive switching sections. Hidden investigation panels need no initial work.
+  const [visited, setVisited] = useState(() => new Set([section]));
+  useEffect(() => {
+    setVisited((previous) => previous.has(section) ? previous : new Set([...previous, section]));
+  }, [section]);
   return <div>
     <nav className="control-tabs" role="tablist" aria-label="ブランチの調査セクション">
       {sections.map((item, index) => <button key={item.id} type="button" className="control-tab" role="tab" id={`flow-section-tab-${item.id}`} aria-controls={`flow-section-panel-${item.id}`} aria-selected={section === item.id} tabIndex={section === item.id ? 0 : -1} onClick={() => onSectionChange(item.id)} onKeyDown={(event) => {
@@ -32,9 +38,9 @@ export default function BranchFlowSections({ project, section, onSectionChange, 
       }}>{item.label}</button>)}
     </nav>
     {sections.map((item) => <div key={item.id} hidden={section !== item.id} role="tabpanel" tabIndex={0} id={`flow-section-panel-${item.id}`} aria-labelledby={`flow-section-tab-${item.id}`}>
-      {item.id === "relations" && <BranchRelations project={project} relationRef={relationRef} selectedLane={selectedLane} selectedRowId={selectedRowId} />}
-      {item.id === "history" && <BranchHistoryExplorer project={project} onSelect={onSelect} />}
-      {item.id === "notes" && <div onClick={(event) => {
+      {(section === item.id || visited.has(item.id)) && item.id === "relations" && <BranchRelations project={project} relationRef={relationRef} selectedLane={selectedLane} selectedRowId={selectedRowId} />}
+      {(section === item.id || visited.has(item.id)) && item.id === "history" && <BranchHistoryExplorer project={project} onSelect={onSelect} />}
+      {(section === item.id || visited.has(item.id)) && item.id === "notes" && <div onClick={(event) => {
         if (!(event.target instanceof HTMLAnchorElement) || event.target.hash !== "#branch-relations-title") return;
         event.preventDefault();
         onSectionChange("relations");

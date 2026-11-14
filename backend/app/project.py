@@ -1172,11 +1172,7 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
     lane_count: int | None = None
     checkout = main.get("path") if isinstance(main.get("path"), str) else None
     if checkout:
-        branch_data = detail.get_branches(paths.to_container(checkout))
-        if branch_data is not None:
-            local_branches = branch_data.get("local")
-            if isinstance(local_branches, list):
-                lane_count = len(local_branches)
+        lane_count = detail.count_local_branches(paths.to_container(checkout))
     largest_difference_lane: str | None = None
     largest_difference = -1
     if checkout:
@@ -1184,15 +1180,19 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
         default_branch = gitinfo.default_branch(repo)
         default_ref = f"refs/remotes/origin/{default_branch}" if default_branch else None
         if default_ref:
-            for row in rows:
-                branch = row.get("branch")
-                if not isinstance(branch, str) or not branch or branch == default_branch:
-                    continue
-                ahead_count, behind_count = _count_against_default(
-                    repo,
-                    default_ref,
-                    f"refs/heads/{branch}",
-                )
+            branches = [
+                row["branch"] for row in rows
+                if isinstance(row.get("branch"), str) and row["branch"]
+                and row["branch"] != default_branch
+            ]
+            # Keep comparisons bounded (four projects × four Git readers).
+            # map retains row order, including the original tie-breaking order.
+            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="summary-count") as executor:
+                counts = list(executor.map(
+                    lambda branch: _count_against_default(repo, default_ref, f"refs/heads/{branch}"),
+                    branches,
+                ))
+            for branch, (ahead_count, behind_count) in zip(branches, counts):
                 if ahead_count is None or behind_count is None:
                     continue
                 difference = ahead_count + behind_count

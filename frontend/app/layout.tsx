@@ -8,6 +8,7 @@ import { ThemeProvider } from "./theme-control";
 
 export const metadata: Metadata = {
   title: "gitdash",
+  icons: { icon: { url: "/favicon.svg", type: "image/svg+xml" } },
   description: "PC内のGitリポジトリの状態一覧",
 };
 

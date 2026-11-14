@@ -503,8 +503,10 @@ export default function BranchTimeline({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [clock, setClock] = useState<number | null>(null);
   useEffect(() => { setClock(Date.now()); const timer = setInterval(() => setClock(Date.now()), 60000); return () => clearInterval(timer); }, []);
-  const [history, setHistory] = useState<Record<string, LoadedHistory>>({});
-  const historyRequestKeys = useRef(new Map<string, string>());
+  const [history, setHistory] = useState<Record<string, LoadedHistory>>(() => Object.fromEntries(
+    (project.branch_rows ?? []).map((row) => [row.id, { commits: [], offset: row.history_cursor, loading: false, error: null }]),
+  ));
+  const historyRequestKeys = useRef(new Map((project.branch_rows ?? []).map((row) => [row.id, `${project.main_path}:${row.id}:${row.history_heads.join(",")}`])));
   const flowScrollRef = useRef<HTMLDivElement>(null);
   const eventButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   // The relation panel always keeps every ref/pair.  The graph may still be
@@ -546,13 +548,16 @@ export default function BranchTimeline({
     setPinnedRowId((current) => current !== null && visibleRowIds.has(current) ? current : null);
   }, [rows]);
   useEffect(() => {
-    setHistory((current) => Object.fromEntries(rows.map((row) => {
-      const identity = `${project.main_path}:${row.id}:${row.history_heads.join(",")}`;
-      const previous = current[row.id];
-      if (previous && historyRequestKeys.current.get(row.id) === identity) return [row.id, previous];
-      historyRequestKeys.current.set(row.id, identity);
-      return [row.id, { commits: [], offset: row.history_cursor, loading: false, error: null }];
-    })));
+    setHistory((current) => {
+      const next = Object.fromEntries(rows.map((row) => {
+        const identity = `${project.main_path}:${row.id}:${row.history_heads.join(",")}`;
+        const previous = current[row.id];
+        if (previous && historyRequestKeys.current.get(row.id) === identity) return [row.id, previous];
+        historyRequestKeys.current.set(row.id, identity);
+        return [row.id, { commits: [], offset: row.history_cursor, loading: false, error: null }];
+      }));
+      return Object.keys(current).length === rows.length && rows.every((row) => next[row.id] === current[row.id]) ? current : next;
+    });
   }, [project.main_path, rows]);
   const loadMore = useCallback((row: TimelineRow) => {
     const current = history[row.id] ?? { commits: [], offset: row.history_cursor, loading: false, error: null };
@@ -608,32 +613,35 @@ export default function BranchTimeline({
     && typeof edge.target_row_id === "string"
     && edge.source_row_id === edge.target_row_id
   ));
-  const rangeCutoff = range === "24h" ? now - 86400000 : range === "7d" ? now - 604800000 : null;
-  const allTimes = rows.flatMap((row) => rowCommits.get(row.id) ?? []).map(eventDate).filter((value): value is number => value !== null);
-  const relationTimes = connectionEdges.flatMap((edge) => {
-    const date = connectionEventTime(edge, now);
-    return date === null ? [] : [date];
-  });
-  // A time-range cutoff controls commit points.  Relation events are retained
-  // even when older and use an outside anchor at the left edge.
-  const minTime = rangeCutoff ?? Math.min(now - 1, ...(allTimes.length ? allTimes : relationTimes.length ? relationTimes : [now]));
-  const observationTime = minTime + ((now - minTime) * timeline) / 100;
-  const positioned = rows.flatMap((row) => (rowCommits.get(row.id) ?? []).flatMap((commit) => {
-    const time = eventDate(commit);
-    if (time === null || time > observationTime) return [];
-    return [{ row: { ...commit, is_head: row.tip_commits.some((tip) => tip.hash === commit.hash), is_merge: commit.parents.length > 1, is_unpushed: isUnpushedCommit(row, commit.hash) }, lane: row, x: recentTimePosition(time, minTime, now), hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(row.id, commit.hash) }];
-  }));
-  const positionedByRow = new Map<string, typeof positioned>();
-  positioned.forEach((event) => {
-    const current = positionedByRow.get(event.lane.id);
-    if (current) current.push(event);
-    else positionedByRow.set(event.lane.id, [event]);
-  });
-  const minimumTrackWidth = Math.max(440, ...rows.map((row) => Math.max(1, positionedByRow.get(row.id)?.length ?? 0) * 44));
-  const trackWidth = Math.max(minimumTrackWidth, availableTrackWidth);
-  const events = rows.flatMap((row) => layoutFlowEvents(positionedByRow.get(row.id) ?? [], trackWidth));
-  const eventsByRow = groupTimelineEventsByRow(events) as Map<string, TimelineEvent[]>;
-  const geometry = timelineRowGeometry(rows, eventsByRow);
+  const { minTime, observationTime, trackWidth, events, eventsByRow, geometry } = useMemo(() => {
+    const rangeCutoff = range === "24h" ? now - 86400000 : range === "7d" ? now - 604800000 : null;
+    const allTimes = rows.flatMap((row) => rowCommits.get(row.id) ?? []).map(eventDate).filter((value): value is number => value !== null);
+    const relationTimes = connectionEdges.flatMap((edge) => {
+      const date = connectionEventTime(edge, now);
+      return date === null ? [] : [date];
+    });
+    // A time-range cutoff controls commit points.  Relation events are retained
+    // even when older and use an outside anchor at the left edge.
+    const minTime = rangeCutoff ?? Math.min(now - 1, ...(allTimes.length ? allTimes : relationTimes.length ? relationTimes : [now]));
+    const observationTime = minTime + ((now - minTime) * timeline) / 100;
+    const positioned = rows.flatMap((row) => (rowCommits.get(row.id) ?? []).flatMap((commit) => {
+      const time = eventDate(commit);
+      if (time === null || time > observationTime) return [];
+      return [{ row: { ...commit, is_head: row.tip_commits.some((tip) => tip.hash === commit.hash), is_merge: commit.parents.length > 1, is_unpushed: isUnpushedCommit(row, commit.hash) }, lane: row, x: recentTimePosition(time, minTime, now), hitX: 0, timestampX: 0, pointOffset: 0, id: flowEventKey(row.id, commit.hash) }];
+    }));
+    const positionedByRow = new Map<string, typeof positioned>();
+    positioned.forEach((event) => {
+      const current = positionedByRow.get(event.lane.id);
+      if (current) current.push(event);
+      else positionedByRow.set(event.lane.id, [event]);
+    });
+    const minimumTrackWidth = Math.max(440, ...rows.map((row) => Math.max(1, positionedByRow.get(row.id)?.length ?? 0) * 44));
+    const trackWidth = Math.max(minimumTrackWidth, availableTrackWidth);
+    const events = rows.flatMap((row) => layoutFlowEvents(positionedByRow.get(row.id) ?? [], trackWidth));
+    const eventsByRow = groupTimelineEventsByRow(events) as Map<string, TimelineEvent[]>;
+    const geometry = timelineRowGeometry(rows, eventsByRow);
+    return { minTime, observationTime, trackWidth, events, eventsByRow, geometry };
+  }, [range, now, rows, rowCommits, connectionEdges, timeline, availableTrackWidth]);
   const denseEventMode = events.length > DENSE_EVENT_THRESHOLD;
   const refs = useMemo(
     () => project.branch_connections?.refs ?? EMPTY_CONNECTION_REFS,
@@ -805,7 +813,7 @@ export default function BranchTimeline({
           <div className="flow-control-actions"><label className="flow-branch-jump"><span>ブランチへ移動</span><select aria-label="グラフのブランチへ移動" value={rows.some((row) => row.id === navigationRow) ? navigationRow : ""} onChange={(event) => { setNavigationRow(event.target.value); document.querySelector(`[data-flow-row="${CSS.escape(event.target.value)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }}><option value="">ブランチを選択</option>{rows.map((row) => <option key={row.id} value={row.id}>{rowLabel(row)}</option>)}</select></label>{mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}<button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: "smooth" })}>右端へ移動 →</button></div>
         </div>
       </div>
-      <details className="flow-history" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}><summary>履歴をたどる <span>{timeline === 100 ? "最新の観測" : "過去を表示中"} · {exactDate(new Date(observationTime).toISOString())}</span></summary><div className="flow-observation"><label className="timeline-control"><span>表示時点</span><input aria-label="過去の観測時点" max="100" min="0" onChange={(event) => onTimelineChange(100 * (recentTimeAt(Number(event.target.value), minTime, now) - minTime) / (now - minTime))} step="1" type="range" value={observationX} /><output>{timeline === 100 ? "最新の観測" : "選択日時"} · {exactDate(new Date(observationTime).toISOString())}</output></label><button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button></div></details>
+      <details className="flow-history" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}><summary>履歴をたどる <span>{timeline === 100 ? "表示範囲の終点" : "過去を表示中"} · {exactDate(new Date(observationTime).toISOString())}</span></summary><div className="flow-observation"><label className="timeline-control"><span>表示時点</span><input aria-label="過去の観測時点" max="100" min="0" onChange={(event) => onTimelineChange(100 * (recentTimeAt(Number(event.target.value), minTime, now) - minTime) / (now - minTime))} step="1" type="range" value={observationX} /><output>{timeline === 100 ? "表示範囲の終点" : "選択日時"} · {exactDate(new Date(observationTime).toISOString())}</output></label><button className="subtle-button" disabled={timeline === 100} type="button" onClick={() => onTimelineChange(100)}>最新に戻る</button></div></details>
       {timeline < 100 && <p className="flow-history-note" role="status">選択日時までのコミット・合流・ブランチ作業履歴を表示中。ブランチ名とGit作業状態は現在の情報です。</p>}
       {routeLinks.routes.length > 0 && <details className="flow-connection-details"><summary>接続を1本ずつ確認 ({routeLinks.routes.length}件)</summary><div className="flow-connection-controls">
         <label><span>接続を1本ずつ確認</span><select aria-label="強調する接続" value={focusedRoute?.id ?? ""} onChange={event => setFocusedConnection(event.target.value || null)}>
@@ -819,7 +827,7 @@ export default function BranchTimeline({
       <div className="flow-legend" role="group" aria-label="フロー凡例"><span><i className="legend-line legend-line-guide" aria-hidden="true" /> ブランチ行（ガイド）</span><span><i className="legend-dot legend-dot-head" aria-hidden="true" /> ブランチ先端（HEAD）</span><span><i className="legend-dot legend-dot-commit" aria-hidden="true" /> コミット</span><span><i className="legend-dot legend-dot-merge" aria-hidden="true" /> マージコミット</span><span><i className="legend-line legend-line-branch" aria-hidden="true" /> 青=分岐</span><span><i className="legend-line legend-line-merge" aria-hidden="true" /> 緑=マージ</span><span><i className="legend-line legend-line-estimate" aria-hidden="true" /> 推定の関係（破線）</span><span><i className="legend-dot legend-dot-unpushed" aria-hidden="true" /> 未push（upstreamなし・参照なしは判定不能のため強調なし）</span><span className="flow-time-direction">時間 →（直近ほど広く）</span></div>
       {selectedKey !== null && selectedRowId !== null && events.some((event) => event.row.hash === selectedKey && event.lane.id === selectedRowId) && <div className="flow-selected-command"><span>選択コミット</span><code>git show {shortHash(selectedKey)}</code><CopyButton value={`git show ${shortHash(selectedKey)}`} label="git showをコピー" /></div>}
       {rows.length === 0 ? <div className="empty-flow">{project.branch_rows === null ? "ブランチ行の取得に失敗しました。" : "表示できるブランチはありません。完了ブランチが折り畳まれている場合は表示を切り替えてください。"}</div> : <div className="flow-scroll" role="region" aria-label="Gitフローマップ（横スクロール可能）" ref={flowScrollRef} style={{ "--flow-popover-space": previewId ? "360px" : "0px" } as CSSProperties} tabIndex={0} onKeyDown={(event) => { if (event.key === "Escape") setPinnedRowId(null); }}>
-        <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}><span>ブランチ / 現在の作業状態</span><div className="flow-axis-track">{ticks.map((tick) => <span className={`flow-time-tick${tick.edge ? ` is-${tick.edge}` : ""}`} key={tick.time} style={{ left: `${tick.position}%` }}><span className="flow-tick-date">{tick.dateLabel}</span><span>{tick.timeLabel}</span></span>)}<span className="flow-current-label" style={{ left: `${observationX * trackWidth / 100}px` }}>{timeline === 100 ? "最新の観測" : "選択日時"}</span></div></div>
+        <div className="flow-axis" aria-hidden="true" style={{ "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}><span>ブランチ / 現在の作業状態</span><div className="flow-axis-track">{ticks.map((tick) => <span className={`flow-time-tick${tick.edge ? ` is-${tick.edge}` : ""}`} key={tick.time} style={{ left: `${tick.position}%` }}><span className="flow-tick-date">{tick.dateLabel}</span><span>{tick.timeLabel}</span></span>)}<span className="flow-current-label" style={{ left: `${observationX * trackWidth / 100}px` }}>{timeline === 100 ? "表示範囲の終点" : "選択日時"}</span></div></div>
         <div className="flow-rows" style={{ "--flow-total-height": `${geometry.height}px`, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}>
           <svg aria-hidden="true" className="flow-connections" preserveAspectRatio="none" viewBox={`0 0 ${trackWidth} ${geometry.height}`}>
             {ticks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={geometry.height} />)}<line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={geometry.height} />

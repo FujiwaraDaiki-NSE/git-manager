@@ -63,6 +63,11 @@ export function applyBufferedAgentEvents(projects, events) {
 // Freshness affects presentation only, never the explicit status.
 export const AGENT_REPORT_RECENT_MS = 24 * 60 * 60 * 1000;
 export const AGENT_DECISION_STATUSES = ["waiting_for_user", "review_required", "merge_ready", "blocked"];
+export function agentReportFreshness(occurredAt, now) {
+  const time = typeof occurredAt === "string" ? Date.parse(occurredAt) : NaN;
+  return !Number.isFinite(time) ? "unknown"
+    : now - time >= AGENT_REPORT_RECENT_MS ? "old" : "recent";
+}
 const progressStatuses = new Set(["investigating", "implementing", "testing", "reviewing"]);
 export function classifyCurrentAgentRows(rows, now) {
   const groups = {
@@ -72,9 +77,7 @@ export function classifyCurrentAgentRows(rows, now) {
   };
   for (const row of rows) {
     const status = agentTaskState(row.task);
-    const time = typeof row.task.occurred_at === "string" ? Date.parse(row.task.occurred_at) : NaN;
-    const freshness = !Number.isFinite(time) ? "unknown"
-      : now - time >= AGENT_REPORT_RECENT_MS ? "old" : "recent";
+    const freshness = agentReportFreshness(row.task.occurred_at, now);
     if (AGENT_DECISION_STATUSES.includes(status)) {
       groups.decision[freshness].push(row);
       groups.decisionCounts[status] += 1;

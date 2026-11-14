@@ -1,0 +1,29 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-14</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left}code{overflow-wrap:anywhere}</style>
+<h1>判断待ちの気づきやすさと応答速度 — 2026-11-14</h1>
+<p>agentの判断待ちに別作業中でも気づき、確認・ターミナル移動まで素早く行えるようにし、ホーム一覧とブランチ表示を高速化しました。</p>
+<p>開始時30点 + 検証済み加点63点 = <b>93点</b>（100点未達）。加点基準による評価であり客観的な品質保証ではありません。デスクトップ通知は実装・単体テスト済みですが、組み込みブラウザでは通知許可が拒否され実通知を確認できないため加点していません。</p>
+<table><thead><tr><th>No.</th><th>改善内容</th><th>分類・点数</th><th>検証根拠</th></tr></thead><tbody>
+<tr><td>1</td><td>/api/projects 高速化（worktree比較の並列化、ブランチ数取得で不要なmerged判定を省略）</td><td>高速化 +5</td><td>HTTP実測 2.07〜2.12秒 → 0.76〜0.80秒。出力はバイト一致</td></tr>
+<tr><td>2</td><td>ブランチタブ切替の高速化（明示操作の180ms待機除去、配置計算メモ化、遅延マウント）</td><td>高速化 +5</td><td>固定データA/B中央値 310→133ms。実画面で切替150〜220ms（改善前は初回1131ms）</td></tr>
+<tr><td>3</td><td>タブタイトルに入力待ち件数・プロジェクト名</td><td>機能追加 +5</td><td>「(7) 入力待ち · gitdash」「design_db · gitdash」</td></tr>
+<tr><td>4</td><td>agentタイムラインの折りたたみ（保存・要約表示）</td><td>機能追加 +5</td><td>折りたたみ時も入力待ち7件・問題あり1件を表示、メイン幅が拡大</td></tr>
+<tr><td>5</td><td>判断待ちカードの確認済み化（新報告で自動再表示）</td><td>機能追加 +5</td><td>確認済み1件へ移動、未確認に戻すで復元</td></tr>
+<tr><td>6</td><td>worktreeへの <code>cd</code> コマンドコピー</td><td>機能追加 +5</td><td>コピー内容のパスが実在することを確認</td></tr>
+<tr><td>7</td><td>/projectで「このプロジェクトのみ」トグル</td><td>機能追加 +5</td><td>プロジェクト絞り込みが現在のプロジェクトに固定・無効化</td></tr>
+<tr><td>8</td><td>キーボードショートカット一覧（?キー・ボタン）</td><td>機能追加 +5</td><td>?キーで表示、Escで閉じる</td></tr>
+<tr><td>9</td><td>古い判断待ちの一括確認済み／一括未確認</td><td>機能追加 +5</td><td>45件を一括移動し、一括で復元</td></tr>
+<tr><td>10</td><td>faviconに入力待ち件数バッジ</td><td>機能追加 +5</td><td>件数7でバッジ付きPNG、0件で通常SVG</td></tr>
+<tr><td>11</td><td>ヘッダーの折り返し解消（ホーム・/project）</td><td>UIリッチ化 +2</td><td>1024px幅で「再走査」縦書き等が解消</td></tr>
+<tr><td>12</td><td>タブ名・集計カードの途中改行解消</td><td>UIリッチ化 +2</td><td>「アクティビティ」「マージ可能」が1行</td></tr>
+<tr><td>13</td><td>URLコピーボタンをタイトル行に収める</td><td>UIリッチ化 +2</td><td>1024pxで1段占有が解消</td></tr>
+<tr><td>14</td><td>サイドバーの長い名前をホバー/フォーカスで全文表示</td><td>UIリッチ化 +2</td><td>実マウスホバーで全文表示</td></tr>
+<tr><td>15</td><td>報告の古さバッジ（既存24時間基準）</td><td>UIリッチ化 +2</td><td>「直近 · 24時間未満」「古い · 24時間以上」</td></tr>
+<tr><td>16</td><td>「59462秒前の観測」→「Git情報の取得：16時間前」</td><td>文言 +1</td><td>保存スナップショット時刻（仕様）と表示範囲終点を区別</td></tr>
+<tr><td>17</td><td>「いま動いている」→「実行中として報告」</td><td>文言 +1</td><td>報告ベースであることを明示</td></tr>
+<tr><td>18</td><td>SSE連続更新時の /api/projects 多重発行</td><td>バグ修正 +1</td><td>再起動直後 60秒101回・CPU 835%・1回7〜11秒 → 150秒5回・CPU 0.1%</td></tr>
+<tr><td>—</td><td>デスクトップ通知（オプトイン、入力待ち/blocked遷移のみ）</td><td>未加点</td><td>拒否時の案内は実画面確認。実通知は未検証</td></tr>
+</tbody></table>
+<h2>影響範囲</h2><p>backend: <code>project.py</code>・<code>detail.py</code>（出力不変）。frontend: agentタイムライン、ヘッダー、repo-stream（取得の直列化。project-switcherは共有取得へ統一）、ブランチタイムライン。確認済み・折りたたみ・通知・絞り込み設定はブラウザのlocalStorage（例外時も動作）。</p>
+<h2>確認・テスト</h2><ul><li>frontend npm test 390/390、npm run build 成功。backend pytest 329/329（既存Starlette警告1件）。</li><li>Codexレビュー（未コミット差分）: 指摘なし。</li><li>gitdash-compose up -d --build で反映、組み込みブラウザで上記を実操作確認。</li></ul>
+<h2>次回候補</h2><p>/api/project（design_db）24.7MB: branch_rowsのコミット重複（32,729件中ユニーク1,483）、branch_connections.pairs 9.8MB。PR照合の祖先判定（299回）の一括化。デスクトップ通知の実環境確認。</p>
+</html>
