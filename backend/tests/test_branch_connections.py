@@ -364,7 +364,7 @@ def test_current_relation_failure_is_exposed(monkeypatch, tmp_path: Path) -> Non
     commit(repo, "feature")
     rows = rows_for(repo, {"repository": "owner/repo"})
     # A current-state read failure must not erase recorded branch events.
-    monkeypatch.setattr(branch_rows.branch_ref_relations, "build", lambda *_args: {
+    monkeypatch.setattr(branch_rows.branch_ref_relations, "build", lambda *_args, **_kwargs: {
         "refs": [], "pairs": [], "ancestry_status": "unavailable",
     })
     result = branch_rows.connections(str(repo), rows)

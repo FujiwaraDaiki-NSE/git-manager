@@ -1,7 +1,9 @@
 "use client";
+import { remoteLabel } from "./remote-label.mjs";
 
 import { homeDocumentTitle } from "./agent-attention.mjs";
 import Link from "next/link";
+import { FetchFacts } from "./git-state-facts";
 import GitGuide from "./git-guide";
 import WorkspaceExport from "./workspace-export";
 import ShortcutHelp from "./shortcut-help";
@@ -33,7 +35,7 @@ const summaryCards: Array<{ key: AgentSummaryKey; label: string }> = [
   { key: "blocked", label: "問題あり" },
   { key: "active", label: "実行中" },
   { key: "review_required", label: "レビュー待ち" },
-  { key: "merge_ready", label: "マージ可能" },
+  { key: "merge_ready", label: "マージ準備完了" },
 ];
 
 type AgentFilter = "all" | "unknown" | AgentSummaryKey;
@@ -83,18 +85,6 @@ function exactDate(iso: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? "未取得" : date.toLocaleString("ja-JP");
 }
 
-function remoteLabel(remote: string | null) {
-  if (!remote) return "リモート未取得";
-  const value = remote.trim();
-  const scp = !value.includes("://") && value.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
-  if (scp) return `${scp[1]}/${scp[2].replace(/\.git\/?$/i, "")}`;
-  try {
-    const url = new URL(value.includes("://") ? value : `https://${value}`);
-    return `${url.host}${url.pathname.replace(/\.git\/?$/i, "")}`;
-  } catch {
-    return value.replace(/\.git\/?$/i, "");
-  }
-}
 
 function stateClass(state: AgentRunState | null | undefined) {
   return state ? `agent-state-${state.replace(/[^a-z0-9_-]/gi, "-")}` : "agent-state-unknown";
@@ -150,7 +140,7 @@ function ProjectCard({
       onPointerLeave={onInteractEnd}
     >
       <div className="project-card-topline">
-        <span className={`agent-state-badge ${stateClass(state)}`}>{agentStateLabel(state)}</span>
+        <span title={state === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className={`agent-state-badge ${stateClass(state)}`}>{agentStateLabel(state)}</span>
         <span className="project-lane-count">{project.lane_count === null ? "ブランチ数 未取得" : `${project.lane_count} ブランチ`}</span>
       </div>
       <div className="project-card-heading">
@@ -181,7 +171,7 @@ function ProjectCard({
         {completedCount !== null && <span><strong>{formatAgentCount(completedCount)}</strong> 完了</span>}
       </div>}
       {tasks.length > 0 && <div className="project-card-agent-list" aria-label="上位ブランチの作業状況">
-        {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); return <div className="agent-task-row" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><span className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{task.branch || "ブランチ未取得"}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>ブランチ状態不明</strong><span>報告未取得</span></div>}
+        {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); return <div className="agent-task-row" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><span title={taskState === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{task.branch || "ブランチ未取得"}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent報告なし</strong><span>明示的な報告はありません</span></div>}
         {maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
       </div>}
       <div className="project-card-event"><span className="eyebrow">{latestAgent ? "最新のブランチ報告" : "最新コミット"}</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><span>{latestAgent.branch || "ブランチ未取得"} · {agentStateLabel(agentTaskState(latestAgent))}</span><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>{relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>
@@ -198,13 +188,15 @@ function ProjectCard({
         })}
       </div>
       {project.next_lane && <div className="project-card-footer"><span>次に確認 {workHref("all", project.next_lane) ? <Link href={workHref("all", project.next_lane)!} prefetch={false}><strong>{project.next_lane}</strong><span aria-hidden="true"> →</span></Link> : <strong>{project.next_lane}</strong>}</span></div>}
+      {project.fetch_status?.result === "failure" && <span className="fact fact-danger" role="status">⚠ fetch失敗</span>}
       <details className="project-card-extra">
         <summary>管理情報 <span>{project.worktree_count} worktree</span></summary>
+        <FetchFacts fetchedAt={project.fetched_at} status={project.fetch_status} />
         <dl>
           <div><dt>作業パス</dt><dd><code>{project.main_path ?? "未取得"}</code></dd></div>
           <div><dt>既定との差が最大</dt><dd>{project.largest_difference_lane ?? "未取得"}</dd></div>
           <div><dt>統合済み</dt><dd>{project.git.merged}</dd></div>
-          <div><dt>最終観測</dt><dd>{projectLatestTime(project) ? relativeTime(new Date(projectLatestTime(project)).toISOString()) : "未取得"}</dd></div>
+          <div><dt title="agent報告・コミット・観測時刻のうち最新の時刻">最新の活動・観測</dt><dd>{projectLatestTime(project) ? relativeTime(new Date(projectLatestTime(project)).toISOString()) : "未取得"}</dd></div>
           {unknownLabels && <div><dt>agent件数未取得</dt><dd>{unknownLabels}</dd></div>}
         </dl>
       </details>

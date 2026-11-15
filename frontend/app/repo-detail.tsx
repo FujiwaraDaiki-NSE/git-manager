@@ -1,4 +1,5 @@
 "use client";
+import { OperationFacts } from "./git-state-facts";
 
 import PatchView from "./patch-view";
 import CommitFiles from "./commit-files";
@@ -100,6 +101,7 @@ function StatusBlock({ repo }: { repo: Repo }) {
   const badges = stateBadges(repo);
   return (
     <div className="statusblock">
+      <OperationFacts operations={repo.operations} />
       <div className="status-branch">
         {repo.branch_line ? <BranchLine line={repo.branch_line} /> : "—"}
       </div>

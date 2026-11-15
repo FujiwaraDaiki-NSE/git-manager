@@ -1,6 +1,9 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
+import { validCommitColumns } from "./ui-preference-tools.mjs";
+import { usePreference } from "./ui-preferences";
+import ScrollShadow from "./scroll-shadow";
 import CopyButton from "./copy-button";
 import type { Numstat } from "./types";
 import "./commit-files.css";
@@ -27,6 +30,8 @@ import {
   sortCommitFiles,
   summarizeCommitFiles,
 } from "./commit-file-tools.mjs";
+
+const validColumns = (v: unknown): v is boolean[] => validCommitColumns(v);
 
 type CommitFileFilter = "all" | "text" | "binary" | "renamed" | "unknown";
 type CommitFileSort = "path" | "volume" | "additions" | "deletions";
@@ -105,6 +110,7 @@ function FileVolume({ file }: { file: Numstat }) {
 }
 
 export default function CommitFiles({ files, downloadName }: CommitFilesProps) {
+  const [columns, setColumns] = usePreference("gitdash.commit-file-columns", [true, true, true], validColumns);
   const titleId = `commit-files-title-${useId().replaceAll(":", "")}`;
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<CommitFileFilter>("all");
@@ -201,7 +207,7 @@ export default function CommitFiles({ files, downloadName }: CommitFilesProps) {
         </span>
       </div>
 
-      <div className="commit-files-tools">
+      <div className="commit-files-tools"><div className="commit-files-filters commit-files-columns" role="group" aria-label="表示列"><span>表示列</span>{["追加", "削除", "変更量"].map((label, index) => <button type="button" key={label} aria-pressed={columns[index]} onClick={() => setColumns(columns.map((v, i) => i === index ? !v : v))}>{label}</button>)}</div>
         <label className="commit-files-search">
           <span>変更パスを検索</span>
           <input
@@ -319,23 +325,23 @@ export default function CommitFiles({ files, downloadName }: CommitFilesProps) {
           {files.length === 0 ? "変更ファイルはありません。" : "条件に一致する変更ファイルはありません。"}
         </div>
       ) : (
-        <div className="commit-files-table-wrap">
+        <ScrollShadow className="commit-files-table-wrap" label="横スクロールできる表">
           <table className="commit-files-table">
             <caption className="sr-only">コミットで変更されたファイル</caption>
-            <thead><tr><th scope="col">選択</th><th scope="col">追加</th><th scope="col">削除</th><th scope="col">変更量</th><th scope="col">パス</th></tr></thead>
+            <thead><tr><th scope="col">選択</th>{columns[0] && <th scope="col">追加</th>}{columns[1] && <th scope="col">削除</th>}{columns[2] && <th scope="col">変更量</th>}<th scope="col">パス</th></tr></thead>
             <tbody>
               {pageFiles.map((file, index) => (
                 <tr key={`${file.old_path ?? ""}:${file.path}:${index}`}>
                   <td><input type="checkbox" aria-label={`${file.path} を選択`} checked={selected.has(commitFileIdentity(file))} onChange={() => toggleFile(file)} /></td>
-                  <td className="additions" aria-label={lineLabel(file, "additions")}>{displayCommitFileCount(file, "additions") === "不明" ? <span className="commit-files-unknown">不明</span> : `+${displayCommitFileCount(file, "additions")}`}</td>
-                  <td className="deletions" aria-label={lineLabel(file, "deletions")}>{displayCommitFileCount(file, "deletions") === "不明" ? <span className="commit-files-unknown">不明</span> : `−${displayCommitFileCount(file, "deletions")}`}</td>
-                  <td className="commit-files-volume"><FileVolume file={file} /></td>
+                  {columns[0] && <td className="additions" aria-label={lineLabel(file, "additions")}>{displayCommitFileCount(file, "additions") === "不明" ? <span className="commit-files-unknown">不明</span> : `+${displayCommitFileCount(file, "additions")}`}</td>}
+                  {columns[1] && <td className="deletions" aria-label={lineLabel(file, "deletions")}>{displayCommitFileCount(file, "deletions") === "不明" ? <span className="commit-files-unknown">不明</span> : `−${displayCommitFileCount(file, "deletions")}`}</td>}
+                  {columns[2] && <td className="commit-files-volume"><FileVolume file={file} /></td>}
                   <td><FilePath file={file} /></td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollShadow>
       )}
       {files.length > 25 && visibleFiles.length > 0 && <nav className="commit-files-tools" aria-label="変更ファイル一覧のページ">
         <label><span>1ページのファイル数</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>

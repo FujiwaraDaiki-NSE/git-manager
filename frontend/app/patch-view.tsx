@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { sideBySideRows } from "./side-by-side.mjs";
 import CopyButton from "./copy-button";
 import { parsePatch } from "./parse-patch.mjs";
 import { findPatchMatches, selectPatchRows, splitPatchByFile, summarizePatchSection } from "./patch-tools.mjs";
@@ -42,7 +43,7 @@ function PatchText({ text, matches, activeMatchId }: { text: string; matches: Pa
   return <>{pieces}</>;
 }
 
-function PatchLines({ section, wrap, changedOnly, matches, activeMatchId }: { section: PatchSection; wrap: boolean; changedOnly: boolean; matches: PatchMatch[]; activeMatchId: string | null }) {
+function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBySide }: { section: PatchSection; wrap: boolean; changedOnly: boolean; matches: PatchMatch[]; activeMatchId: string | null; sideBySide: boolean }) {
   const [limit, setLimit] = useState(PATCH_PAGE_LINES);
   const containerRef = useRef<HTMLDivElement>(null);
   const focusRow = useRef<number | null>(null);
@@ -89,15 +90,25 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId }: { se
   };
 
   return <>
-    <div ref={containerRef} className={`patch-lines${wrap ? " patch-wrap" : ""}${changedOnly ? " patch-lines-changed-only" : ""}`} tabIndex={0} role="region" aria-label={`${section.title} の差分（左: 変更前、右: 変更後の行番号）`}>
-      <pre>{selectedLines.slice(0, count).map(({ line, lineIndex }) => {
+    <div ref={containerRef} className={`patch-lines${sideBySide ? " patch-lines-side-by-side" : ""}${wrap ? " patch-wrap" : ""}${changedOnly ? " patch-lines-changed-only" : ""}`} tabIndex={0} role="region" aria-label={`${section.title} の差分（左: 変更前、右: 変更後の行番号）`}>
+      {sideBySide ? <div className="patch-side-by-side">
+        <div className="patch-side-heading"><span>変更前</span><span>変更後</span></div>
+        {sideBySideRows(selectedLines.slice(0, count)).map((pair, index) => <div className="patch-side-row" key={index}>
+          {pair.shared ? <pre className={`patch-side-shared patch-${pair.shared.line.kind}`} data-patch-row={pair.shared.lineIndex} tabIndex={-1}><PatchText text={pair.shared.line.text} matches={lineMatches.get(pair.shared.lineIndex) ?? []} activeMatchId={activeMatchId} /></pre>
+            : [pair.left, pair.right].map((row, side) => <div key={side} className={`patch-side-cell${row ? ` patch-${row.line.kind}` : " patch-side-empty"}${row?.lineIndex === activeMatch?.lineIndex ? " patch-line-active" : ""}`} data-patch-row={row?.lineIndex} tabIndex={-1}>
+              <span className="patch-number" aria-hidden="true">{row ? side === 0 ? row.line.oldLine : row.line.newLine : null}</span>
+              <pre className="patch-side-text">{row && <PatchText text={row.line.text} matches={lineMatches.get(row.lineIndex) ?? []} activeMatchId={activeMatchId} />}</pre>
+            </div>)}
+        </div>)}
+      </div> : <>      <pre>{selectedLines.slice(0, count).map(({ line, lineIndex }) => {
         const matchesForLine = lineMatches.get(lineIndex) ?? [];
         return <span className={`patch-line patch-${line.kind}${activeMatch?.lineIndex === lineIndex ? " patch-line-active" : ""}`} data-patch-row={lineIndex} tabIndex={-1} key={lineIndex} data-patch-active={activeMatch?.lineIndex === lineIndex ? "true" : undefined}>
           <span className="patch-number" aria-hidden="true">{line.oldLine}</span>
           <span className="patch-number" aria-hidden="true">{line.newLine}</span>
           <span className="patch-text"><PatchText text={line.text} matches={matchesForLine} activeMatchId={activeMatchId} />{lineIndex < section.lines.length - 1 ? "\n" : ""}</span>
         </span>;
-      })}</pre>
+      })}</pre></>}
+
     </div>
     {selectedLines.length > PATCH_PAGE_LINES && <div className="patch-more">
       <span role="status">{changedOnly ? "変更行" : "差分"} {count.toLocaleString()} / {selectedLines.length.toLocaleString()} 行を表示{changedOnly ? "（コンテキスト行は非表示）" : ""}</span>
@@ -125,6 +136,9 @@ export default function PatchView({ patch }: { patch: string }) {
   const sectionPatches = useMemo(() => splitPatchByFile(patch), [patch]);
   const indexedSections = useMemo<PatchReviewEntry[]>(() => sections.map((section, index) => ({ section, index })), [sections]);
   const [wrap, setWrap] = useState(false);
+  const [layout, setLayout] = useState("unified");
+  const [wide, setWide] = useState(false);
+  useEffect(() => { const media = window.matchMedia("(min-width: 900px)"); const update = () => setWide(media.matches); update(); media.addEventListener("change", update); return () => media.removeEventListener("change", update); }, []);
   const [changedOnly, setChangedOnly] = useState(false);
   const [fileQuery, setFileQuery] = useState("");
   const [fileKind, setFileKind] = useState<PatchFileKind>("all");
@@ -242,10 +256,11 @@ export default function PatchView({ patch }: { patch: string }) {
       </div>
     </div>
     <div className="patch-toolbar">
+      <label>差分表示 <select value={wide ? layout : "unified"} disabled={!wide} onChange={e => setLayout(e.target.value)}><option value="unified">unified</option><option value="side-by-side">左右比較</option></select></label>{!wide && <span>狭い画面ではunified表示</span>}
       <span className="patch-legend"><span>＋ 追加</span><span>− 削除</span></span>
       <button type="button" aria-pressed={changedOnly} onClick={() => setChangedOnly((value) => !value)}>{changedOnly ? "すべての行を表示" : "変更行のみ"}</button>
       <button type="button" aria-pressed={wrap} onClick={() => setWrap((value) => !value)}>行を折り返す</button>
-      {sections.length > 1 && <div className="patch-review-controls" aria-label="差分ファイルの表示設定">
+      <details className="patch-advanced"><summary>詳細</summary>      {sections.length > 1 && <div className="patch-review-controls" aria-label="差分ファイルの表示設定">
         <label>内容<select value={fileKind} onChange={(event) => setFileKind(event.target.value as PatchFileKind)}>
           <option value="all">すべて</option>
           <option value="text">テキスト変更</option>
@@ -266,6 +281,8 @@ export default function PatchView({ patch }: { patch: string }) {
       })}>{visible.length > 0 && visible.every(({ index }) => expanded.has(index)) ? "表示中を折りたたむ" : "表示中を展開"}</button>}
       <CopyButton value={patch} label="差分全体をコピー" />
       <button className="patch-export-button" type="button" disabled={!visible.length} onClick={downloadVisiblePatch}>表示中のファイルをパッチ保存</button>
+</details>
+      <span className="patch-active-conditions" role="status">内容: {fileKind === "all" ? "すべて" : fileKind === "text" ? "テキスト" : "バイナリ"} · 並び順: {fileSort === "original" ? "元の順序" : fileSort === "path" ? "パス順" : "変更行数順"}{hideReviewed ? " · レビュー済みを非表示" : ""}{changedOnly ? " · 変更行のみ" : ""}</span>
       <span className="patch-review-progress" role="status" aria-live="polite">レビュー済み {reviewProgress.reviewed.toLocaleString()} / {reviewProgress.total.toLocaleString()} ファイル</span>
       {downloadStatus && <span className="patch-download-status" role="status" aria-live="polite">{downloadStatus}</span>}
       <span className="patch-view-note" role="status">レビュー済みの印はこの画面だけの表示状態です。Gitの状態は変更しません。{changedOnly ? " コンテキスト行を非表示中。hunkヘッダーと変更行、行番号は表示しています。" : ""}</span>
@@ -292,7 +309,7 @@ export default function PatchView({ patch }: { patch: string }) {
             </button>
             <span className="patch-file-copy" onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={(event) => event.stopPropagation()}><CopyButton value={rawSection} label={`${section.title} の差分をコピー`} /></span>
           </summary>
-          {expanded.has(index) && <PatchLines section={section} wrap={wrap} changedOnly={changedOnly} matches={sectionMatches} activeMatchId={activeMatchId} />}
+          {expanded.has(index) && <PatchLines sideBySide={wide && layout === "side-by-side"} section={section} wrap={wrap} changedOnly={changedOnly} matches={sectionMatches} activeMatchId={activeMatchId} />}
         </details>;
       })}
     </div>

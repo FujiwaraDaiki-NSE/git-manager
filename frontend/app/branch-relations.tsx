@@ -1,5 +1,6 @@
 "use client";
 
+import ScrollShadow from "./scroll-shadow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   connectionPairs,
@@ -29,6 +30,7 @@ import {
 } from "./branch-relations-ui-tools.mjs";
 import type {
   ProjectBranchConnectionEdge,
+  ProjectBranchConnections,
   ProjectBranchConnectionUnresolved,
   ProjectBranchConnectionRef,
   ProjectBranchRow,
@@ -197,7 +199,11 @@ export default function BranchRelations({
   selectedLane: string | null;
   relationRef: string | null;
 }) {
-  const connection = project.branch_connections;
+  const sourceConnection = project.branch_connections;
+  const [pairData, setPairData] = useState<{ source: typeof sourceConnection; data: Pick<ProjectBranchConnections, "refs" | "pairs" | "ancestry_status"> } | null>(null);
+  const connection = useMemo(() => sourceConnection && pairData?.source === sourceConnection
+    ? { ...sourceConnection, ...pairData.data }
+    : sourceConnection, [pairData, sourceConnection]);
   const refs: ProjectBranchConnectionRef[] = useMemo(() => connectionRefs(connection) as ProjectBranchConnectionRef[], [connection]);
   const pairs = useMemo(() => connectionPairs(connection), [connection]);
   const rows = project.branch_rows ?? [];
@@ -211,7 +217,24 @@ export default function BranchRelations({
   const [historyEvidence, setHistoryEvidence] = useState("");
   const [historyOperation, setHistoryOperation] = useState("");
   const [exportStatus, setExportStatus] = useState("");
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [pairError, setPairError] = useState<string | null>(null);
+  const [retryPairs, setRetryPairs] = useState(0);
+  useEffect(() => {
+    if (!open || !sourceConnection || (pairData !== null && pairData.source === sourceConnection)) return;
+    const controller = new AbortController();
+    setPairError(null);
+    void fetch(`/api/repo/branch-pairs?path=${encodeURIComponent(project.main_path)}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`参照比較を取得できませんでした（HTTP ${response.status}）。`);
+        return await response.json();
+      })
+      .then((data) => { if (!controller.signal.aborted) setPairData({ source: sourceConnection, data }); })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setPairError(error instanceof Error ? error.message : "参照比較の取得に失敗しました。");
+      });
+    return () => controller.abort();
+  }, [open, project.main_path, sourceConnection, retryPairs, pairData]);
   const [showAllUnresolved, setShowAllUnresolved] = useState(false);
   const selectionContext = JSON.stringify([selectedRowId, selectedLane, relationRef]);
   const previousSelectionContext = useRef(selectionContext);
@@ -284,7 +307,6 @@ export default function BranchRelations({
     unknown: 0,
   }), [oriented]);
   const coverage = coverageLabels(connection);
-  const hasNewContract = Array.isArray(connection?.refs) || Array.isArray(connection?.pairs);
   const unknownHistoryEdges = selectedRefId ? edges.filter((edge) => {
     const ids = edgeReferenceIds(edge, refs);
     return !ids.source && !ids.target;
@@ -323,8 +345,9 @@ export default function BranchRelations({
 
   return <section className="branch-relations-panel" aria-labelledby="branch-relations-title">
     <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary id="branch-relations-title">ブランチ・参照の全関係と関連履歴 <span>{hasNewContract ? `${pairs.length}組 · ${refs.length}件の参照` : "関係情報を取得中"}</span></summary>
-      <div className="branch-relations-body">
+      <summary id="branch-relations-title">ブランチ・参照の全関係と関連履歴 <span>{Array.isArray(connection?.pairs) ? `${pairs.length}組 · ${refs.length}件の参照` : `${refs.length}件の参照 · 開くと比較を取得`}</span></summary>
+      {open && <div className="branch-relations-body">
+        {pairError ? <p role="alert">{pairError} <button type="button" onClick={() => setRetryPairs((value) => value + 1)}>再試行</button></p> : !Array.isArray(connection?.pairs) && <p role="status">参照比較を取得中です。</p>}
         <div className="branch-relations-heading">
           <div><h3>現在の参照比較と、過去の操作イベント</h3><p>現在の包含関係と過去の分岐・合流は別の事実です。現在の先端が含んでいることだけから、過去の合流元を決めていません。</p></div>
           <span className={`branch-relations-status is-${connection?.status ?? "unavailable"}`}>{statusLabel(connection?.status ?? "unavailable")}</span>
@@ -353,7 +376,7 @@ export default function BranchRelations({
               <div className="branch-relations-export-actions"><button type="button" className="subtle-button" disabled={!filteredPairs.length} onClick={exportCurrentPairs} aria-label="表示中の関係をJSON保存">JSON保存</button><button type="button" className="subtle-button" disabled={!filteredPairs.length} onClick={copyCurrentPairs} aria-label="表示中の関係をMarkdownコピー">Markdownコピー</button></div>
             </div>
             {exportStatus && <p className="branch-relations-export-status" role="status" aria-live="polite">{exportStatus}</p>}
-            {pairs.length === 0 ? <p className="branch-relations-empty">現在の参照比較は未取得です。ペア情報が返るまでGitの意味を推測しません。</p> : filteredPairs.length === 0 ? <p className="branch-relations-empty">検索条件に一致する関係はありません。</p> : <ul className="branch-relations-pairs" tabIndex={0} aria-label="現在の比較結果（スクロール可能）">{pairPage.rows.map((item: ReturnType<typeof selectReferencePairs>[number]) => <RelationPairRow item={item} key={`${item.pair.left_ref_id}:${item.pair.right_ref_id}`} refsById={refsById} selectedRef={refsById.get(selectedRefId)} />)}</ul>}
+            {pairs.length === 0 ? <p className="branch-relations-empty">現在の参照比較は未取得です。ペア情報が返るまでGitの意味を推測しません。</p> : filteredPairs.length === 0 ? <p className="branch-relations-empty">検索条件に一致する関係はありません。</p> : <ScrollShadow className="branch-relations-scroll" label="現在の比較結果（横スクロール可能）"><ul className="branch-relations-pairs">{pairPage.rows.map((item: ReturnType<typeof selectReferencePairs>[number]) => <RelationPairRow item={item} key={`${item.pair.left_ref_id}:${item.pair.right_ref_id}`} refsById={refsById} selectedRef={refsById.get(selectedRefId)} />)}</ul></ScrollShadow>}
             <MoreRelations total={filteredPairs.length} shown={pairPage.rows.length} label="現在の関係" onMore={pairPage.showMore} />
           </div>}
 
@@ -371,7 +394,7 @@ export default function BranchRelations({
           {unresolved.length > 0 && <details className="branch-relations-unresolved"><summary>未解決の関係 ({unresolved.length}件・一致 {filteredUnresolved.length}件)</summary><div className="branch-relations-unresolved-controls"><label><input type="checkbox" checked={showAllUnresolved} onChange={(event) => setShowAllUnresolved(event.target.checked)} /> 対象の参照を特定できない履歴も全件表示</label>{selectedRefId && unknownUnresolved > 0 && <span>{unknownUnresolved}件は取り込み元・先の参照 ID が未取得です。</span>}</div>{filteredUnresolved.length > 0 ? <ul>{unresolvedPage.rows.map((item) => <li key={item.id}><strong>{item.source_ref_id ? refName(refs, item.source_ref_id, item.source || "操作元の参照未取得") : item.source || "操作元の参照未取得"} → {item.target_ref_id ? refName(refs, item.target_ref_id, item.target || "操作先の参照未取得") : item.target || "操作先の参照未取得"}</strong>{item.evidence && <span>{evidenceLabel(item.evidence)}</span>}{item.operation && <span>{operationLabel(item.operation)}</span>}<span>{item.occurred_at ? `操作時刻 ${exactDate(item.occurred_at)}` : "操作時刻未取得"}</span><span>{reasonLabel(item.reason)}</span>{item.pr_number !== null && item.pr_number !== undefined && (item.pr_url ? <a href={item.pr_url} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <span>PR #{item.pr_number}</span>)}{(item.source_commit_hash || item.target_commit_hash || item.commit_hash) && <span>根拠ハッシュ: {shortHash(item.source_commit_hash ?? item.target_commit_hash ?? item.commit_hash)}</span>}</li>)}</ul> : <p className="branch-relations-empty">この対象と検索条件に一致する未解決履歴はありません。「対象の参照を特定できない履歴も全件表示」を選ぶと全件を確認できます。</p>}<MoreRelations total={filteredUnresolved.length} shown={unresolvedPage.rows.length} label="未解決の関係" onMore={unresolvedPage.showMore} /></details>}
           <p className="branch-relations-coverage-note">reflog は期限切れ・削除済みになるため、過去のブランチ識別情報を完全に復元できないことがあります。取得状態が「一部取得」「未取得」の関係は、Gitの意味を補って表示していません。</p>
         </>}
-      </div>
+      </div>}
     </details>
   </section>;
 }

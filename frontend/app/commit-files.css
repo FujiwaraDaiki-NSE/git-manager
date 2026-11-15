@@ -278,3 +278,6 @@
   min-height: 32px; padding: 5px 7px; border: 1px solid var(--rule); border-radius: 6px;
   color: var(--ink); background: var(--panel); font: 12px var(--sans);
 }
+
+.commit-files-columns { padding: 0; }
+.commit-files-columns > span { color: var(--muted); font: 11px var(--sans); }

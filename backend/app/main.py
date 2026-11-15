@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from app import compare, file_history, stashes, tags, reflog, repository_files, blame, worktree_diff
 from app import content_search, ignore_inspector, file_attributes
 from app import conflict_inspector, commit_containment, tree_sizes
-from app import agent_events, branch_history, config, detail, github, gitinfo, graph, mcp_server, paths, project, project_snapshots, scanner, store
+from app import agent_events, branch_history, branch_ref_relations, config, detail, github, gitinfo, graph, mcp_server, paths, project, project_snapshots, scanner, store
 from app.bus import bus
 from app.watcher import Watcher
 
@@ -270,27 +270,39 @@ def _refresh_project_snapshot(row: dict[str, Any]) -> None:
     project_snapshots.refresh_existing(paths.to_container(representative), project_id, siblings, _repo_lock(representative))
 
 
-def _upsert(repo: dict[str, Any]) -> None:
+def _store_repo(repo: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Keep fetch observations shared by common repository, including failures."""
     with STATE_LOCK:
         existing = STATE.get(repo["path"], {})
         merged = {**existing, **repo}
+        common = merged.get("common_dir")
+        siblings = [row for row in STATE.values() if common is not None and row.get("common_dir") == common]
+        observations = [row["fetch_status"] for row in [*siblings, merged] if row.get("fetch_status") is not None]
+        latest = max(observations, key=lambda item: item["attempted_at"], default=None)
+        successes = [row["fetched_at"] for row in [*siblings, merged] if row.get("fetched_at") is not None]
+        last_success = max(successes, default=None)
+        merged.update(fetch_status=latest, fetched_at=last_success)
         STATE[repo["path"]] = merged
-    bus.publish("repo", merged)
+        changed = []
+        for row in siblings:
+            if row["path"] != repo["path"] and (row.get("fetch_status") != latest or row.get("fetched_at") != last_success):
+                row.update(fetch_status=latest, fetched_at=last_success)
+                changed.append(dict(row))
+        return merged, changed
+
+
+def _upsert(repo: dict[str, Any]) -> None:
+    merged, siblings = _store_repo(repo)
+    for row in [merged, *siblings]:
+        bus.publish("repo", row)
     _refresh_project_snapshot(merged)
 
 
 def _upsert_threadsafe(repo: dict[str, Any]) -> None:
-    """Store and publish a row from a worker thread.
-
-    ``_refresh_sync`` runs in an executor, so putting directly into an
-    ``asyncio.Queue`` would bind an SSE queue to the wrong thread.  The bus
-    schedules the actual publish on the event loop instead.
-    """
-    with STATE_LOCK:
-        existing = STATE.get(repo["path"], {})
-        merged = {**existing, **repo}
-        STATE[repo["path"]] = merged
-    bus.publish_threadsafe("repo", merged)
+    """Store and publish rows from a worker thread on the event loop."""
+    merged, siblings = _store_repo(repo)
+    for row in [merged, *siblings]:
+        bus.publish_threadsafe("repo", row)
     _refresh_project_snapshot(merged)
 
 
@@ -335,6 +347,7 @@ def _refresh_sync(
     container = paths.to_container(host_path)
     with STATE_LOCK:
         existing_fetched_at = STATE.get(host_path, {}).get("fetched_at")
+        existing_fetch_status = STATE.get(host_path, {}).get("fetch_status")
     context = context if context is not None else _repo_context(host_path)
     if refresh_project_metadata and not context.get("common_dir"):
         layout = scanner.repo_layout(container)
@@ -400,8 +413,10 @@ def _refresh_sync(
             result = None
         else:
             result = gitinfo.collect(container, fetch=fetch, context=context)
-            if not fetch:
+            if result.get("fetched_at") is None:
                 result["fetched_at"] = existing_fetched_at
+            if result.get("fetch_status") is None:
+                result["fetch_status"] = existing_fetch_status
         if result is None:
             # The target was confirmed to have disappeared from Git's
             # worktree list.  Keep the removal emitted by reconciliation and
@@ -558,12 +573,14 @@ def _refresh_project_members(
         container_path = paths.to_container(path)
         with STATE_LOCK:
             existing_fetched_at = STATE.get(path, {}).get("fetched_at")
+            existing_fetch_status = STATE.get(path, {}).get("fetch_status")
         try:
             result = gitinfo.collect(container_path, context=context)
         except Exception:
             # A single inaccessible sibling must not prevent the rest of the
             # project from being reconciled.
             continue
+        result["fetch_status"] = existing_fetch_status
         if existing_fetched_at is not None:
             result["fetched_at"] = existing_fetched_at
         result["path"] = path
@@ -879,8 +896,9 @@ async def _fetch_round(host_paths: list[str]) -> None:
         )
         if fetched is None:
             return common, representative, members, None
+        _upsert(fetched)
         fetched_at = fetched.get("fetched_at")
-        if fetched_at is None:
+        if fetched["fetch_status"] is None or fetched["fetch_status"]["result"] != "success":
             return common, representative, members, fetched
         with STATE_LOCK:
             for path in members:
@@ -1229,6 +1247,19 @@ async def get_project(path: str, range: str = "current", as_of: datetime | None 
     if result is None:
         raise HTTPException(status_code=502, detail="プロジェクトの Git 情報を取得できませんでした")
     return result
+
+
+@app.get("/api/repo/branch-pairs")
+async def get_branch_pairs(path: str) -> dict[str, Any]:
+    """Load all ref comparisons only when the relations view is opened."""
+    result = await get_project(path)
+    repo = paths.to_container(result["main_path"])
+
+    def read():
+        with _repo_lock(path):
+            return branch_ref_relations.build(repo, result["branch_rows"])
+
+    return await asyncio.get_running_loop().run_in_executor(pool, read)
 
 
 @app.get("/api/repo/graph")
@@ -1629,3 +1660,7 @@ async def health() -> dict[str, Any]:
         "watching": watcher is not None and watcher.available,
         "fetch": config.FETCH_ENABLED,
     }
+
+
+from app.investigation_routes import create_router as create_investigation_router
+app.include_router(create_investigation_router(_known_repo, _repo_lock, pool))

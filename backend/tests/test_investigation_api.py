@@ -56,6 +56,27 @@ def test_unknown_repository_and_required_parameters(investigation):
     assert client.get('/api/repo/file-history', params={'path': path, 'revision': target, 'file': '../outside', 'follow': False, 'offset': 0}).status_code == 422
 
 
+def test_branch_pairs_are_loaded_separately_without_changing_relations(investigation, monkeypatch, tmp_path_factory):
+    from app import branch_ref_relations, config, github
+    client, path, _, _, _, git = investigation
+    git('branch', 'topic', 'HEAD~1')
+    monkeypatch.setattr(config, 'DATA_DIR', tmp_path_factory.mktemp('branch-pairs-data'))
+    monkeypatch.setattr(github, 'load', lambda repo: github.unavailable('test'))
+    before = (git('status', '--porcelain=v2'), git('show-ref'))
+    response = client.get('/api/project', params={'path': path})
+    assert response.status_code == 200
+    payload = response.json()
+    assert 'pairs' not in payload['branch_connections']
+    response = client.get('/api/repo/branch-pairs', params={'path': path})
+    assert response.status_code == 200
+    assert response.json() == branch_ref_relations.build(path, payload['branch_rows'])
+    assert response.json()['refs'] == payload['branch_connections']['refs']
+    assert len(response.json()['pairs']) == 1
+    assert client.get('/api/repo/branch-pairs', params={'path': '/unregistered'}).status_code == 404
+    assert client.get('/api/repo/branch-pairs').status_code == 422
+    assert (git('status', '--porcelain=v2'), git('show-ref')) == before
+
+
 def test_reference_investigation_endpoints_preserve_git_state(investigation):
     client, path, base, target, stash, git = investigation
     git('tag', 'v1', base)

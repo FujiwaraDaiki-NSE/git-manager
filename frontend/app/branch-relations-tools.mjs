@@ -55,9 +55,9 @@ const REASON_LABELS = Object.freeze({
   multiple_merge_bases: "共通祖先が複数あり、分岐関係を一意に確定できません。",
   multiple_pr_targets: "PRの操作先が複数あり、特定できません。",
   target_branch_not_found: "操作先ブランチが現在の一覧にありません。",
-  merge_commit_unavailable: "PRのマージコミットを取得できませんでした。",
-  merge_commit_ancestry_unavailable: "PRのマージコミットの祖先関係を取得できませんでした。",
-  merge_commit_not_ancestor: "現在の操作先refにPRのマージコミットが含まれていません。",
+  merge_commit_unavailable: "PRの取り込み先コミットを取得できませんでした。",
+  merge_commit_ancestry_unavailable: "PRの取り込み先コミットの祖先関係を取得できませんでした。",
+  merge_commit_not_ancestor: "現在の操作先refにPRの取り込み先コミットが含まれていません。",
   base_tip_unavailable: "比較元refの先端ハッシュを取得できませんでした。",
   shared_tip: "両方のrefが同じ先端を指しています。",
   source_and_target_are_same_row: "操作元と操作先が同じブランチ行です。",
@@ -298,6 +298,7 @@ export function unresolvedItems(connection) {
 
 /** @param {any} connection */
 export function relationCounts(connection) {
+  if (!Array.isArray(connection?.pairs)) return null;
   const pairs = connectionPairs(connection);
   return pairs.reduce((counts, pair) => ({ ...counts, [pair.relation]: counts[pair.relation] + 1 }), {
     equal: 0,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import ScrollShadow from "./scroll-shadow";
 import CopyButton from "./copy-button";
 import {
   buildPullRequestExplorerData,
@@ -94,7 +95,7 @@ function PullRequestCard({ record }: { record: PullRequestRecord }) {
           </div>
         </div>
         <footer className="pr-explorer-card-foot">
-          {record.commit_hash ? <><code className="pr-explorer-merge-hash" title={record.commit_hash}>{record.commit_hash}</code><CopyButton value={record.commit_hash} label="マージコミットをコピー" /></> : <span className="pr-explorer-missing-hash">マージコミット未取得</span>}
+          {record.commit_hash ? <><code className="pr-explorer-merge-hash" title={`${record.commit_hash} · PR取り込み後のコミット。Squash/Rebaseでは複数親のmerge commitとは限りません。`}>{record.commit_hash}</code><CopyButton value={record.commit_hash} label="取り込み先コミットをコピー" /></> : <span className="pr-explorer-missing-hash">取り込み先コミット未取得</span>}
           {!href && <span className="pr-explorer-missing-url">リンク未取得</span>}
         </footer>
       </article>
@@ -104,11 +105,11 @@ function PullRequestCard({ record }: { record: PullRequestRecord }) {
 
 function PullRequestTable({ records }: { records: PullRequestRecord[] }) {
   return (
-    <div className="pr-explorer-table-scroll" tabIndex={0} aria-label="マージ済みPRの表。横にスクロールできます">
+    <ScrollShadow className="pr-explorer-table-scroll" label="横スクロールできる表">
       <table className="pr-explorer-table">
         <caption className="pr-explorer-visually-hidden">表示中のマージ済みPR</caption>
         <thead>
-          <tr><th scope="col">PR</th><th scope="col">マージ日</th><th scope="col">マージ元</th><th scope="col">マージ先</th><th scope="col">マージコミット</th></tr>
+          <tr><th scope="col">PR</th><th scope="col">マージ日</th><th scope="col">マージ元</th><th scope="col">マージ先</th><th scope="col" title="PR取り込み後のコミット。Squash/Rebaseでは複数親のmerge commitとは限りません。">取り込み先コミット</th></tr>
         </thead>
         <tbody>
           {records.map((record, index) => {
@@ -127,14 +128,14 @@ function PullRequestTable({ records }: { records: PullRequestRecord[] }) {
                 <td><code title={record.source}>{record.source}</code></td>
                 <td><code title={record.target}>{record.target}</code></td>
                 <td className="pr-explorer-table-hash">
-                  {record.commit_hash ? <><code title={record.commit_hash}>{record.commit_hash}</code><CopyButton value={record.commit_hash} label="マージコミットをコピー" /></> : <span className="pr-explorer-missing-hash">マージコミット未取得</span>}
+                  {record.commit_hash ? <><code title={`${record.commit_hash} · PR取り込み後のコミット。Squash/Rebaseでは複数親のmerge commitとは限りません。`}>{record.commit_hash}</code><CopyButton value={record.commit_hash} label="取り込み先コミットをコピー" /></> : <span className="pr-explorer-missing-hash">取り込み先コミット未取得</span>}
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
-    </div>
+    </ScrollShadow>
   );
 }
 

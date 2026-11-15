@@ -164,9 +164,9 @@ def _historical_row_key(number: int) -> str:
 def _ref_contains(repo: str, ref: str, commit_hash: str) -> bool:
     batch = project_git_batch.current(repo)
     if batch is not None:
-        reachable = batch.ancestors(batch.resolve(ref))
-        if reachable is not None and batch.commits is not None and commit_hash in batch.commits:
-            return commit_hash in reachable
+        contains = batch.contains(commit_hash, ref)
+        if contains is not None:
+            return contains
     return gitinfo._run(repo, ["merge-base", "--is-ancestor", commit_hash, ref]) is not None
 
 
@@ -733,9 +733,9 @@ def _pr_target_candidates(
 def _ancestor_status(repo: str, ancestor: str, descendant: str) -> bool | None:
     batch = project_git_batch.current(repo)
     if batch is not None:
-        reachable = batch.ancestors(descendant)
-        if reachable is not None and batch.commits is not None and ancestor in batch.commits:
-            return ancestor in reachable
+        contains = batch.contains(ancestor, descendant)
+        if contains is not None:
+            return contains
     _output, status = gitinfo._run_with_status(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
     if status == 0:
         return True
@@ -762,6 +762,7 @@ def connections(
     *,
     default_branch: str | None = None,
     github_data: Mapping[str, Any] | None = None,
+    include_pairs: bool = True,
 ) -> dict[str, Any]:
     """Join current ref comparisons and explicitly recorded branch events.
 
@@ -769,7 +770,8 @@ def connections(
     creator. All pairwise ancestry facts are exposed separately from events.
     """
     git_rows = project_facts.relation_rows(rows)
-    ref_relations = project_facts.observe("project.ref_relations", [repo, git_rows], lambda: branch_ref_relations.build(repo, rows))
+    observation = "project.ref_relations" if include_pairs else "project.ref_register"
+    ref_relations = project_facts.observe(observation, [repo, git_rows], lambda: branch_ref_relations.build(repo, rows, include_pairs=include_pairs))
     recorded = project_facts.observe("project.reflog_relations", [repo, git_rows], lambda: branch_relation_events.build(repo, rows))
     if rows is None:
         return {**ref_relations, **recorded, "status": "unavailable"}

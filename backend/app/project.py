@@ -535,9 +535,9 @@ def _tracks_remote_branch(repo: str, branch: str, commit_hash: str) -> bool:
     if not upstream_ref:
         return False
     if batch is not None:
-        reachable = batch.ancestors(batch.resolve(upstream_ref))
-        if reachable is not None and batch.commits is not None and commit_hash in batch.commits:
-            return commit_hash in reachable
+        contains = batch.contains(commit_hash, upstream_ref)
+        if contains is not None:
+            return contains
     return gitinfo._run(repo, ["merge-base", "--is-ancestor", commit_hash, upstream_ref]) is not None
 
 
@@ -784,6 +784,10 @@ def build(
     default_ref = f"refs/remotes/origin/{default_branch}" if default_branch else None
     default_hash = _ref_hash(repo, default_ref) if default_ref else None
 
+    destinations = gitinfo.branch_destinations_many(repo, [
+        name for name in [*(row.get("name") for row in local), *(row.get("branch") for row in worktrees)]
+        if isinstance(name, str) and name
+    ])
     lanes: list[dict[str, Any]] = []
     branch_heads: dict[str, str] = {}
     for branch in local:
@@ -812,6 +816,8 @@ def build(
                 "name": name,
                 "branch": name,
                 "path": status["path"],
+                "operations": gitinfo.operations(paths.to_container(status["path"])) if status["path"] else None,
+                "destinations": destinations[name],
                 "is_worktree": worktree is not None,
                 "worktree_state": status["worktree_state"],
                 "head": head,
@@ -870,6 +876,8 @@ def build(
                 "branch": branch_name,
                 "unborn": unborn,
                 "path": path,
+                "operations": gitinfo.operations(paths.to_container(path)),
+                "destinations": destinations[branch_name] if branch_name else None,
                 "is_worktree": not worktree.get("is_main", False),
                 "worktree_state": worktree.get("state"),
                 "head": head,
@@ -1038,6 +1046,7 @@ def build(
         branch_row_data,
         default_branch=default_branch,
         github_data=github_data,
+        include_pairs=False,
     )
     return {
         "id": project_id,
@@ -1048,6 +1057,7 @@ def build(
         "default_hash": default_hash,
         "main_path": main_path,
         "fetched_at": fetched_at,
+        "fetch_status": main_row.get("fetch_status") if main_row else None,
         "observed_at": observed_at,
         "range": range_name,
         "graph": graph_data,
@@ -1223,6 +1233,8 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
             "name": os.path.basename(project_id.rstrip("/")) or project_id,
             "remote": main.get("remote"),
             "main_path": main.get("path"),
+            "fetched_at": main.get("fetched_at"),
+            "fetch_status": main.get("fetch_status"),
             # A worktree is a checkout, not a branch lane. Match the
             # project endpoint's local-branch lane count instead of
             # counting snapshot rows.

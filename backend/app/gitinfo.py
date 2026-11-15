@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import re
 import selectors
 import shlex
 import shutil
@@ -404,14 +405,235 @@ def next_command(
     return None
 
 
-def do_fetch(repo: str) -> bool:
-    """成功したら True。認証切れやオフラインでは False。"""
-    out = _run(
-        repo,
-        ["fetch", "--quiet", "--no-tags", "--prune"],
-        timeout=config.FETCH_TIMEOUT_SEC,
-    )
-    return out is not None
+def do_fetch(repo: str) -> dict[str, Any]:
+    """Retain the latest attempt independently of the last successful fetch."""
+    category = None
+    reason = None
+    try:
+        proc = subprocess.run(
+            [GIT, "-C", repo, "fetch", "--quiet", "--no-tags", "--prune"],
+            capture_output=True, timeout=config.FETCH_TIMEOUT_SEC,
+            env={**os.environ, **NON_INTERACTIVE_ENV},
+        )
+        success = proc.returncode == 0
+        if not success:
+            reason = " ".join(proc.stderr.decode("utf-8", errors="replace").split())[:600]
+            lower = reason.lower()
+            category = (
+                "authentication" if any(x in lower for x in ("authentication", "permission denied", "could not read username", "terminal prompts disabled", "access denied"))
+                else "timeout" if any(x in lower for x in ("timed out", "timeout"))
+                else "connection" if any(x in lower for x in ("could not resolve", "unable to access", "connection", "network is unreachable", "no route to host"))
+                else "other"
+            )
+    except subprocess.TimeoutExpired as exc:
+        success, category = False, "timeout"
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        reason = ("fetch timed out: " + " ".join(stderr.split()))[:600]
+    except OSError as exc:
+        success, category, reason = False, "other", str(exc)[:600]
+    return {"attempted_at": time.time(), "result": "success" if success else "failure", "category": category, "reason": reason}
+
+
+def operations(repo: str) -> list[dict[str, Any]] | None:
+    """Read worktree-specific markers; None means observation failed."""
+    raw = _run(repo, ["rev-parse", "--absolute-git-dir"])
+    if raw is None:
+        return None
+    from pathlib import Path
+    directory = Path(raw.strip())
+    result = []
+    markers = [("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"), ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect")]
+    try:
+        for marker, kind in markers:
+            target = directory / marker
+            try:
+                target.stat()
+            except FileNotFoundError:
+                continue
+            step = total = None
+            if kind == "rebase":
+                step_file, total_file = ("msgnum", "end") if marker == "rebase-merge" else ("next", "last")
+                try:
+                    step = int((target / step_file).read_text().strip())
+                    total = int((target / total_file).read_text().strip())
+                except (OSError, ValueError):
+                    step = total = None
+            commands = [{"command": "git status", "reason": "競合と現在の作業状態を確認します"}]
+            if kind == "bisect":
+                commands += [{"command": "git bisect log", "reason": "これまでの判定を確認します"}, {"command": "git bisect good", "reason": "現在のコミットを正常と判定して探索を続けます"}, {"command": "git bisect bad", "reason": "現在のコミットを問題ありと判定して探索を続けます"}, {"command": "git bisect reset", "reason": "探索を終了し開始前のHEADに戻します"}]
+            else:
+                commands += [{"command": f"git {kind} --continue", "reason": "競合を解消してステージした後、操作を継続します"}, {"command": f"git {kind} --abort", "reason": "進行中の操作を中止します"}]
+            result.append({"kind": kind, "marker": marker, "step": step, "total": total, "commands": commands})
+    except OSError:
+        return None
+    return result
+
+
+def _config_key(key: str) -> str:
+    """Git folds section/key case but preserves subsection case."""
+    section, _, rest = key.partition(".")
+    subsection, dot, name = rest.rpartition(".")
+    return f"{section.lower()}.{subsection}.{name.lower()}" if dot else f"{section.lower()}.{rest.lower()}"
+
+
+@project_facts.cached
+def _branch_config(repo: str) -> dict[str, list[str | None]] | None:
+    # Cache only the settings used here, not unrelated credentials from --list.
+    try:
+        proc = subprocess.run(
+            [GIT, "-C", repo, "config", "-z", "--list"],
+            capture_output=True, timeout=config.GIT_TIMEOUT_SEC,
+            env={**os.environ, **NON_INTERACTIVE_ENV},
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    settings: dict[str, list[str | None]] = {}
+    for record in proc.stdout.decode("utf-8", errors="replace").split("\0"):
+        if not record:
+            continue
+        key, separator, value = record.partition("\n")
+        key = _config_key(key)
+        section, _, rest = key.partition(".")
+        name = rest.rsplit(".", 1)[-1]
+        if (section == "branch" and name in ("remote", "pushremote", "merge")) or (section == "remote" and name in ("pushdefault", "push", "pushurl")) or key in ("push.default", "push.autosetupremote"):
+            settings.setdefault(key, []).append(value if separator else None)
+    return settings
+
+
+def _config_bool(value: str | None) -> bool | None:
+    """Parse Git's boolean text and integer forms; None as input is a bare key."""
+    if value is None or value.lower() in ("true", "yes", "on"):
+        return True
+    if value.lower() in ("false", "no", "off", ""):
+        return False
+    number = re.fullmatch(r"([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)([kKmMgG]?)", value.lstrip(" \t\n\r\v\f"))
+    if number is None:
+        return None
+    sign, digits, unit = number.groups()
+    base = 16 if digits.lower().startswith("0x") else 8 if digits.startswith("0") else 10
+    parsed = int(("-" if sign == "-" else "") + digits, base) * (1024 ** ("kmg".index(unit.lower()) + 1) if unit else 1)
+    return parsed != 0 if -(2 ** 31) <= parsed < 2 ** 31 else None
+
+
+def branch_destinations_many(repo: str, branches: list[str]) -> dict[str, dict[str, Any] | None]:
+    """Resolve a repository's branches using one config observation per batch."""
+    settings = _branch_config(repo)
+    raw = _run(repo, ["for-each-ref", f"--format={_DESTINATION_REF_FORMAT}", "refs/heads/"]) if settings is not None else None
+    refs = {line.split("\0")[0]: line.split("\0") for line in raw.splitlines()} if raw is not None else None
+    return {branch: _branch_destinations(repo, branch, settings, refs) if settings is not None and refs is not None else None for branch in dict.fromkeys(branches)}
+
+
+def branch_destinations(repo: str, branch: str) -> dict[str, Any] | None:
+    return branch_destinations_many(repo, [branch])[branch]
+
+
+_DESTINATION_REF_FORMAT = "%(refname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:remoteref)%00%(push:remotename)%00%(push:remoteref)"
+
+
+def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | None]], refs: dict[str, list[str]]) -> dict[str, Any] | None:
+    # Git resolves pushRemote/pushDefault/remote, refspecs and push.default.
+    fields = refs.get(f"refs/heads/{branch}")
+    if fields is None:
+        return None
+    def setting(key: str) -> str | None:
+        values = settings.get(_config_key(key))
+        # --get emits a bare key as an empty string; an absent key stays None.
+        return (values[-1] if values[-1] is not None else "").strip() if values is not None else None
+
+    def all_values(key: str) -> list[str] | None:
+        values = settings.get(_config_key(key))
+        # Preserve --get-all's handling of embedded newlines and empty values.
+        return ("\n".join(value if value is not None else "" for value in values) + "\n").splitlines() if values is not None else None
+
+    fetch_remote = setting(f"branch.{branch}.remote")
+    if fetch_remote is None:
+        remotes = _run(repo, ["remote"])
+        if remotes is None:
+            return None
+        names = remotes.splitlines()
+        fetch_remote = names[0] if len(names) == 1 else "origin" if "origin" in names else None
+    push_default = setting("push.default")
+    push_remote = None
+    for key in (f"branch.{branch}.pushRemote", "remote.pushDefault", f"branch.{branch}.remote"):
+        candidate = setting(key)
+        if candidate is not None:
+            push_remote = candidate
+            break
+    if push_remote is None:
+        remotes = _run(repo, ["remote"])
+        if remotes is None:
+            return None
+        names = remotes.splitlines()
+        push_remote = names[0] if len(names) == 1 else "origin" if "origin" in names else None
+    merge = setting(f"branch.{branch}.merge")
+    mode = "simple" if push_default is None else push_default
+    refspecs = None
+    if push_remote is not None:
+        values = all_values(f"remote.{push_remote}.push")
+        refspecs = values if values is not None else []
+    auto_setup_values = settings.get("push.autosetupremote")
+    auto_setup = _config_bool(auto_setup_values[-1]) if auto_setup_values is not None else False
+    if auto_setup is None:
+        return None
+    push_refs = []
+    push_reason = None
+    source = f"refs/heads/{branch}"
+    if refspecs:
+        for spec in refspecs:
+            spec = spec.removeprefix("+")
+            if spec == ":":
+                push_reason = "matching: リモートに同名ブランチがある場合に送信"
+                continue
+            src, separator, dst = spec.partition(":")
+            if not separator or dst == "":
+                dst = src
+            if src in (source, branch):
+                push_refs.append(dst if dst.startswith("refs/") else f"refs/heads/{dst}")
+            elif "*" in src and "*" in dst:
+                prefix, suffix = src.split("*", 1)
+                if source.startswith(prefix) and source.endswith(suffix):
+                    middle = source[len(prefix):len(source)-len(suffix) if suffix else None]
+                    push_refs.append(dst.replace("*", middle))
+            elif src == "HEAD":
+                current = _run(repo, ["symbolic-ref", "-q", "HEAD"])
+                if current is not None and current.strip() == source:
+                    push_refs.append(source if dst == "HEAD" else dst if dst.startswith("refs/") else f"refs/heads/{dst}")
+                else:
+                    push_reason = "HEAD refspec: このworktreeのHEADは選択ブランチではありません"
+        if not push_refs and push_reason is None:
+            push_reason = "remote.push refspecにこのブランチの送信指定なし"
+    elif push_remote is None:
+        push_reason = "push remote未設定"
+    elif mode == "nothing":
+        push_reason = "push.default=nothing: 引数なしのpushは拒否"
+    elif mode == "matching":
+        push_reason = "matching: リモートに同名ブランチがある場合に送信"
+    elif mode == "current" or (mode == "simple" and push_remote != fetch_remote):
+        push_refs = [source]
+    elif mode in ("upstream", "tracking", "simple"):
+        merges = all_values(f"branch.{branch}.merge")
+        if merge is None and auto_setup:
+            push_refs = [source]
+        elif merge is None or merges is None or len(merges) != 1:
+            push_reason = "upstreamが一意に設定されていないためpushは拒否"
+        elif push_remote != fetch_remote:
+            push_reason = "push先とupstream remoteが異なるためpushは拒否"
+        elif mode == "simple" and merge != source:
+            push_reason = "simple: upstreamとローカルの名前が異なるためpushは拒否"
+        else:
+            push_refs = [merge]
+    else:
+        push_reason = "push.defaultの値を解決できません"
+    def urls(remote: str | None, push: bool) -> list[str] | None:
+        if remote is None:
+            return None
+        if remote == ".":
+            return ["."]
+        value = _run(repo, ["remote", "get-url", *(["--push", "--all"] if push else []), "--", remote])
+        return value.splitlines() if value is not None else None
+    return {"fetch_remote": fetch_remote, "fetch_urls": urls(fetch_remote, False), "upstream": fields[1] or None, "upstream_ref": merge, "upstream_state": "unset" if merge is None else "configured", "push_remote": push_remote, "push_urls": urls(push_remote, True), "push_ref": " / ".join(push_refs) if push_refs else None, "push_ref_reason": push_reason, "push_refspecs": refspecs, "push_default": mode}
 
 
 def collect(
@@ -490,9 +712,9 @@ def collect(
                 resolved_is_worktree = os.path.realpath(repo) != common_root
 
     fetched_at: float | None = None
-    if fetch and config.FETCH_ENABLED:
-        if do_fetch(repo):
-            fetched_at = time.time()
+    fetch_status = do_fetch(repo) if fetch and config.FETCH_ENABLED else None
+    if fetch_status is not None and fetch_status["result"] == "success":
+        fetched_at = fetch_status["attempted_at"]
 
     result: dict[str, Any] = {
         "path": repo_host,
@@ -520,6 +742,8 @@ def collect(
         "can_ff": False,
         "diverged": False,
         "fetched_at": fetched_at,
+        "fetch_status": fetch_status,
+        "operations": operations(repo),
         "checked_at": time.time(),
     }
 
@@ -563,6 +787,9 @@ def collect(
         merged=resolved_merged,
         worktree=resolved_worktree,
     )
+
+    if result["operations"]:
+        result["next_command"] = {"command": "git status", "reason": "進行中のGit操作と競合を確認します"}
 
     log = _run(repo, ["log", "-1", "--format=%h%x1f%s%x1f%an%x1f%cI"])
     if log:

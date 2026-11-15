@@ -149,7 +149,7 @@ test("explicit branch status is precise, lifecycle rows stay activity-only, and 
   };
   assert.equal(isExplicitAgentStatus(first), true);
   assert.equal(isExplicitAgentStatus(lifecycle), false);
-  assert.equal(agentStateLabel("merge_ready"), "マージ可能");
+  assert.equal(agentStateLabel("merge_ready"), "マージ準備完了");
   assert.equal(AGENT_STATE_LABELS.stopped, "中断");
   assert.deepEqual(
     agentSnapshotAt([first, second, lifecycle], Date.parse("2026-09-01T04:00:00Z")),

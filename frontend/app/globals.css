@@ -4487,3 +4487,27 @@ html[data-theme="dark"] {
 .shortcut-help-dialog th, .shortcut-help-dialog td { padding: 10px 8px; border-bottom: 1px solid var(--control-border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .shortcut-help-dialog kbd { white-space: normal; }
 @media (max-width: 600px) { .shortcut-help-dialog { padding: 12px; font-size: 11px; } .shortcut-help-heading h2 { font-size: 16px; } }
+
+:root { --code-font-size: 13px; }
+:root .patch-lines pre, :root .repository-text-code, :root .repository-text-code pre, :root .repository-text-content, :root .blame-content code { font-size: var(--code-font-size); }
+.pane-separator { width: 10px; align-self: stretch; min-height: 120px; cursor: col-resize; touch-action: none; border-radius: 4px; background: linear-gradient(90deg, transparent 4px, var(--control-border) 4px, var(--control-border) 6px, transparent 6px); }
+.pane-separator:hover, .pane-separator:focus-visible { background-color: var(--control-border); outline: 2px solid var(--accent); }
+@media (min-width: 1200px) {
+  .control-layout.has-selection { grid-template-columns: minmax(0, 1fr) 10px minmax(320px, var(--detail-width)); gap: 10px; }
+}
+@media (min-width: 901px) {
+  .workspace-agent-layout:not(.is-sidebar-collapsed) { grid-template-columns: minmax(0, 1fr) 10px minmax(280px, var(--agent-sidebar-width)); gap: 10px; }
+}
+@media (max-width: 1199px) { .control-layout > .pane-separator { display: none; } }
+@media (max-width: 900px) { .workspace-agent-layout > .pane-separator { display: none; } }
+.scroll-shadow-frame { position: relative; min-width: 0; }
+.scroll-shadow-frame::before, .scroll-shadow-frame::after { content: ""; position: absolute; top: 0; bottom: 0; width: 18px; pointer-events: none; z-index: 2; opacity: 0; }
+.scroll-shadow-frame::before { left: 0; background: linear-gradient(90deg, #0005, transparent); }
+.scroll-shadow-frame::after { right: 0; background: linear-gradient(270deg, #0005, transparent); }
+.scroll-shadow-frame[data-left="true"]::before, .scroll-shadow-frame[data-right="true"]::after { opacity: 1; }
+.patch-advanced > summary { cursor: pointer; padding: 6px; }
+.patch-advanced[open] { flex-basis: 100%; }
+.patch-active-conditions { font-size: 12px; }
+.branch-relations-scroll .branch-relations-pairs { min-width: 620px; }
+
+:root .repository-text-line { font-size: var(--code-font-size); }

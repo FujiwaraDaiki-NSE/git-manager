@@ -1,6 +1,8 @@
 "use client";
 
+import { WorktreeOverlaps, CommitSearch, RecoveryCandidates, PatchEquivalence } from "./repository-investigations";
 import { snapshotAge } from "./agent-attention.mjs";
+import { FetchFacts, OperationFacts, DestinationFacts } from "./git-state-facts";
 import PatchView from "./patch-view";
 import StashExplorer from "./stash-explorer";
 import TagExplorer from "./tag-explorer";
@@ -29,6 +31,8 @@ import Link from "next/link";
 import { homeReturnHref } from "./home-overview.mjs";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { upstreamLabel } from "./upstream-label.mjs";
+import { PaneSeparator, paneStyle, usePaneWidth } from "./ui-preferences";
 import CopyButton from "./copy-button";
 import "./activity-explorer.css";
 import "./lane-explorer.css";
@@ -180,13 +184,6 @@ function currentLaneAgent(lane: ProjectLane) {
   return lane.agent;
 }
 
-function upstreamLabel(lane: ProjectLane) {
-  if (!lane.upstream) return "upstream 未取得";
-  if (lane.upstream_ahead === null || lane.upstream_behind === null) {
-    return `upstream ${lane.upstream} · push 状態未取得`;
-  }
-  return `追跡先 ${lane.upstream} · ahead ${lane.upstream_ahead} · behind ${lane.upstream_behind}`;
-}
 
 function agentElapsed(occurredAt: string | null | undefined) {
   if (!occurredAt) return "経過時間 未取得";
@@ -200,10 +197,10 @@ function agentElapsed(occurredAt: string | null | undefined) {
 }
 
 function AgentFact({ task, branch }: { task: AgentTask | null | undefined; branch?: string | null }) {
-  if (!task) return <span className="agent-unknown">ブランチ状態不明</span>;
+  if (!task) return <span className="agent-unknown">agent報告なし</span>;
   return (
     <span className="agent-fact">
-      <strong>{agentStateLabel(agentTaskState(task))}</strong>
+      <strong title={agentTaskState(task) === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined}>{agentStateLabel(agentTaskState(task))}</strong>
       <span>{branch || task.branch || "ブランチ未取得"}</span>
       <span>{task.phase ? agentStateLabel(task.phase) : "工程未取得"}</span>
       <span>{task.summary || "報告内容なし"}</span>
@@ -641,6 +638,7 @@ function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectRes
   return (
     <section className="info-section" aria-labelledby="info-title">
       <div className="section-heading-row"><div><h3 id="info-title">プロジェクト情報</h3><p className="section-copy">このプロジェクトの基本情報と、今わかっている管理状況です。</p></div></div>
+      <FetchFacts fetchedAt={project.fetched_at} status={project.fetch_status} />
       <div className="info-grid">
         <div className="info-card info-card-wide"><span className="eyebrow">説明</span><p>{project.description || "説明なし"}</p></div>
         <InfoField label="リモート URL" value={project.remote} code />
@@ -657,8 +655,8 @@ function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectRes
         <InfoField label="テストコマンド" value={project.test_commands ? project.test_commands.join(" / ") : null} />
         <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
-      <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">ブランチ状態不明（報告未取得）</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
-      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
+      <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent報告なし</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
+      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
       <WorktreeExplorer project={project} onOpenGit={onOpenGit} onSelectLane={onSelectLane} />
       <PrExplorer project={project} />
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
@@ -693,6 +691,8 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
         <div><dt>このローカルブランチへの取り込み記録</dt><dd>{relationText(incoming)}</dd></div>
         <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || (currentLaneAgent(lane)?.attention ? agentStateLabel(currentLaneAgent(lane)?.attention) : null) || "未取得"}</dd></div>
       </dl>
+      <OperationFacts operations={lane.operations} />
+      {lane.branch !== null && <DestinationFacts destinations={lane.destinations} />}
       <p>記録がない場合も、取り込まれていないとは限りません。<Link href={`${relationHref.split("#")[0]}#branch-relations-title`}>現在の包含関係・未解決の記録を確認</Link></p>
       <details className="flow-help selection-help">
         <summary>Git状態と比較先の見方</summary>
@@ -918,6 +918,7 @@ function ProjectSnapshotFreshness({ snapshot }: { snapshot: ProjectResponse["sna
 }
 
 export default function ProjectControl() {
+  const [detailWidth, setDetailWidth] = usePaneWidth("gitdash.detail-width", 380);
   const { repos, scanning, connected, latestAgentEvent, projectUpdates } = useRepoStream();
   const { state: urlState, update: updateUrl } = useProjectUrl();
   const homeQuery = useSearchParams().get("home");
@@ -1177,7 +1178,7 @@ export default function ProjectControl() {
       {projectState === "error" && <div className="project-refresh-error" role="alert"><span>最新情報を取得できませんでした。前回取得した内容を表示しています。</span><button className="subtle-button" type="button" onClick={retryProject}>再試行</button></div>}
       <section className="control-hero" aria-labelledby="project-title">
         <div className="control-hero-main"><div className="project-identity"><h1 id="project-title">{project.name}</h1><span className="project-baseline">既定 <strong>{project.default_branch ?? "未取得"}</strong></span><span className="project-lane-count">{project.lanes.length} 作業レーン</span><span className="project-url-control"><button aria-describedby={projectUrlCopyState !== "idle" ? "project-url-copy-feedback" : undefined} className="subtle-button project-url-copy" type="button" onClick={copyCurrentProjectUrl}>{projectUrlCopyState === "success" ? "URLをコピーしました" : "この画面のURLをコピー"}</button><span aria-live="polite" className="project-url-feedback" id="project-url-copy-feedback" role={projectUrlCopyState === "error" ? "alert" : projectUrlCopyState === "success" ? "status" : undefined}>{projectUrlCopyState === "success" ? "現在のプロジェクト画面URLをコピーしました。" : projectUrlCopyState === "error" ? "URLをコピーできませんでした。ブラウザのクリップボード機能を利用できません。" : "\u00a0"}</span></span></div><details className="project-context"><summary>プロジェクトの概要・集計</summary><p className="control-description">{project.description || "説明なし"}</p><div className="control-identifiers"><code title={project.remote ?? undefined}>{project.remote ?? "リモート未取得"}</code><span>既定 <strong>{project.default_branch ?? "未取得"}</strong></span><code title={project.main_path}>{project.main_path}</code></div><div className="control-latest-git" aria-label="Git最終イベント"><span className="eyebrow">最新コミット</span>{project.latest_event ? <><strong>{project.latest_event.subject || "(no subject)"}</strong><time dateTime={project.latest_event.occurred_at ?? undefined}>{relativeTime(project.latest_event.occurred_at)} · {exactDate(project.latest_event.occurred_at)}</time><span>Git · コミット · {shortHash(project.latest_event.commit_hash)}</span></> : <span>Git · 最終イベント 未取得</span>}</div>
-        <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span>マージ可能</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div></details></div>
+        <div className="control-metrics" aria-label="プロジェクト集計"><div><strong>{agentCount(project, "waiting_for_user")}</strong><span>入力待ち</span></div><div><strong>{agentCount(project, "blocked")}</strong><span>問題あり</span></div><div><strong>{agentCount(project, "active")}</strong><span>実行中</span></div><div><strong>{agentCount(project, "review_required")}</strong><span>レビュー待ち</span></div><div><strong>{agentCount(project, "merge_ready")}</strong><span title="agentによる準備完了の報告です。実際のマージ可否を保証しません。">マージ準備完了</span></div><div><strong>{project.lanes.length}</strong><span>Gitレーン</span></div></div></details></div>
       </section>
       <nav className="control-tabs" role="tablist" aria-label="プロジェクト管制画面">
         {tabs.map((tab) => <button aria-selected={urlState.tab === tab.id} className="control-tab" key={tab.id} role="tab" id={`project-tab-${tab.id}`} aria-controls={`project-panel-${tab.id}`} tabIndex={urlState.tab === tab.id ? 0 : -1} type="button" onKeyDown={(event) => {
@@ -1189,14 +1190,15 @@ export default function ProjectControl() {
           document.getElementById(`project-tab-${tabs[next].id}`)?.focus();
         }} onClick={() => updateUrl({ tab: tab.id })}><span>{tab.label}</span></button>)}
       </nav>
-      <div className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
+      <div style={paneStyle("--detail-width", detailWidth)} className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
           {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} renderSections={(notes) => <BranchFlowSections key={project.main_path} project={project} section={urlState.flowSection} onSectionChange={(flowSection) => updateUrl({ flowSection })} relationRef={urlState.relationRef} selectedLane={selectedLane} selectedRowId={urlState.branchRow} onSelect={selectEvent}>{notes}</BranchFlowSections>} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /></>}
-          {urlState.tab === "lanes" && <WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} />}
+          {urlState.tab === "lanes" && <><WorktreeOverlaps path={project.main_path} /><WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} /></>}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルを調べる</h3><p className="section-copy">指定した版の内容や変更元を確認し、無視ルール・改行・Git属性の扱いを調べられます。</p></div></div><ConflictInspector key={`conflicts:${project.main_path}`} path={project.main_path} /><TreeSizes key={`sizes:${project.main_path}`} path={project.main_path} /><ContentSearch key={`content:${project.main_path}`} path={project.main_path} /><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /><IgnoreInspector key={`ignore:${project.main_path}`} path={project.main_path} /><FileAttributes key={`attributes:${project.main_path}`} path={project.main_path} /></section>}
           {urlState.tab === "info" && <ProjectInfo project={project} onOpenGit={openGit} onSelectLane={selectLane} />}
         </section>
+        {(selectedEvent || selectedLane) && <PaneSeparator width={detailWidth} onChange={setDetailWidth} minimum={320} label="選択詳細の幅" />}
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}
       </div>
       <GitGuide key={project.main_path} path={project.main_path} />

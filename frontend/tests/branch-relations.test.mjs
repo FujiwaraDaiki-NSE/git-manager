@@ -12,6 +12,7 @@ import {
   reasonLabel,
   selectReferencePairs,
   syncSelectedReferenceId,
+  relationCounts,
 } from "../app/branch-relations-tools.mjs";
 
 const refs = [
@@ -19,6 +20,12 @@ const refs = [
   { id: "refs/remotes/origin/main", row_id: "main", name: "origin/main", kind: "remote", hash: "a".repeat(40) },
   { id: "refs/heads/topic", row_id: "topic", name: "topic", kind: "local", hash: "b".repeat(40) },
 ];
+
+test("unloaded relation counts remain unknown until pairs are fetched", () => {
+  assert.equal(relationCounts({ refs }), null);
+  assert.deepEqual(relationCounts({ pairs: [] }), { equal: 0, ahead: 0, behind: 0, diverged: 0, unrelated: 0, unknown: 0 });
+  assert.equal(relationCounts({ pairs: [{ left_ref_id: "a", right_ref_id: "b", relation: "equal" }] }).equal, 1);
+});
 
 test("relation focus keeps the exact local ref when multiple locals share a row", () => {
   const shared = [

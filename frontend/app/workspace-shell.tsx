@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { currentAgentTasks } from "./agent-timeline-tools.mjs";
 import { agentTaskState } from "./agent-overview.mjs";
+import { CodeSizeControl, PaneSeparator, paneStyle, usePaneWidth } from "./ui-preferences";
 import FaviconBadge from "./favicon-badge";
 import { aggregateAgentCounts } from "./home-overview.mjs";
 import AgentTimelineSidebar from "./agent-timeline";
@@ -10,6 +11,7 @@ import { RepoStreamProvider, useRepoStream } from "./repo-stream";
 
 function WorkspaceContent({ children }: { children: ReactNode }) {
   const { agentEvents, projectSummaries, connected, agentDataLoading, agentDataError } = useRepoStream();
+  const [sidebarWidth, setSidebarWidth] = usePaneWidth("gitdash.agent-sidebar-width", 340);
   const [collapsed, setCollapsed] = useState(false);
   const [storageIssue, setStorageIssue] = useState(false);
   useEffect(() => {
@@ -28,14 +30,15 @@ function WorkspaceContent({ children }: { children: ReactNode }) {
   const blocked = tasks.filter(({ task }) => agentTaskState(task) === "blocked").length;
   const unknown = agentDataLoading || agentDataError !== null || projectSummaries.some((project) => project.agent_tasks === null);
   const attention = `全プロジェクトの報告（確認済みを含む）：入力待ち ${waiting}件 · 問題あり ${blocked}件${unknown ? " · 一部未取得" : ""}`;
-  return <div className={`workspace-agent-layout${collapsed ? " is-sidebar-collapsed" : ""}`}>
+  return <div style={paneStyle("--agent-sidebar-width", sidebarWidth)} className={`workspace-agent-layout${collapsed ? " is-sidebar-collapsed" : ""}`}>
     <Suspense fallback={null}><FaviconBadge waiting={waitingCount} /></Suspense>
-    <div className="agent-sidebar-controls">
+    <div className="agent-sidebar-controls"><CodeSizeControl />
       <button type="button" className="agent-timeline-pause" onClick={toggle} aria-expanded={!collapsed} aria-controls="workspace-agent-timeline">{collapsed ? "agentタイムラインを開く" : "agentタイムラインを折りたたむ"}</button>
-      <span role="status">{attention}{!connected && " · 再接続中"}</span>
+      <span title="表示はagentの報告です。マージ準備完了は実際のマージ可否を保証しません。" role="status">{attention}{!connected && " · 再接続中"}</span>
       {storageIssue && <span role="status">開閉状態を保存・復元できません。</span>}
     </div>
     <div className="workspace-primary">{children}</div>
+    {!collapsed && <PaneSeparator width={sidebarWidth} onChange={setSidebarWidth} minimum={280} label="agentサイドバーの幅" />}
     <div id="workspace-agent-timeline" className="workspace-agent-sidebar" hidden={collapsed}><Suspense fallback={<p role="status">タイムラインを読み込み中…</p>}><AgentTimelineSidebar agentEvents={agentEvents} projectSummaries={projectSummaries}
       connected={connected} loading={agentDataLoading} error={agentDataError} /></Suspense></div>
   </div>;

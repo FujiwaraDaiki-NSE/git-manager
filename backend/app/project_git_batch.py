@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from functools import wraps
+import re
 
 from app import gitinfo, project_facts
 
@@ -54,6 +55,43 @@ class Batch:
         self.commits = None if data["commits"] is None else {item["hash"]: item for item in data["commits"]}
         self.reachable = {}
         self.reflogs = {}
+        self.ancestry_tips = list(dict.fromkeys(item["hash"] for item in (self.refs or {}).values()))
+        self.ancestry_loaded = False
+        self.ancestry_graph = None
+
+    def prepare_pr_ancestry(self, github_data):
+        if github_data is not None:
+            # Include detached PR objects too, so an existing commit outside
+            # today's refs can still establish an exact negative result.
+            self.ancestry_tips = list(dict.fromkeys([
+                *self.ancestry_tips,
+                *(value for pull in github_data["pulls"] for key in ("merge", "head_sha")
+                  if isinstance(value := pull.get(key), str) and re.fullmatch(r"[0-9a-f]{40}", value)),
+            ]))
+
+    def contains(self, ancestor, descendant):
+        """Answer PR ancestry from one complete parent walk, or leave it unknown.
+
+        Unknown/missing objects and failed/incomplete walks still use the
+        caller's original Git query, preserving its success/error semantics.
+        Shallow boundaries follow Git's parent graph exactly.
+        """
+        from app import branch_ref_relations
+        head = self.resolve(descendant) if descendant.startswith("refs/") else descendant
+        if not isinstance(head, str) or re.fullmatch(r"[0-9a-f]{40}", head) is None:
+            return None
+        if re.fullmatch(r"[0-9a-f]{40}", ancestor) is None:
+            return None
+        if not self.ancestry_loaded:
+            self.ancestry_loaded = True
+            self.ancestry_graph = branch_ref_relations._graph_for(self.repo, list(dict.fromkeys([*self.ancestry_tips, head])))
+        graph = self.ancestry_graph
+        if graph is None or graph.malformed or graph.incomplete.get(head, True):
+            return None
+        index = graph.indexes.get(ancestor)
+        if index is None:
+            return None
+        return bool(graph.reach[head] & (1 << index))
 
     def resolve(self, ref):
         if self.refs is None:
@@ -122,7 +160,9 @@ def scoped(function):
     @wraps(function)
     def build(repo, *args, **kwargs):
         data = project_facts.observe("project.batch", [repo], lambda: _read(repo))
-        token = _active.set(Batch(repo, data))
+        batch = Batch(repo, data)
+        batch.prepare_pr_ancestry(kwargs.get("github_data"))
+        token = _active.set(batch)
         try:
             return function(repo, *args, **kwargs)
         finally:

@@ -38,6 +38,10 @@ services:
       # SSH リモートへ fetch するための鍵と設定。読み取り専用
       - ${HOME}/.ssh:/home/host/.ssh:ro
       - ${HOME}/.gitconfig:/home/host/.gitconfig:ro
+      # ssh は起動時に実行 uid の passwd エントリを要求する（無いと
+      # "No user exists for uid" で SSH fetch が全件失敗する）。ホストの定義を読み取り専用で使う
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
     depends_on:
       data-init:
         condition: service_completed_successfully

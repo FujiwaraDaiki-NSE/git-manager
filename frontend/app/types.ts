@@ -1,3 +1,6 @@
+export type FetchStatus = { attempted_at: number; result: "success" | "failure"; category: "authentication" | "connection" | "timeout" | "other" | null; reason: string | null };
+export type GitOperation = { kind: string; marker: string; step: number | null; total: number | null; commands: NextCommand[] };
+export type BranchDestinations = { upstream_state: "unset" | "configured"; push_ref_reason: string | null; push_refspecs: string[] | null; fetch_remote: string | null; fetch_urls: string[] | null; upstream: string | null; upstream_ref: string | null; push_remote: string | null; push_urls: string[] | null; push_ref: string | null; push_default: string | null };
 export type Entry = { xy: string; path: string };
 export type Count = { xy: string; count: number };
 export type Commit = { hash: string; subject: string; author: string; date: string };
@@ -183,6 +186,8 @@ export type ProjectMergeRelation = {
 };
 
 export type ProjectLane = {
+  operations?: GitOperation[] | null;
+  destinations?: BranchDestinations | null;
   historical?: boolean;
   unborn?: boolean;
   id: string;
@@ -342,7 +347,7 @@ export type ProjectBranchConnections = {
   edges: ProjectBranchConnectionEdge[];
   unresolved: ProjectBranchConnectionUnresolved[];
   status: "available" | "partial" | "unavailable";
-  /** All refs and all unordered ref pairs are supplied by the new contract. */
+  /** Pairs are fetched from /api/repo/branch-pairs when the view opens. */
   refs?: ProjectBranchConnectionRef[];
   pairs?: ProjectBranchConnectionPair[];
   ancestry_status?: "complete" | "partial" | "shallow" | "unavailable" | null;
@@ -404,6 +409,8 @@ export type ProjectGitCounts = {
 };
 
 export type ProjectSummary = {
+  fetch_status?: FetchStatus | null;
+  fetched_at?: number | null;
   id: string;
   name: string;
   remote: string | null;
@@ -424,6 +431,7 @@ export type ProjectSummary = {
 };
 
 export type ProjectResponse = {
+  fetch_status?: FetchStatus | null;
   snapshot?: { observed_at: number; status: "ready" | "refreshing" | "failed"; error: string | null };
   github: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
   branch_rows: ProjectBranchRow[] | null;
@@ -461,6 +469,8 @@ export type ProjectResponse = {
 };
 
 export type Repo = {
+  operations?: GitOperation[] | null;
+  fetch_status?: FetchStatus | null;
   path: string;
   name: string;
   common_dir: string;

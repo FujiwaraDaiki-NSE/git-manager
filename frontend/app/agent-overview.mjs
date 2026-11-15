@@ -39,7 +39,7 @@ export const AGENT_STATE_LABELS = {
   waiting_for_user: "入力待ち",
   blocked: "問題あり",
   review_required: "レビュー待ち",
-  merge_ready: "マージ可能",
+  merge_ready: "マージ準備完了",
   completed: "完了",
   stopped: "中断",
 };
@@ -49,7 +49,7 @@ const activeStatuses = new Set(["investigating", "implementing", "testing", "rev
 const knownStatuses = new Set(AGENT_STATUS_PRIORITY);
 
 export function agentStateLabel(state) {
-  return state ? AGENT_STATE_LABELS[state] || state : "ブランチ状態不明";
+  return state ? AGENT_STATE_LABELS[state] || state : "agent報告なし";
 }
 
 export function agentStatePriority(state) {

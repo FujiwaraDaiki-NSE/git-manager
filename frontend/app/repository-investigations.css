@@ -1,0 +1,17 @@
+.repository-investigation { min-width: 0; overflow-wrap: anywhere; }
+.repository-investigation .tag-explorer-note:first-child { margin-top: 0; }
+.repository-investigation .tag-explorer-tools label { min-width: 0; }
+.repository-investigation-list { list-style: none; margin: 0; padding: 0; }
+.repository-investigation .tag-explorer-select { gap: 5px; }
+.repository-investigation code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.repository-investigation .repository-investigation-xy { white-space: pre; }
+.repository-investigation .tag-explorer-select[aria-pressed="true"] {
+  border-color: var(--control-blue);
+  background: var(--control-blue-soft);
+}
+.repository-investigation .tag-explorer-select:focus-visible,
+.repository-investigation .tag-explorer-export:focus-visible,
+.repository-investigation input:focus-visible {
+  outline: 2px solid var(--control-blue);
+  outline-offset: 2px;
+}

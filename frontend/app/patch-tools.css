@@ -320,3 +320,17 @@
   .patch-file-summary { margin-left: 0; }
   .patch-file-copy { flex: 1 1 100%; margin-left: 0; }
 }
+
+/* Keep two equal columns inside the available panel, not the longest code line. */
+.patch-lines.patch-lines-side-by-side { overflow-x: hidden; }
+.patch-lines-side-by-side .patch-side-by-side { display: grid; width: 100%; min-width: 0; }
+.patch-lines-side-by-side .patch-side-row,
+.patch-lines-side-by-side .patch-side-heading { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; }
+.patch-side-heading > span { padding: 6px 8px; font-weight: bold; }
+.patch-side-cell { display: grid; grid-template-columns: 5ch minmax(0, 1fr); min-width: 0; border-right: 1px solid var(--rule); }
+.patch-lines-side-by-side .patch-side-row pre { margin: 0; width: 100%; min-width: 0; box-sizing: border-box; }
+.patch-lines-side-by-side .patch-side-text { overflow-x: auto; white-space: pre; padding-right: 8px; }
+.patch-lines-side-by-side .patch-side-shared { grid-column: 1 / -1; white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 8px; }
+.patch-lines-side-by-side.patch-wrap .patch-side-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.patch-lines-side-by-side .patch-side-cell { grid-template-columns: minmax(5ch, max-content) minmax(0, 1fr); }
+.patch-lines-side-by-side .patch-side-cell .patch-number { width: auto; min-width: 5ch; white-space: nowrap; text-align: right; padding: 0 6px 0 4px; box-sizing: border-box; }

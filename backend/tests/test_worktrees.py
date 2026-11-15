@@ -652,6 +652,7 @@ def test_fetch_round_fetches_once_per_common_repository(
             return {
                 **main.STATE[path],
                 "fetched_at": 123.0,
+                "fetch_status": {"attempted_at": 123.0, "result": "success", "category": None, "reason": None},
             }
         # Simulate metadata reconciliation having already published current
         # members and removed a worktree that vanished during fetch.

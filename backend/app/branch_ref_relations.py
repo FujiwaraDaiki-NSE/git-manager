@@ -555,19 +555,21 @@ def _pair(
     return base
 
 
-def build(repo: str, rows: list[Mapping[str, Any]] | None) -> dict[str, Any]:
+def build(repo: str, rows: list[Mapping[str, Any]] | None, *, include_pairs: bool = True) -> dict[str, Any]:
     """Return ref snapshots and exact pair relations for ``branch_rows``.
 
     ``rows=None`` means branch-row acquisition failed and is represented as an
     unavailable result.  An empty list is a valid empty register.  Every
     malformed or missing hash remains a ref when its identity is known, but
     all pairs involving it are explicitly unknown.
+    ``include_pairs=False`` retains the same refs and coverage while skipping
+    the quadratic pair construction for the initial project response.
     """
 
     if rows is None:
-        return {"refs": [], "pairs": [], "ancestry_status": "unavailable"}
+        return {"refs": [], **({"pairs": []} if include_pairs else {}), "ancestry_status": "unavailable"}
     if not isinstance(rows, list):
-        return {"refs": [], "pairs": [], "ancestry_status": "unavailable"}
+        return {"refs": [], **({"pairs": []} if include_pairs else {}), "ancestry_status": "unavailable"}
 
     refs = _refs_from_rows(rows)
     public_refs = [
@@ -584,7 +586,7 @@ def build(repo: str, rows: list[Mapping[str, Any]] | None) -> dict[str, Any]:
         # No pair needs ancestry.  Empty rows are a successful empty view;
         # refs with unusable hashes are a partial view of the register.
         status = "complete" if not refs or all(ref.valid_hash is not None for ref in refs) else "partial"
-        return {"refs": public_refs, "pairs": [], "ancestry_status": status}
+        return {"refs": public_refs, **({"pairs": []} if include_pairs else {}), "ancestry_status": status}
 
     valid_tips = [ref.valid_hash for ref in refs if ref.valid_hash is not None]
     graph = _graph_for(repo, valid_tips)
@@ -601,7 +603,7 @@ def build(repo: str, rows: list[Mapping[str, Any]] | None) -> dict[str, Any]:
     commit_hashes = graph.hashes if graph is not None else ()
     merge_base_cache: dict[int, list[str]] = {}
     pairs: list[dict[str, Any]] = []
-    for left_index, left in enumerate(refs[:-1]):
+    for left_index, left in enumerate(refs[:-1] if include_pairs else []):
         for right in refs[left_index + 1:]:
             pairs.append(
                 _pair(
@@ -635,6 +637,6 @@ def build(repo: str, rows: list[Mapping[str, Any]] | None) -> dict[str, Any]:
 
     return {
         "refs": public_refs,
-        "pairs": pairs,
+        **({"pairs": pairs} if include_pairs else {}),
         "ancestry_status": ancestry_status,
     }

@@ -1,0 +1,9 @@
+.git-state-facts {
+  margin-block: 12px;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.git-state-facts .selection-command {
+  margin-block: 8px;
+}

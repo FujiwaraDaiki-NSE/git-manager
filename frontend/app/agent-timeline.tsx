@@ -72,7 +72,7 @@ const statusLabels: Record<string, string> = {
   waiting_for_user: "入力待ち",
   blocked: "問題あり",
   review_required: "レビュー待ち",
-  merge_ready: "マージ可能",
+  merge_ready: "マージ準備完了",
   completed: "完了",
   stopped: "中断",
 };
@@ -157,7 +157,7 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
     <li className={`agent-timeline-current-row status-${statusClass(agentTaskState(task))}${decision ? ` report-age-${freshness}` : ""}`}>
       <ProjectBranch project={project} projectId={projectId} branch={task.branch}>
         <span className="agent-timeline-row-head"><strong>{projectLabel(project, projectId)}</strong><span>{branchLabel(task.branch)}</span></span>
-        <span className="agent-timeline-status-line"><span className="agent-timeline-status">{currentStatus(task)}</span>{task.attention && <span className="agent-timeline-attention">注意: {agentStateLabel(task.attention)}</span>}</span>
+        <span className="agent-timeline-status-line"><span title={agentTaskState(task) === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{currentStatus(task)}</span>{task.attention && <span className="agent-timeline-attention">注意: {agentStateLabel(task.attention)}</span>}</span>
         {decision && <span className={`agent-timeline-age age-${freshness}`}>{freshness === "old" ? "古い · 24時間以上" : freshness === "recent" ? "直近 · 24時間未満" : "報告時刻未取得"}</span>}
         <span className="agent-timeline-summary">{task.summary || "報告内容なし"}</span>
         {oldDecision && <span className="agent-timeline-freshness">{relativeTime(task.occurred_at)}から（古い報告）</span>}
@@ -192,7 +192,7 @@ function HistoryRow({ event, project }: { event: AgentEvent; project: TimelinePr
     <li className={`agent-timeline-history-row ${event.kind === "lifecycle" ? "is-lifecycle" : "is-status"} status-${statusClass(event.status)}`}>
       <ProjectBranch project={project} projectId={projectId} branch={event.branch}>
         <span className="agent-timeline-row-head"><strong>{projectLabel(project, projectId)}</strong><span>{branchLabel(event.branch)}</span></span>
-        <span className="agent-timeline-status-line"><span className="agent-timeline-status">{historicalStatus(event)}</span></span>
+        <span className="agent-timeline-status-line"><span title={event.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{historicalStatus(event)}</span></span>
         <span className="agent-timeline-summary">{historicalSummary(event)}</span>
         <TimeValue value={event.occurred_at} />
       </ProjectBranch>

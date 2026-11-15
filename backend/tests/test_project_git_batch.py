@@ -6,6 +6,54 @@ from test_project import init_repo, commit, git
 from test_project_snapshots import without_times
 
 
+def test_pr_ancestry_matches_git_beyond_page_boundary_and_for_detached_objects(tmp_path, monkeypatch):
+    from app import branch_rows, project_git_batch
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    root = git(repo, "rev-parse", "HEAD").strip()
+    for index in range(205):
+        commit(repo, f"history {index}")
+    head = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "--orphan", "deleted-pr")
+    commit(repo, "detached PR object")
+    detached = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "main")
+    git(repo, "branch", "-D", "deleted-pr")
+    batch = project_git_batch.Batch(str(repo), project_git_batch._read(str(repo)))
+    batch.prepare_pr_ancestry({"pulls": [{"merge": detached, "head_sha": detached}]})
+    monkeypatch.setattr(project_git_batch, "current", lambda repo: batch)
+    for ancestor, descendant in [(root, head), (head, head), (detached, head), (head, detached), ("f" * 40, head)]:
+        status = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", ancestor, descendant], capture_output=True).returncode
+        expected = True if status == 0 else False if status == 1 else None
+        assert branch_rows._ancestor_status(str(repo), ancestor, descendant) is expected
+    assert batch.contains(root, head) is True
+    assert batch.contains(detached, head) is False
+    assert batch.contains("f" * 40, head) is None
+
+
+def test_pr_ancestry_preserves_shallow_git_and_failed_walk_results(tmp_path, monkeypatch):
+    from app import branch_rows, project_git_batch, branch_ref_relations
+    source = tmp_path / "source"
+    init_repo(source)
+    root = git(source, "rev-parse", "HEAD").strip()
+    commit(source, "second")
+    boundary = git(source, "rev-parse", "HEAD").strip()
+    commit(source, "third")
+    repo = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth=2", source.as_uri(), str(repo)], check=True)
+    head = git(repo, "rev-parse", "HEAD").strip()
+    batch = project_git_batch.Batch(str(repo), project_git_batch._read(str(repo)))
+    batch.prepare_pr_ancestry({"pulls": [{"merge": root, "head_sha": boundary}]})
+    monkeypatch.setattr(project_git_batch, "current", lambda repo: batch)
+    assert branch_rows._ancestor_status(str(repo), boundary, head) is True
+    assert branch_rows._ancestor_status(str(repo), root, head) is None
+    monkeypatch.setattr(branch_ref_relations, "_graph_for", lambda *_args: None)
+    failed = project_git_batch.Batch(str(repo), project_git_batch._read(str(repo)))
+    monkeypatch.setattr(project_git_batch, "current", lambda repo: failed)
+    assert branch_rows._ancestor_status(str(repo), boundary, head) is True
+    assert branch_rows._ancestor_status(str(repo), root, head) is None
+
+
 def test_batched_output_matches_individual_git_queries_and_shares_reflogs(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     init_repo(repo)
