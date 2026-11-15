@@ -1,7 +1,8 @@
 """Request-local Git observations used to record/replay project snapshots.
 
 Only Git readers participate. README, STATE, clock, agents and GitHub never do.
-Values are copied because project composition adds presentation fields in place.
+Values are copied by default because composition adds presentation fields.
+Readers whose callers leave the entire result untouched may opt out.
 """
 from __future__ import annotations
 
@@ -24,20 +25,23 @@ def using(values: dict[str, Any]):
         _active.reset(token)
 
 
-def observe(name, args, read):
+def observe(name, args, read, *, copy_value=True):
     values = _active.get()
     if values is None:
         return read()
     key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
     if key not in values:
         values[key] = read()
-    return deepcopy(values[key])
+    return deepcopy(values[key]) if copy_value else values[key]
 
 
-def cached(function):
+def cached(function=None, *, copy_value=True):
+    if function is None:
+        return lambda function: cached(function, copy_value=copy_value)
+
     @wraps(function)
     def read(*args, **kwargs):
-        return observe(f"{function.__module__}.{function.__name__}", [args, kwargs], lambda: function(*args, **kwargs))
+        return observe(f"{function.__module__}.{function.__name__}", [args, kwargs], lambda: function(*args, **kwargs), copy_value=copy_value)
     return read
 
 

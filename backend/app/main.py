@@ -140,6 +140,11 @@ def _get_branches_sync(host_path: str, repo: str) -> dict[str, Any] | None:
 
 
 
+def _get_submodules_sync(host_path: str, repo: str) -> dict[str, Any] | None:
+    with _repo_lock(host_path):
+        return detail.get_submodules(repo)
+
+
 def _read_stashes_sync(host_path: str, repo: str) -> dict[str, Any] | None:
     with _repo_lock(host_path):
         return stashes.get_stashes(repo)
@@ -256,8 +261,10 @@ def _get_project_sync(
     as_of: datetime | None = None,
 ) -> dict[str, Any] | None:
     """Build one project payload while sharing the repository Git lock."""
-    github_future = fetch_pool.submit(github.load, repo)
-    return project_snapshots.get(repo, project_id, state_rows, _repo_lock(host_path), range_name, as_of, github_future.result)
+    merged_future = fetch_pool.submit(github.load, repo)
+    open_future = fetch_pool.submit(github.load_open, repo)
+    return project_snapshots.get(repo, project_id, state_rows, _repo_lock(host_path), range_name, as_of,
+                                 lambda: {**merged_future.result(), "open": open_future.result()})
 
 
 def _refresh_project_snapshot(row: dict[str, Any]) -> None:
@@ -1328,6 +1335,14 @@ async def get_repo_branches(path: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail="ブランチ一覧を取得できませんでした")
     return result
 
+
+@app.get("/api/repo/submodules")
+async def get_repo_submodules(path: str) -> dict[str, Any]:
+    repo = _known_repo(path)
+    result = await asyncio.get_running_loop().run_in_executor(pool, _get_submodules_sync, path, repo)
+    if result is None:
+        raise HTTPException(status_code=502, detail="サブモジュールの状態を取得できませんでした")
+    return result
 
 
 @app.get("/api/repo/stashes")

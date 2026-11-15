@@ -218,3 +218,13 @@ test("new PR filter parameters must be provided explicitly", () => {
   assert.throws(() => filterPullRequests([pr(1)], { query: "", target: "all", range: "all", observedAt }), /provided explicitly/);
   assert.throws(() => pullRequestDateRangeError(null, undefined), /provided explicitly/);
 });
+
+test("オープンPRのレビュー・CI状態と欠損を区別する", async () => {
+  const { openPullRequestLabels } = await import("../app/pr-tools.mjs");
+  assert.deepEqual(openPullRequestLabels({ isDraft: true, reviewDecision: null, ciState: null }), ["Draft", "レビュー情報なし", "CI なし"]);
+  for (const [reviewDecision, review] of [["APPROVED", "レビュー承認"], ["CHANGES_REQUESTED", "変更要求"], ["REVIEW_REQUIRED", "レビュー待ち"]]) {
+    for (const [ciState, ci] of [["SUCCESS", "CI 成功"], ["FAILURE", "CI 失敗"], ["ERROR", "CI 失敗"], ["PENDING", "CI 実行中"], ["EXPECTED", "CI 実行中"]]) {
+      assert.deepEqual(openPullRequestLabels({ isDraft: false, reviewDecision, ciState }), [review, ci]);
+    }
+  }
+});

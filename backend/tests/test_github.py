@@ -69,3 +69,50 @@ def test_cache_expiry_does_not_retain_stale_success(monkeypatch):
     clock[0] = 61
     assert github.load("repo")["status"] == "unavailable"
     github._cache.clear()
+
+
+def test_open_pr_graphql_pages_and_nulls(monkeypatch):
+    item = dict(number=2, url="https://github.com/o/r/pull/2", title="変更", isDraft=True,
+                headRefName="feature", headRefOid="a" * 40, baseRefName="main",
+                headRepository={"nameWithOwner": "o/r"}, reviewDecision=None,
+                commits={"nodes": [{"commit": {"statusCheckRollup": None}}]})
+    def page(nodes, more):
+        return json.dumps({"data": {"repository": {"pullRequests": {
+            "nodes": nodes, "pageInfo": {"hasNextPage": more, "endCursor": "cursor"}}}}})
+    output = [page([item], True) + '\n' + page([], False)]
+    def run(args, **kwargs):
+        assert args[:5] == ["gh", "api", "--hostname", "github.com", "graphql"]
+        assert "--paginate" in args
+        assert kwargs["timeout"] == 15
+        return SimpleNamespace(returncode=0, stdout=output[0])
+    monkeypatch.setattr(github.subprocess, "run", run)
+    result = github._read_open("o/r")
+    assert result["status"] == "available"
+    assert result["pulls"][0]["reviewDecision"] is None
+    assert result["pulls"][0]["ciState"] is None
+    assert result["pulls"][0]["headRepository"] == "o/r"
+    item["reviewDecision"] = "APPROVED"
+    item["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = {"state": "SUCCESS"}
+    output[0] = page([item], False)
+    assert github._read_open("o/r")["pulls"][0]["ciState"] == "SUCCESS"
+    for invalid in [page([item], True), page([item], False) + '\n{broken', '{"errors":[{"message":"secret"}]}']:
+        output[0] = invalid
+        failed = github._read_open("o/r")
+        assert failed["status"] == "unavailable"
+        assert failed["pulls"] == []
+        assert "secret" not in json.dumps(failed)
+
+
+def test_open_cache_expires_and_discards_success(monkeypatch):
+    github._cache.clear()
+    monkeypatch.setattr(github, "repository", lambda _: "o/r")
+    monkeypatch.setattr(github, "_read", lambda _: github.unavailable("履歴未取得"))
+    clock = [0]
+    monkeypatch.setattr(github.time, "monotonic", lambda: clock[0])
+    replies = iter([{**github.unavailable(""), "status": "available"}, github.unavailable("offline")])
+    monkeypatch.setattr(github, "_read_open", lambda _: next(replies))
+    assert github.load_open("repo")["status"] == "available"
+    assert github.load_open("repo")["status"] == "available"
+    clock[0] = 61
+    assert github.load_open("repo")["status"] == "unavailable"
+    github._cache.clear()

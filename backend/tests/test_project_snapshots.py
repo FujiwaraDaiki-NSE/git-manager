@@ -1,4 +1,5 @@
 import threading
+import json
 
 import pytest
 
@@ -203,3 +204,17 @@ def test_all_is_computed_lazily_and_missing_stats_are_saved(snapshot_repo, monke
     assert limits == [200, None]
     assert without_times(again) == without_times(actual)
     assert project_snapshots.load(str(repo)) == saved
+
+
+@pytest.mark.parametrize("range_name", ["current", "24h", "7d", "all"])
+def test_composition_does_not_mutate_recorded_history(snapshot_repo, range_name):
+    from app import project_facts
+
+    repo, state = snapshot_repo
+    read(repo, state, range_name)
+    facts = project_snapshots.load(str(repo))["facts"]
+    before = json.dumps(facts, sort_keys=True)
+    with project_facts.using(facts):
+        project.build(str(repo), str(repo), state, range_name=range_name)
+        project.build(str(repo), str(repo), state, range_name="current")
+    assert json.dumps(facts, sort_keys=True) == before

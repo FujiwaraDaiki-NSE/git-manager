@@ -1,4 +1,6 @@
-import { projectLatestTime, sortProjects } from "./agent-overview.mjs";
+import { isAcknowledged } from "./agent-acknowledgements.mjs";
+import { AGENT_DECISION_STATUSES } from "./agent-timeline-tools.mjs";
+import { agentTaskState, projectLatestTime, sortProjects } from "./agent-overview.mjs";
 
 export const AGENT_SUMMARY_KEYS = [
   "waiting_for_user",
@@ -27,6 +29,7 @@ export const HOME_DEFAULT_VIEW = {
   gitFilter: "all",
   sort: "priority",
   favoritesOnly: false,
+  hideDormant: false,
   density: "comfortable",
 };
 
@@ -147,12 +150,14 @@ export function parseHomeUrl(search) {
   const sortParam = params.get("sort");
   const densityParam = params.get("density");
   const favoritesParam = params.get("favorites");
+  const dormantParam = params.get("hideDormant");
   const invalidParams = [];
   if (agentParam !== null && !isAgentFilter(agentParam)) invalidParams.push(`agent=${agentParam}`);
   if (gitParam !== null && !isGitFilter(gitParam)) invalidParams.push(`git=${gitParam}`);
   if (sortParam !== null && !isSort(sortParam)) invalidParams.push(`sort=${sortParam}`);
   if (densityParam !== null && !isDensity(densityParam)) invalidParams.push(`density=${densityParam}`);
   if (favoritesParam !== null && favoritesParam !== "0" && favoritesParam !== "1") invalidParams.push(`favorites=${favoritesParam}`);
+  if (dormantParam !== null && dormantParam !== "0" && dormantParam !== "1") invalidParams.push("hideDormant=" + dormantParam);
   if (invalidParams.length > 0) return { view: null, invalidParams };
   return {
     view: {
@@ -161,6 +166,7 @@ export function parseHomeUrl(search) {
       gitFilter: gitParam === null ? HOME_DEFAULT_VIEW.gitFilter : gitParam,
       sort: sortParam === null ? HOME_DEFAULT_VIEW.sort : sortParam,
       favoritesOnly: favoritesParam === "1",
+      hideDormant: dormantParam === "1",
       density: densityParam === null ? HOME_DEFAULT_VIEW.density : densityParam,
     },
     invalidParams,
@@ -173,6 +179,7 @@ export function homeSearch(view) {
   if (view.agentFilter !== HOME_DEFAULT_VIEW.agentFilter) params.set("agent", view.agentFilter);
   if (view.gitFilter !== HOME_DEFAULT_VIEW.gitFilter) params.set("git", view.gitFilter);
   if (view.sort !== HOME_DEFAULT_VIEW.sort) params.set("sort", view.sort);
+  if (view.hideDormant) params.set("hideDormant", "1");
   if (view.favoritesOnly) params.set("favorites", "1");
   if (view.density !== HOME_DEFAULT_VIEW.density) params.set("density", view.density);
   return params.toString();
@@ -201,4 +208,41 @@ export function homeReturnHref(query) {
   const parsed = parseHomeUrl(query);
   if (parsed.view === null) return `/?${query}`;
   return homeHref(parsed.view, "/");
+}
+
+export function isDormantProject(project, acknowledgements, now) {
+  const date = project.latest_event?.date;
+  if (typeof date !== "string" || !Number.isFinite(Date.parse(date))
+    || now - Date.parse(date) < 30 * 86400000) return false;
+  if (!["dirty", "conflict", "ahead"].every((key) => project.git?.[key] === 0)) return false;
+  // The API publishes this exact combination when no agent has reported.
+  // Missing fields remain unknown rather than an empty report history.
+  if (project.agent_tasks === null
+    && ["running", "waiting_for_user", "problem", "reviewing", "integratable"]
+      .every((key) => project.agent_counts?.[key] === null)
+    && AGENT_COUNT_KEYS.every((key) => project.agent_priority_counts?.[key] === null)) return true;
+  if (acknowledgements === null) return false;
+  if (agentCount(project, "active") !== 0 || !Array.isArray(project.agent_tasks)) return false;
+  for (const key of AGENT_DECISION_STATUSES) {
+    const count = agentCount(project, key);
+    if (count === null) return false;
+    const tasks = project.agent_tasks.filter((task) => agentTaskState(task) === key);
+    if (tasks.length !== count || tasks.some((task) => !isAcknowledged(task, acknowledgements))) return false;
+  }
+  return true;
+}
+
+export function homeCardKeyAction(event, { editing, dialogOpen, cardFocused, interactive }) {
+  if (editing || dialogOpen || event.defaultPrevented || event.isComposing
+    || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
+  if (event.key === "j") return "next";
+  if (event.key === "k") return "previous";
+  if (cardFocused && !interactive && (event.key === "Enter" || event.key === "o")) return "open";
+  return null;
+}
+
+export function homeCardIndex(action, current, length) {
+  if (!length) return null;
+  if (current < 0) return action === "previous" ? length - 1 : 0;
+  return Math.max(0, Math.min(length - 1, current + (action === "previous" ? -1 : 1)));
 }

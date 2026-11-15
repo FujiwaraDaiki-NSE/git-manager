@@ -320,3 +320,18 @@ def test_tip_metadata_keeps_all_remote_and_local_heads_when_page_is_truncated(tm
     assert old_head not in feature["commit_hashes"]
     assert {item["hash"] for item in feature["tip_commits"]} == {new_remote_head, old_head, copy_head}
     assert feature["tip_metadata_available"] is True
+
+
+def test_open_pr_attaches_to_local_head_without_confusing_fork(tmp_path):
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    git(repo, "remote", "add", "origin", "https://github.com/o/r.git")
+    branches = detail.get_branches(str(repo))
+    lanes = [lane(repo, branch) for branch in branches["local"]]
+    own = {"number": 1, "headRepository": "o/r", "headRefName": "main"}
+    fork = {"number": 2, "headRepository": "fork/r", "headRefName": "main"}
+    data = {"repository": "o/r", "pulls": [], "open": {"status": "available", "pulls": [own, fork]}}
+    rows = branch_rows.build(str(repo), branches, lanes, data, "main")
+    assert rows[0]["open_pull_requests"] == [own]
+    data["open"] = {"status": "unavailable", "pulls": []}
+    assert branch_rows.build(str(repo), branches, lanes, data, "main")[0]["open_pull_requests"] is None

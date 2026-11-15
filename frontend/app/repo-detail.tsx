@@ -4,6 +4,7 @@ import { OperationFacts } from "./git-state-facts";
 import PatchView from "./patch-view";
 import CommitFiles from "./commit-files";
 import CopyButton from "./copy-button";
+import Submodules from "./submodules";
 import { fileStatusDescription, fileStatusGroups } from "./file-status.mjs";
 import {
   BRANCH_FILTERS,
@@ -745,7 +746,7 @@ export default function RepoDetail({
       </div>
 
       <div role="tabpanel" id={`repo-panel-${activeTab}`} aria-labelledby={`repo-tab-${activeTab}`} tabIndex={0}>
-      {activeTab === "status" && <StatusPane key={repo.path} repo={repo} />}
+      {activeTab === "status" && <><StatusPane key={repo.path} repo={repo} /><Submodules key={repo.path} repo={repo} /></>}
 
       {activeTab === "graph" && (
         <section

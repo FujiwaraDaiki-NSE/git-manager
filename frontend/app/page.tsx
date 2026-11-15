@@ -3,6 +3,8 @@ import { remoteLabel } from "./remote-label.mjs";
 
 import { homeDocumentTitle } from "./agent-attention.mjs";
 import Link from "next/link";
+import { ACKNOWLEDGEMENTS_STORAGE_KEY, parseAcknowledgements } from "./agent-acknowledgements.mjs";
+import type { Acknowledgements } from "./agent-acknowledgements.mjs";
 import { FetchFacts } from "./git-state-facts";
 import GitGuide from "./git-guide";
 import WorkspaceExport from "./workspace-export";
@@ -19,6 +21,9 @@ import {
   countProjectsWithUnknownAgentCounts,
   formatAgentCount,
   homeSearch,
+  isDormantProject,
+  homeCardKeyAction,
+  homeCardIndex,
   parseFavoriteIds,
   parseHomeUrl,
   projectMatchesView,
@@ -48,6 +53,7 @@ type HomeView = {
   gitFilter: GitFilter;
   sort: ProjectSort;
   favoritesOnly: boolean;
+  hideDormant: boolean;
   density: CardDensity;
 };
 
@@ -57,6 +63,7 @@ const defaultView: HomeView = {
   gitFilter: "all",
   sort: "priority",
   favoritesOnly: false,
+  hideDormant: false,
   density: "comfortable",
 };
 
@@ -133,6 +140,7 @@ function ProjectCard({
     <article
       className={`project-card${hasAttention ? " project-card-attention" : ""}`}
       data-density={density}
+      tabIndex={-1}
       aria-label={project.name}
       onFocusCapture={onInteractStart}
       onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onInteractEnd(); }}
@@ -160,7 +168,7 @@ function ProjectCard({
           >
             <span aria-hidden="true">{favorite ? "★" : "☆"}</span>
           </button>
-          {href ? <Link className="open-project" href={href} prefetch={false} aria-label={`${project.name} の詳細を開く`}>開く <span aria-hidden="true">↗</span></Link> : <span className="no-checkout">作業パス未取得</span>}
+          {href ? <Link data-project-open className="open-project" href={href} prefetch={false} aria-label={`${project.name} の詳細を開く`}>開く <span aria-hidden="true">↗</span></Link> : <span className="no-checkout">作業パス未取得</span>}
         </div>
       </div>
       {hasAgentCounts && <div className="project-card-agent-counts" aria-label="ブランチの作業状況件数">
@@ -187,7 +195,7 @@ function ProjectCard({
           return count > 0 && targetHref ? <Link key={key} className={`fact fact-${color} fact-link`} prefetch={false} href={targetHref} title={`${title}。クリックして該当する作業を表示`} aria-label={`${project.name}の${label} ${count}件の作業を表示`}>{label} <strong>{count}</strong><span className="fact-arrow" aria-hidden="true">↗</span></Link> : <span key={key} className={count > 0 ? `fact fact-${color}` : "fact"} title={title}>{label} <strong>{count}</strong></span>;
         })}
       </div>
-      {project.next_lane && <div className="project-card-footer"><span>次に確認 {workHref("all", project.next_lane) ? <Link href={workHref("all", project.next_lane)!} prefetch={false}><strong>{project.next_lane}</strong><span aria-hidden="true"> →</span></Link> : <strong>{project.next_lane}</strong>}</span></div>}
+      {project.next_lane && <div className="project-card-footer"><span>次に確認 {workHref("all", project.next_lane) ? <Link href={workHref("all", project.next_lane)!} prefetch={false}><strong>{project.next_lane === "(detached)" ? "HEAD切り離し（ブランチなし）" : project.next_lane}</strong><span aria-hidden="true"> →</span></Link> : <strong>{project.next_lane === "(detached)" ? "HEAD切り離し（ブランチなし）" : project.next_lane}</strong>}</span></div>}
       {project.fetch_status?.result === "failure" && <span className="fact fact-danger" role="status">⚠ fetch失敗</span>}
       <details className="project-card-extra">
         <summary>管理情報 <span>{project.worktree_count} worktree</span></summary>
@@ -223,11 +231,53 @@ export default function Page() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favoritesReady, setFavoritesReady] = useState(false);
   const [favoritesStorageIssue, setFavoritesStorageIssue] = useState(false);
+  const gridRef = useRef<HTMLElement>(null);
+  const [acknowledgements, setAcknowledgements] = useState<Acknowledgements | null>(null);
+  useEffect(() => {
+    const read = () => {
+      try { setAcknowledgements(parseAcknowledgements(localStorage.getItem(ACKNOWLEDGEMENTS_STORAGE_KEY))); }
+      catch { setAcknowledgements(null); }
+    };
+    read();
+    window.addEventListener("storage", read);
+    window.addEventListener("gitdash-acknowledgements-changed", read);
+    return () => {
+      window.removeEventListener("storage", read);
+      window.removeEventListener("gitdash-acknowledgements-changed", read);
+    };
+  }, []);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const cards = Array.from(gridRef.current?.querySelectorAll<HTMLElement>(".project-card") ?? []);
+      const card = target.closest<HTMLElement>(".project-card");
+      const action = homeCardKeyAction(event, {
+        editing: target.isContentEditable || Boolean(target.closest("input, textarea, select, [role='textbox']")),
+        dialogOpen: Boolean(document.querySelector("dialog[open]")),
+        cardFocused: card !== null && cards.includes(card),
+        interactive: target !== card,
+      });
+      if (action === null) return;
+      if (action === "open") {
+        const link = card?.querySelector<HTMLAnchorElement>("[data-project-open]");
+        if (link) { event.preventDefault(); link.click(); }
+        return;
+      }
+      const index = homeCardIndex(action, card === null ? -1 : cards.indexOf(card), cards.length);
+      if (index === null) return;
+      event.preventDefault();
+      cards[index].focus({ preventScroll: true });
+      cards[index].scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || target.isContentEditable || target.closest("input, textarea, select")) return;
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.defaultPrevented || document.querySelector("dialog[open]") || target.isContentEditable || target.closest("input, textarea, select")) return;
       event.preventDefault();
       searchRef.current?.focus();
     };
@@ -300,7 +350,8 @@ export default function Page() {
     return displayOrder.map((id) => byId.get(id)).filter((project): project is ProjectSummary => Boolean(project));
   }, [displayOrder, projects]);
   const ordered = useMemo(() => view.sort === "priority" ? orderedByPriority : sortHomeProjects(projects, view.sort), [orderedByPriority, projects, view.sort]);
-  const visible = useMemo(() => invalidUrlParams.length > 0 ? [] : ordered.filter((project) => projectMatchesView(project, view, favorites)), [favorites, invalidUrlParams.length, ordered, view]);
+  const dormantIds = useMemo(() => new Set(projects.filter((project) => isDormantProject(project, acknowledgements, Date.now())).map((project) => project.id)), [projects, acknowledgements]);
+  const visible = useMemo(() => invalidUrlParams.length > 0 ? [] : ordered.filter((project) => projectMatchesView(project, view, favorites) && (!view.hideDormant || !dormantIds.has(project.id))), [dormantIds, favorites, invalidUrlParams.length, ordered, view]);
   const totals = useMemo(() => aggregateAgentCounts(projects), [projects]);
   useEffect(() => {
     document.title = homeDocumentTitle(totals.waiting_for_user);
@@ -308,7 +359,7 @@ export default function Page() {
   }, [totals.waiting_for_user]);
   const unknownProjectTotal = useMemo(() => countProjectsWithUnknownAgentCounts(projects), [projects]);
   const gitTotals = useMemo(() => ({ conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0), dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0), lanes: projects.every((item) => item.lane_count !== null) ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0) : null }), [projects]);
-  const hasActiveFilters = Boolean(view.query.trim() || view.agentFilter !== "all" || view.gitFilter !== "all" || view.favoritesOnly || invalidUrlParams.length);
+  const hasActiveFilters = Boolean(view.query.trim() || view.agentFilter !== "all" || view.gitFilter !== "all" || view.favoritesOnly || view.hideDormant || invalidUrlParams.length);
   const startInteraction = (id?: string) => setInteractionId(id || "grid");
   const finishInteraction = () => setInteractionId(null);
   const applyOrder = () => { if (deferredOrder) { setDisplayOrder(deferredOrder); setDeferredOrder(null); } };
@@ -324,7 +375,7 @@ export default function Page() {
       else window.history.pushState({}, "", nextHref);
     }
   };
-  const resetView = () => applyView({ query: "", agentFilter: "all", gitFilter: "all", favoritesOnly: false, ...(invalidUrlParams.length ? defaultView : {}) });
+  const resetView = () => applyView({ query: "", agentFilter: "all", gitFilter: "all", favoritesOnly: false, hideDormant: false, ...(invalidUrlParams.length ? defaultView : {}) });
   const homeQuery = homeSearch(view);
   const gitProjectCounts = useMemo(() => Object.fromEntries(gitFilters.map(({ key }) => [key, projects.filter((project) => project.git[key] > 0).length])), [projects]);
   const toggleFavorite = (projectId: string) => {
@@ -350,7 +401,7 @@ export default function Page() {
   const agentSummaryQuiet = projects.length > 0 && !projects.some((project) => summaryCards.some(({ key }) => { const count = agentCount(project, key); return count !== null && count > 0; }));
   const agentSummary = (<div className="home-summary" aria-label="ブランチの作業状況サマリー">
         {invalidUrlParams.length > 0 ? <span className="filter-unavailable">URL条件を確認してから一覧を表示します。</span> : <>
-          {summaryCards.filter(({ key }) => loading || error !== null || totals[key] !== null).map(({ key, label }) => <button type="button" className="home-summary-card" key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
+          {summaryCards.filter(({ key }) => loading || error !== null || totals[key] !== null).map(({ key, label }) => <button type="button" className="home-summary-card" data-empty={totals[key] === 0} key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : formatAgentCount(totals[key])}</strong><span>{label}</span></button>)}
           <button type="button" className="home-summary-card" aria-label="agent報告がないプロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : unknownProjectTotal}</strong><span>agent報告なし</span></button>
         </>}
         <p className="home-summary-note">集計とタブタイトルの入力待ち件数は、確認済みを含む最新の報告件数です。</p>
@@ -365,11 +416,13 @@ export default function Page() {
         <label>並び順<select value={view.sort} onChange={(event) => applyView({ sort: event.target.value as ProjectSort })} aria-label="プロジェクトの並び順"><option value="priority">優先度</option><option value="name">名前</option><option value="latest">最新更新</option></select></label>
         <div role="group" aria-label="Git状態で絞り込み"><button type="button" aria-pressed={view.gitFilter === "all"} onClick={() => applyView({ gitFilter: "all" })}>すべて</button>{gitFilters.map(({ key, label }) => <button type="button" key={key} aria-pressed={view.gitFilter === key} onClick={() => applyView({ gitFilter: view.gitFilter === key ? "all" : key })}>{label}<span className="filter-count">{loading && !projects.length ? "…" : gitProjectCounts[key]}</span></button>)}</div>
         <button type="button" aria-pressed={view.favoritesOnly} onClick={() => applyView({ favoritesOnly: !view.favoritesOnly })}>{view.favoritesOnly ? "★ お気に入りのみ" : "☆ お気に入り"}</button>
+        <button type="button" aria-pressed={view.hideDormant} title="最新コミットが30日以上前で、変更・未push・未確認の判断待ち・実行中がないプロジェクト" onClick={() => applyView({ hideDormant: !view.hideDormant })}>休眠プロジェクトを隠す<span className="filter-count">{dormantIds.size}件{view.hideDormant ? "を非表示" : ""}</span></button>
         <div role="group" aria-label="カード密度"><button type="button" aria-pressed={view.density === "comfortable"} onClick={() => applyView({ density: "comfortable" })}>ゆったり</button><button type="button" aria-pressed={view.density === "compact"} onClick={() => applyView({ density: "compact" })}>コンパクト</button></div>
         <span className="toolbar-note">{loading && !projects.length ? "Git件数を取得中…" : <>{gitTotals.lanes === null ? "ブランチ数は一部未取得" : `${gitTotals.lanes} ブランチ`} · {gitTotals.dirty} 作業ディレクトリに変更</>}</span>
       </section>}
       {hasActiveFilters && invalidUrlParams.length === 0 && <div className="active-filters" aria-label="選択中の検索条件">
         <span>絞り込み</span>
+        {view.hideDormant && <button type="button" onClick={() => applyView({ hideDormant: false })}>休眠を非表示<span aria-hidden="true">×</span></button>}
         {view.query.trim() && <button type="button" onClick={() => applyView({ query: "" })} aria-label="検索キーワードを解除">検索: {view.query}<span aria-hidden="true">×</span></button>}
         {view.agentFilter !== "all" && <button type="button" onClick={() => applyView({ agentFilter: "all" })} aria-label="ブランチ作業状況の絞り込みを解除">{view.agentFilter === "unknown" ? "agent報告なし" : AGENT_SUMMARY_LABELS[view.agentFilter]}<span aria-hidden="true">×</span></button>}
         {view.gitFilter !== "all" && <button type="button" onClick={() => applyView({ gitFilter: "all" })} aria-label="Gitの絞り込みを解除">{gitFilters.find((item) => item.key === view.gitFilter)?.label}<span aria-hidden="true">×</span></button>}
@@ -383,7 +436,7 @@ export default function Page() {
       {invalidUrlParams.length === 0 && loading && projects.length === 0 && <SkeletonGrid />}
       {error && <div className="home-state home-state-error" role="alert"><strong>{projects.length ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
       {invalidUrlParams.length === 0 && !loading && !error && visible.length === 0 && <div className="home-state home-empty"><h3>該当するプロジェクトがありません</h3><p>{hasActiveFilters ? "現在の条件に一致するプロジェクトはありません。条件をリセットして一覧を確認できます。" : "登録されたプロジェクトはありません。"}</p>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
-      {invalidUrlParams.length === 0 && <section className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
+      {invalidUrlParams.length === 0 && <section ref={gridRef} className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
       <GitGuide path={null} />
       <details className="git-reading-guide"><summary>Git状態の見方</summary><div>
         <p><strong>変更あり</strong> 作業ディレクトリに未コミットの変更があります。<code>git status</code> で確認できます。</p>

@@ -499,6 +499,22 @@ def build(
         historical_by_source[source_key] = historical
         rows.append(historical)
 
+    open_data = github_data.get("open")
+    open_pulls = open_data["pulls"] if isinstance(open_data, Mapping) and open_data.get("status") == "available" else None
+    for row in rows:
+        row["open_pull_requests"] = None if open_pulls is None else [
+            pull for pull in open_pulls
+            if not row["historical"]
+            and isinstance(pull["headRepository"], str)
+            and (
+                (row["remote_repository"] == pull["headRepository"].lower()
+                 and row["remote_branch"] == pull["headRefName"])
+                or (row["remote_ref"] is None
+                    and _origin_repository(github_data) == pull["headRepository"].lower()
+                    and any(lane.get("branch") == pull["headRefName"] for lane in row["locals"]))
+            )
+        ]
+
     all_history_heads = list(
         dict.fromkeys(
             head

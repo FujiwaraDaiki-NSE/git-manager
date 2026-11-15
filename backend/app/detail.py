@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from app import gitinfo, paths
@@ -192,3 +193,42 @@ def get_branches(repo: str) -> dict[str, Any] | None:
         "remotes": remotes,
         "command": "git branch -vv",
     }
+
+
+def parse_submodule_status(raw: str, index_raw: str) -> list[dict[str, Any]] | None:
+    """status の先頭記号と、NUL区切りのindexのgitlinkを対応させる。"""
+    recorded: dict[str, str | None] = {}
+    for entry in index_raw.split("\0"):
+        if not entry:
+            continue
+        metadata, path = entry.split("\t", 1)
+        mode, commit, stage = metadata.split()
+        if mode == "160000":
+            recorded[path] = commit if stage == "0" else None
+    states = {"-": "uninitialized", "+": "different", " ": "same", "U": "conflict"}
+    result = []
+    for line in raw.splitlines():
+        match = re.fullmatch(r"([-+ U])([0-9a-f]{40}|[0-9a-f]{64}) (.*)", line)
+        if match is None:
+            return None
+        marker, _checkout, tail = match.groups()
+        candidates = [path for path in recorded if tail == path or tail.startswith(path + " (")]
+        if not candidates:
+            return None
+        path = max(candidates, key=len)
+        result.append({"path": path, "recorded_commit": recorded[path], "status": states[marker]})
+    return result
+
+
+def get_submodules(repo: str) -> dict[str, Any] | None:
+    """詳細表示専用。定義がなければGitを呼び出さない。"""
+    if not (Path(repo) / ".gitmodules").is_file():
+        return {"submodules": []}
+    raw = gitinfo._run(repo, ["submodule", "status"])
+    if raw is None:
+        return None
+    index = gitinfo._run(repo, ["ls-files", "--stage", "-z"])
+    if index is None:
+        return None
+    entries = parse_submodule_status(raw, index)
+    return {"submodules": entries} if entries is not None else None

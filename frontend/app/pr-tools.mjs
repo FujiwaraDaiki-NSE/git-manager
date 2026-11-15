@@ -310,3 +310,14 @@ export function buildPullRequestExplorerData(project, options) {
     githubStatus: project.github.status,
   };
 }
+
+/** GitHubの明示値を表示し、nullを待機状態と混同しない。 */
+export function openPullRequestLabels(pr) {
+  const review = { APPROVED: "レビュー承認", CHANGES_REQUESTED: "変更要求", REVIEW_REQUIRED: "レビュー待ち" };
+  const ci = { SUCCESS: "CI 成功", FAILURE: "CI 失敗", ERROR: "CI 失敗", PENDING: "CI 実行中", EXPECTED: "CI 実行中" };
+  return [
+    ...(pr.isDraft ? ["Draft"] : []),
+    pr.reviewDecision === null ? "レビュー情報なし" : review[pr.reviewDecision],
+    pr.ciState === null ? "CI なし" : ci[pr.ciState],
+  ];
+}

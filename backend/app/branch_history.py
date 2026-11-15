@@ -50,7 +50,8 @@ def read_tips(repo: str, heads: list[str]) -> list[dict[str, Any]] | None:
     return commits
 
 
-@project_facts.cached
+# Callers only read/serialize the page; no presentation fields are added.
+@project_facts.cached(copy_value=False)
 def read_page(repo: str, heads: list[str], offset: int) -> dict[str, Any] | None:
     if not heads:
         return {"commits": [], "next_offset": None}

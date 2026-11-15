@@ -119,6 +119,7 @@ function projectLabel(project: TimelineProject | null | undefined, projectId: st
 }
 
 function branchLabel(branch: string | null | undefined) {
+  if (branch === "(detached)") return "HEAD切り離し（ブランチなし）";
   return branch || "ブランチ未取得";
 }
 
@@ -281,7 +282,7 @@ export default function AgentTimelineSidebar({
   const saveAcknowledgements = (tasks: AgentTask[], acknowledged: boolean, focusId: string) => {
     const next = updateAcknowledgements(tasks, acknowledgements, acknowledged);
     setAcknowledgements(next);
-    try { localStorage.setItem(ACKNOWLEDGEMENTS_STORAGE_KEY, JSON.stringify(next)); setAcknowledgementsIssue(false); }
+    try { localStorage.setItem(ACKNOWLEDGEMENTS_STORAGE_KEY, JSON.stringify(next)); setAcknowledgementsIssue(false); window.dispatchEvent(new Event("gitdash-acknowledgements-changed")); }
     catch { setAcknowledgementsIssue(true); }
     window.requestAnimationFrame(() => { document.getElementById(focusId)?.focus(); });
   };

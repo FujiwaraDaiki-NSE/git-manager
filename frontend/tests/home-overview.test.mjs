@@ -85,6 +85,7 @@ test("search, favorites, agent, and Git filters compose without losing the query
     gitFilter: "dirty",
     sort: "name",
     favoritesOnly: true,
+    hideDormant: false,
     density: "compact",
   };
   assert.equal(projectMatchesView(selected, view, new Set(["selected"])), true);
@@ -102,6 +103,7 @@ test("URL state validates filters and round-trips shareable view options", () =>
     gitFilter: "behind",
     sort: "latest",
     favoritesOnly: true,
+    hideDormant: false,
     density: "compact",
   });
   assert.deepEqual(parsed.invalidParams, []);
@@ -142,4 +144,87 @@ test("entirely unknown totals stay unknown while published zero and empty totals
   assert.equal(aggregateAgentCounts([unknown, project("zero")]).active, 0);
   assert.equal(aggregateAgentCounts([]).active, 0);
   assert.equal(matchesAgentFilter(unknown, "active"), false);
+});
+
+test("dormancy requires an old commit and known quiet Git and agent facts", async () => {
+  const { isDormantProject } = await import("../app/home-overview.mjs");
+  const now = Date.parse("2026-11-16T00:00:00Z");
+  const old = project("old", { latest_event: { date: "2026-10-17T00:00:00Z" } });
+  assert.equal(isDormantProject(old, {}, now), true);
+  assert.equal(isDormantProject(old, {}, now - 1), false);
+  for (const latest_event of [null, { date: null }, { date: "invalid" }])
+    assert.equal(isDormantProject({ ...old, latest_event }, {}, now), false);
+  for (const key of ["dirty", "conflict", "ahead"])
+    for (const value of [1, null])
+      assert.equal(isDormantProject({ ...old, git: { ...old.git, [key]: value } }, {}, now), false);
+  for (const key of ["active", "waiting_for_user", "blocked", "review_required", "merge_ready"])
+    for (const value of [1, null])
+      assert.equal(isDormantProject({ ...old, agent_priority_counts: counts({ [key]: value }) }, {}, now), false);
+  assert.equal(isDormantProject({ ...old, agent_tasks: null }, {}, now), false);
+  assert.equal(isDormantProject(old, null, now), false);
+  const task = { project_id: "old", branch: "main", kind: "status", status: "review_required", event_id: "e1", sequence: 1 };
+  const waiting = { ...old, agent_tasks: [task], agent_priority_counts: counts({ review_required: 1 }) };
+  const { updateAcknowledgements } = await import("../app/agent-acknowledgements.mjs");
+  const saved = updateAcknowledgements([task], {}, true);
+  assert.equal(isDormantProject(waiting, {}, now), false);
+  assert.equal(isDormantProject(waiting, saved, now), true);
+  assert.equal(isDormantProject({ ...waiting, agent_tasks: [{ ...task, event_id: "e2" }] }, saved, now), false);
+});
+
+test("dormancy URL setting validates and round trips", () => {
+  const view = parseHomeUrl("?hideDormant=1").view;
+  assert.equal(view.hideDormant, true);
+  assert.equal(homeSearch(view), "hideDormant=1");
+  assert.equal(parseHomeUrl("").view.hideDormant, false);
+  assert.equal(parseHomeUrl("?hideDormant=invalid").view, null);
+});
+
+test("card shortcuts ignore editing, dialogs, modifiers and native controls", async () => {
+  const { homeCardKeyAction, homeCardIndex } = await import("../app/home-overview.mjs");
+  const context = { editing: false, dialogOpen: false, cardFocused: true, interactive: false };
+  assert.equal(homeCardKeyAction({ key: "j" }, context), "next");
+  assert.equal(homeCardKeyAction({ key: "k" }, context), "previous");
+  for (const key of ["Enter", "o"]) {
+    assert.equal(homeCardKeyAction({ key }, context), "open");
+    assert.equal(homeCardKeyAction({ key }, { ...context, interactive: true }), null);
+    assert.equal(homeCardKeyAction({ key }, { ...context, cardFocused: false }), null);
+  }
+  for (const key of ["/", "?", "K"]) assert.equal(homeCardKeyAction({ key }, context), null);
+  for (const flag of ["ctrlKey", "metaKey", "altKey", "shiftKey", "isComposing", "defaultPrevented"])
+    assert.equal(homeCardKeyAction({ key: "j", [flag]: true }, context), null);
+  for (const flag of ["editing", "dialogOpen"])
+    assert.equal(homeCardKeyAction({ key: "j" }, { ...context, [flag]: true }), null);
+  assert.equal(homeCardIndex("next", -1, 3), 0);
+  assert.equal(homeCardIndex("previous", -1, 3), 2);
+  assert.equal(homeCardIndex("next", 0, 3), 1);
+  assert.equal(homeCardIndex("next", 2, 3), 2);
+  assert.equal(homeCardIndex("previous", 0, 3), 0);
+  assert.equal(homeCardIndex("next", -1, 0), null);
+});
+
+test("agent報告なしの30日以上前のクリーンなプロジェクトは隠れる", async () => {
+  const { isDormantProject } = await import("../app/home-overview.mjs");
+  const now = Date.parse("2026-11-16T00:00:00Z");
+  const noReports = project("no-reports", {
+    latest_event: { date: "2026-10-17T00:00:00Z" },
+    agent_tasks: null,
+    agent_counts: { running: null, waiting_for_user: null, problem: null, reviewing: null, integratable: null },
+    agent_priority_counts: Object.fromEntries(Object.keys(counts()).map((key) => [key, null])),
+  });
+  assert.equal(isDormantProject(noReports, {}, now), true);
+  assert.equal(isDormantProject(noReports, null, now), true);
+  assert.equal(isDormantProject(noReports, {}, now - 1), false);
+  for (const date of [null, undefined, "invalid"])
+    assert.equal(isDormantProject({ ...noReports, latest_event: { date } }, {}, now), false);
+  assert.equal(isDormantProject({ ...noReports, latest_event: null }, {}, now), false);
+  for (const key of ["dirty", "conflict", "ahead"])
+    for (const value of [null, undefined, 1])
+      assert.equal(isDormantProject({ ...noReports, git: { ...noReports.git, [key]: value } }, {}, now), false);
+  for (const field of ["agent_counts", "agent_priority_counts"]) {
+    assert.equal(isDormantProject({ ...noReports, [field]: null }, {}, now), false);
+    assert.equal(isDormantProject({ ...noReports, [field]: {} }, {}, now), false);
+    const key = Object.keys(noReports[field])[0];
+    for (const value of [undefined, 0, 1])
+      assert.equal(isDormantProject({ ...noReports, [field]: { ...noReports[field], [key]: value } }, {}, now), false);
+  }
 });

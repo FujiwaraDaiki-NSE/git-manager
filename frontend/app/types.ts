@@ -271,6 +271,7 @@ export type ProjectBranchRow = {
   historical: boolean;
   status: "synchronized" | "local_ahead" | "remote_ahead" | "diverged" | "remote_only" | "remote_unavailable" | "tracking_unavailable" | "tracking_inconsistent" | "mixed" | "local_only" | "upstream_deleted" | "detached" | "historical_deleted" | string;
   pull_requests: ProjectBranchPullRequest[];
+  open_pull_requests?: OpenPullRequest[] | null;
 };
 
 export type ProjectBranchConnectionEdge = {
@@ -433,7 +434,7 @@ export type ProjectSummary = {
 export type ProjectResponse = {
   fetch_status?: FetchStatus | null;
   snapshot?: { observed_at: number; status: "ready" | "refreshing" | "failed"; error: string | null };
-  github: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
+  github: { open?: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; pulls: OpenPullRequest[] }; status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
   branch_rows: ProjectBranchRow[] | null;
   branch_connections: ProjectBranchConnections | null;
   id: string;
@@ -504,3 +505,9 @@ export type Repo = {
 export const isDirty = (r: Repo) => (r.entries?.length ?? 0) > 0;
 export const hasConflict = (r: Repo) =>
   (r.entries ?? []).some((e) => ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(e.xy));
+
+export type OpenPullRequest = {
+  number: number; url: string; title: string; isDraft: boolean;
+  headRefName: string; headRefOid: string; baseRefName: string;
+  headRepository: string | null; reviewDecision: string | null; ciState: string | null;
+};
