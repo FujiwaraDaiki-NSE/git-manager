@@ -1,0 +1,19 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-16</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>オープンPRのレビュー・CI状態、サブモジュール、ホームのキーボード操作 — 2026-11-16</h1>
+<p>ブランチごとのオープンPRとレビュー・CI状態、サブモジュールの状態と対応コマンドを表示するようにしました。ホームにはキーボード移動と休眠プロジェクトの非表示を追加し、詳細APIを高速化しました。</p>
+<p>開始時30点 + 検証済み加点26点 = <b>56点</b>（100点未達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+<table><thead><tr><th>No.</th><th>改善内容</th><th>分類・点数</th><th>検証根拠</th></tr></thead><tbody>
+<tr><td>1</td><td>オープンPRの表示。ブランチ行に「PR #番号 · レビュー状態 · CI状態」とDraftを表示（GraphQLを1リポジトリ1クエリ、60秒キャッシュ、マージ済みPRの取得と並列）</td><td>機能 +5</td><td>実データ design_db: #329「レビュー情報なし · CI 成功」、#301 Draft。GitHubへのリンクを実画面で確認</td></tr>
+<tr><td>2</td><td>サブモジュールの状態表示（Git詳細の「状態」タブ）。記録コミット、状態（未初期化／ずれ／一致／競合）、コピーできる対応コマンド</td><td>機能 +5</td><td>OCR_PaddleOCR で「PaddleOCR 一致」を実画面で確認。KSM_2CGL と hk_thinkplatform はAPIで確認。未初期化・ずれ・競合はユニットテストのみ</td></tr>
+<tr><td>3</td><td>ホームのキーボード移動（j / k、Enter / o で開く）。ショートカット一覧にも追記</td><td>機能 +5</td><td>実キー入力: j×2 で2枚目にフォーカス枠とスクロール、k→Enter で design_db を開き、ホームのフィルタ状態も引き継がれた</td></tr>
+<tr><td>4</td><td>休眠プロジェクトを隠すトグル（最新コミットが30日以上前で、変更・競合・未push・実行中・未確認の判断待ちがないもの。設定はURLに保存）</td><td>機能 +5</td><td>実データ: 28件を非表示（108→80）、<code>?hideDormant=1</code>。検証中に見つけた、agent報告なしを不明扱いして0件になるバグは同日中に修正（加点なし）</td></tr>
+<tr><td>5</td><td>詳細API: 読み取り専用の履歴ページはリクエストごとの deepcopy を省略</td><td>高速化 +5</td><td>design_db のハーネス中央値（7回）227.7→151.0ms（-33.7%）。キー整列済みJSON 11.4MB がバイト単位で一致</td></tr>
+<tr><td>6</td><td>Gitの内部表記「(detached)」を「HEAD切り離し（ブランチなし）」に変更（ホームのカードとagentタイムライン）</td><td>文言 +1</td><td>実画面のカードで確認</td></tr>
+</tbody></table>
+<h2>加点しなかったもの</h2>
+<ul><li>件数0のサマリーカードを控えめにする表示: 今日の実データに0件のカードがなく、実画面で確認できなかったため。</li>
+<li>/api/projects の高速化2案（-57%と-5.5%の悪化）: 採用せず元に戻した。</li>
+<li>同日中に直したもの（休眠判定、サブモジュール表示が更新されないレビュー指摘P2）。</li></ul>
+<h2>テスト・起動</h2>
+<p>backend 393件成功（既存のStarlette警告1件）、frontend 406件成功、next build 成功。<code>gitdash-compose up -d --build</code> で反映。アクセス先は http://localhost:4412 。</p>
+</html>
