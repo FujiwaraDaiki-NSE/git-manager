@@ -1,0 +1,34 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-15</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>Gitの実状態の可視化・調査ツール・大規模プロジェクト高速化 — 2026-11-15</h1>
+<p>fetchの成否、Git操作の途中状態、push先などGitが実際にどう動くかを画面で確認できるようにし、履歴調査ツール4種を追加、design_db 規模の詳細画面を高速化しました。</p>
+<p>開始時30点 + 検証済み加点64点 = <b>94点</b>（100点未達）。加点基準による評価であり客観的な品質保証ではありません。</p>
+<table><thead><tr><th>No.</th><th>改善内容</th><th>分類・点数</th><th>検証根拠</th></tr></thead><tbody>
+<tr><td>1</td><td>ブランチ全関係（pairs 約10MB・40,186組）を /api/repo/branch-pairs へ分離し、パネルを開いた時だけ取得</td><td>高速化 +5</td><td>同条件ハーネス中央値 1.577→1.344秒（-14.8%）、応答 24.9MB→15.0MB。実画面: 開く前0回、開いて1回、40,186組を1.2秒で表示</td></tr>
+<tr><td>2</td><td>PR祖先判定の一括化（merge-base 299回→1回、Git起動320→23回）</td><td>高速化 +5</td><td>ハーネス 1.344→0.517秒。出力バイト一致をスクリプト検証。本番コンテナ定常時 /api/project(design_db) 1.50秒→0.65〜0.70秒</td></tr>
+<tr><td>3</td><td>fetchの成否（最終成功・直近試行・失敗分類・stderr要約）、カードに「fetch失敗」</td><td>機能追加 +5</td><td>接続失敗の検証repoで「接続」分類と理由を表示。実データで認証失敗・タイムアウトも分類</td></tr>
+<tr><td>4</td><td>Git操作の途中状態（merge/rebase/cherry-pick/revert/bisect）と継続・中止コマンド</td><td>機能追加 +5</td><td>MERGE_HEAD を持つ検証repoで「merge途中」と git status / --continue / --abort を表示・コピー</td></tr>
+<tr><td>5</td><td>fetch元・追跡先・実効push先・push URL・push先ref・push.default</td><td>機能追加 +5</td><td>git-manager main で origin / refs/heads/main / simple を表示。一括読込化の前後で design_db 292件の出力が完全一致</td></tr>
+<tr><td>6</td><td>worktree間の変更パス重なり</td><td>機能追加 +5</td><td>main と別worktreeが同じ backend/app/main.py を変更中であることを実データで検出</td></tr>
+<tr><td>7</td><td>リポジトリ全体のコミット検索（件名・作成者・期間・パス、50件ページング、詳細へ遷移）</td><td>機能追加 +5</td><td>件名検索で90cd8aaを表示し差分へ遷移。日付はブラウザのタイムゾーンの暦日全体（同日指定で該当）</td></tr>
+<tr><td>8</td><td>到達不能コミットの復旧候補（reflog出所・復旧コマンド）</td><td>機能追加 +5</td><td>reset で外したコミットを refs/heads/main@{1}・HEAD@{3} 付きで表示</td></tr>
+<tr><td>9</td><td>パッチ同等コミットの判定（cherry-mark）</td><td>機能追加 +5</td><td>cherry-pick したブランチ同士で両コミットに「=」</td></tr>
+<tr><td>10</td><td>詳細ペイン・agentサイドバーの幅調整（ドラッグ・矢印キー・保存）</td><td>UIリッチ化 +2</td><td>1440px幅で詳細380→400px、サイドバー340→360px、localStorage保存</td></tr>
+<tr><td>11</td><td>差分の左右比較</td><td>UIリッチ化 +2</td><td>2列grid・行番号・ヘッダー全幅を実画面で確認（初版のCSS不具合と行番号折り返しを修正後）</td></tr>
+<tr><td>12</td><td>コード文字サイズ（小/中/大）</td><td>UIリッチ化 +2</td><td>大で差分本文 13px→16px</td></tr>
+<tr><td>13</td><td>差分ツールバーの詳細操作を折りたたみ（条件・レビュー進捗は常時表示）</td><td>UIリッチ化 +2</td><td>「▶ 詳細」と「内容: すべて · 並び順 · レビュー済み 0/30」を表示</td></tr>
+<tr><td>14</td><td>横スクロール表の端の影</td><td>UIリッチ化 +2</td><td>ブランチ関係一覧で右端の影を確認</td></tr>
+<tr><td>15</td><td>変更ファイル一覧の表示列トグル</td><td>UIリッチ化 +2</td><td>「追加」OFFで見出しから追加列が消え、ONで復元（既存チップと同じ見た目）</td></tr>
+<tr><td>16</td><td>「ブランチ状態不明」→「agent報告なし」</td><td>文言 +1</td><td>backendは報告0件をnullで返すため意味は「なし」。集計カードと一致</td></tr>
+<tr><td>17</td><td>「upstream 未取得」→「追跡先なし」／取得不能は別文言</td><td>文言 +1</td><td>作業一覧で「追跡先なし」5件、旧文言0件</td></tr>
+<tr><td>18</td><td>「マージ可能」→「マージ準備完了」（agent報告である旨をtitle）</td><td>文言 +1</td><td>サイドバー集計「マージ準備完了 32件」</td></tr>
+<tr><td>19</td><td>PRの「マージコミット」→「取り込み先コミット」</td><td>文言 +1</td><td>旧文言0件</td></tr>
+<tr><td>20</td><td>「最終観測」→「最新の活動・観測」</td><td>文言 +1</td><td>ホームの管理情報で確認</td></tr>
+<tr><td>21</td><td>ローカルパスのremoteが先頭スラッシュ欠落で表示</td><td>バグ修正 +1</td><td>「/home/solution2024/thinkplatform-dev/thinkplatform」と表示</td></tr>
+<tr><td>22</td><td>コンテナのSSH自動fetchが全件失敗（ssh: No user exists for uid 1000）</td><td>バグ修正 +1</td><td>ホストの /etc/passwd・/etc/group を読み取り専用マウント。fetch成功 12→64件。残る失敗は実際の認証・未存在・タイムアウト</td></tr>
+</tbody></table>
+<p>未加点: 当日追加機能の自己修正（左右比較CSS、日付範囲の暦日化、push先解決の設定一括読込・for-each-ref一括化、調査ツールの見た目統一）。</p>
+<h2>影響範囲</h2><p>backend: <code>gitinfo.py</code>（fetch状態・途中状態・push先）、<code>project.py</code>、<code>branch_rows.py</code>・<code>branch_ref_relations.py</code>・<code>project_git_batch.py</code>（pairs分離・PR祖先一括）、新規 <code>investigation.py</code>／<code>investigation_routes.py</code>、<code>main.py</code>。frontend: プロジェクトカード、ブランチ詳細、プロジェクト情報、差分・変更ファイル表示、上部バー。<code>docker-compose.yml</code>: passwd/group の読み取り専用マウント。</p>
+<p>注意: SSH fetch 復旧直後は約60プロジェクトが一斉に新しいrefを取得するため、再起動直後数分はbackend CPUが高く詳細画面が遅くなります（定常化を確認済み）。</p>
+<h2>確認・テスト</h2><ul><li>backend pytest 382 passed（既存Starlette警告1件）、frontend npm test 399/399、npm run build 成功。</li><li>Codexレビュー: 日付範囲の指摘1件（P2）を修正しテスト追加。</li><li>gitdash-compose up -d --build で反映、組み込みブラウザで上表を実操作確認。検証用フィクスチャは削除済み。</li></ul>
+<h2>次回候補</h2><p>branch_rows のコミット重複除去（試作で-6%、採用基準未達）、/api/projects の再起動直後の重さ、取得済み状態のdeepcopy（0.5秒）、オープンPRのレビュー・CI状態、agent判断待ちの構造化。</p>
+</html>
