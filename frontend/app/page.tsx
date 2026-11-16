@@ -1,4 +1,5 @@
 "use client";
+import { nextAgentCheck } from "./home-next-check.mjs";
 import { remoteLabel } from "./remote-label.mjs";
 
 import { homeDocumentTitle } from "./agent-attention.mjs";
@@ -98,6 +99,7 @@ function stateClass(state: AgentRunState | null | undefined) {
 }
 
 function ProjectCard({
+  acknowledgements,
   project,
   favorite,
   density,
@@ -107,6 +109,7 @@ function ProjectCard({
   onInteractEnd,
   onInteractStart,
 }: {
+  acknowledgements: Acknowledgements | null;
   project: ProjectSummary;
   favorite: boolean;
   density: CardDensity;
@@ -154,7 +157,7 @@ function ProjectCard({
       <div className="project-card-heading">
         <div className="project-card-title-wrap">
           <h3>{href ? <Link href={href} prefetch={false}>{project.name}</Link> : project.name}</h3>
-          <code title={remoteLabel(project.remote)}>{remoteLabel(project.remote)}</code>
+          <code title={remoteLabel(project.remote, project.remote_status)}>{remoteLabel(project.remote, project.remote_status)}</code>
           {showPath && <code className="project-card-location" title={target ?? undefined}>{target === null ? "作業パス未取得" : target}</code>}
         </div>
         <div className="project-card-actions">
@@ -192,10 +195,20 @@ function ProjectCard({
         ] as const).map(({ key, label, color, title }) => {
           const count = project.git[key];
           const targetHref = workHref(key);
-          return count > 0 && targetHref ? <Link key={key} className={`fact fact-${color} fact-link`} prefetch={false} href={targetHref} title={`${title}。クリックして該当する作業を表示`} aria-label={`${project.name}の${label} ${count}件の作業を表示`}>{label} <strong>{count}</strong><span className="fact-arrow" aria-hidden="true">↗</span></Link> : <span key={key} className={count > 0 ? `fact fact-${color}` : "fact"} title={title}>{label} <strong>{count}</strong></span>;
+          return !project.git_status_available ? <span key={key} className="fact" title={title}>{label} <strong>未取得</strong></span> : count > 0 && targetHref ? <Link key={key} className={`fact fact-${color} fact-link`} prefetch={false} href={targetHref} title={`${title}。クリックして該当する作業を表示`} aria-label={`${project.name}の${label} ${count}件の作業を表示`}>{label} <strong>{count}</strong><span className="fact-arrow" aria-hidden="true">↗</span></Link> : <span key={key} className={count > 0 ? `fact fact-${color}` : "fact"} title={title}>{label} <strong>{count}</strong></span>;
         })}
+        {project.git_status_failed > 0 && <span className="fact fact-danger" role="status">Git状態の取得失敗 {project.git_status_failed}件{project.git_status_available ? "（件数は取得できた範囲）" : ""}</span>}
       </div>
-      {project.next_lane && <div className="project-card-footer"><span>次に確認 {workHref("all", project.next_lane) ? <Link href={workHref("all", project.next_lane)!} prefetch={false}><strong>{project.next_lane === "(detached)" ? "HEAD切り離し（ブランチなし）" : project.next_lane}</strong><span aria-hidden="true"> →</span></Link> : <strong>{project.next_lane === "(detached)" ? "HEAD切り離し（ブランチなし）" : project.next_lane}</strong>}</span></div>}
+      {(() => {
+        const task = nextAgentCheck(project, acknowledgements);
+        const branch = task ? task.branch : project.next_lane;
+        if (!branch) return null;
+        const params = target === null ? null : new URLSearchParams({ path: target, tab: "flow", range: "7d", lane: `branch:${branch}` });
+        if (params && homeQuery) params.set("home", homeQuery);
+        const nextHref = task ? (params ? `/project?${params}` : null) : workHref("all", branch);
+        const label = branch === "(detached)" ? "HEAD切り離し（ブランチなし）" : branch;
+        return <div className="project-card-footer"><span>次に確認 {nextHref ? <Link href={nextHref} prefetch={false}><strong>{label}</strong><span aria-hidden="true"> →</span></Link> : <strong>{label}</strong>}{task && <span> · {task.status === "waiting_for_user" ? "agentが入力待ち" : "agentが問題を報告"}</span>}</span></div>;
+      })()}
       {project.fetch_status?.result === "failure" && <span className="fact fact-danger" role="status">⚠ fetch失敗</span>}
       <details className="project-card-extra">
         <summary>管理情報 <span>{project.worktree_count} worktree</span></summary>
@@ -436,7 +449,7 @@ export default function Page() {
       {invalidUrlParams.length === 0 && loading && projects.length === 0 && <SkeletonGrid />}
       {error && <div className="home-state home-state-error" role="alert"><strong>{projects.length ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
       {invalidUrlParams.length === 0 && !loading && !error && visible.length === 0 && <div className="home-state home-empty"><h3>該当するプロジェクトがありません</h3><p>{hasActiveFilters ? "現在の条件に一致するプロジェクトはありません。条件をリセットして一覧を確認できます。" : "登録されたプロジェクトはありません。"}</p>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
-      {invalidUrlParams.length === 0 && <section ref={gridRef} className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
+      {invalidUrlParams.length === 0 && <section ref={gridRef} className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard acknowledgements={acknowledgements} key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
       <GitGuide path={null} />
       <details className="git-reading-guide"><summary>Git状態の見方</summary><div>
         <p><strong>変更あり</strong> 作業ディレクトリに未コミットの変更があります。<code>git status</code> で確認できます。</p>

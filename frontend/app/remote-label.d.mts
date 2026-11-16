@@ -1,1 +1,1 @@
-export function remoteLabel(remote: string | null): string;
+export function remoteLabel(remote: string | null, status: "configured" | "unset" | "failed" | null): string;

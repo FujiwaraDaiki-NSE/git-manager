@@ -737,6 +737,7 @@ def collect(
         "branch_line": "",
         "stashes": 0,
         "remote": None,
+        "remote_status": "failed",
         "last_commit": None,
         "next_command": None,
         "can_ff": False,
@@ -776,9 +777,12 @@ def collect(
     result["can_ff"] = info["behind"] > 0 and info["ahead"] == 0
     result["diverged"] = info["behind"] > 0 and info["ahead"] > 0
 
-    remote = _run(repo, ["config", "--get", "remote.origin.url"])
-    if remote:
+    remote, remote_code = _run_with_status(repo, ["config", "--get", "remote.origin.url"])
+    if remote_code == 0:
         result["remote"] = remote.strip()
+        result["remote_status"] = "configured"
+    elif remote_code == 1:
+        result["remote_status"] = "unset"
     result["next_command"] = next_command(
         info,
         result["remote"],

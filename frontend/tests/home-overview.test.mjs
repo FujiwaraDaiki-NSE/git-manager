@@ -30,6 +30,7 @@ const project = (id, overrides = {}) => ({
   id,
   name: id,
   remote: null,
+  git_status_failed: 0,
   main_path: `/repo/${id}`,
   git: { dirty: 0, conflict: 0, ahead: 0, behind: 0 },
   agent_priority_counts: counts(),
@@ -157,6 +158,8 @@ test("dormancy requires an old commit and known quiet Git and agent facts", asyn
   for (const key of ["dirty", "conflict", "ahead"])
     for (const value of [1, null])
       assert.equal(isDormantProject({ ...old, git: { ...old.git, [key]: value } }, {}, now), false);
+  // Upstream-only movement (e.g. an unused OSS clone) does not make a project active.
+  assert.equal(isDormantProject({ ...old, git: { ...old.git, behind: 1 } }, {}, now), true);
   for (const key of ["active", "waiting_for_user", "blocked", "review_required", "merge_ready"])
     for (const value of [1, null])
       assert.equal(isDormantProject({ ...old, agent_priority_counts: counts({ [key]: value }) }, {}, now), false);
@@ -227,4 +230,12 @@ test("agent報告なしの30日以上前のクリーンなプロジェクトは�
     for (const value of [undefined, 0, 1])
       assert.equal(isDormantProject({ ...noReports, [field]: { ...noReports[field], [key]: value } }, {}, now), false);
   }
+});
+
+test("Git取得失敗とfetch失敗は休眠扱いしない", async () => {
+  const { isDormantProject } = await import("../app/home-overview.mjs");
+  const now = Date.parse("2026-11-16T00:00:00Z");
+  const old = project("old", { latest_event: { date: "2026-10-01T00:00:00Z" } });
+  assert.equal(isDormantProject({ ...old, git_status_failed: 1 }, {}, now), false);
+  assert.equal(isDormantProject({ ...old, fetch_status: { result: "failure" } }, {}, now), false);
 });

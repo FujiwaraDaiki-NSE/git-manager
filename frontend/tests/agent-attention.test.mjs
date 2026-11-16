@@ -24,3 +24,18 @@ test('home title and Git snapshot age use readable values', () => {
     assert.equal(snapshotAge(now / 1000 - seconds, now), label);
   }
 });
+
+test('new waiting questions notify once; unchanged content and removed decisions do not', () => {
+  const observe = createAttentionTracker();
+  const waiting = (sequence, question) => ({ ...event(sequence, 'waiting_for_user'), decision: question === null ? null : { question, options: [], links: [] } });
+  const first = waiting(1, '質問A');
+  observe(first); // Initial/replayed snapshots are seeded without dispatching notifications.
+  assert.equal(observe(waiting(2, '質問A')), false);
+  const changed = waiting(3, '質問B');
+  assert.equal(observe(changed), true);
+  assert.equal(observe(changed), false);
+  assert.equal(observe({ ...changed, decision: { ...changed.decision, question: '再送による変更' } }), false);
+  assert.equal(observe(waiting(2, '遅れた質問')), false);
+  assert.equal(observe(waiting(4, null)), false);
+  assert.equal(observe(waiting(5, '質問C')), true);
+});

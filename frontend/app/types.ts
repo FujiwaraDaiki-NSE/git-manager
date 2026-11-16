@@ -124,6 +124,8 @@ export type AgentRunState =
 
 export type AgentEventKind = "lifecycle" | "status" | string;
 
+export type AgentDecision = { question: string; options: string[]; links: string[] };
+
 export type AgentTask = {
   /** Legacy history identity. Branch status reports do not require it. */
   task_id?: string | null;
@@ -139,6 +141,7 @@ export type AgentTask = {
   attention: string | null;
   outcome: string | null;
   summary: string | null;
+  decision?: AgentDecision | null;
   occurred_at: string | null;
 };
 
@@ -260,7 +263,6 @@ export type ProjectBranchRow = {
   tracking_ref: string | null;
   locals: ProjectLane[];
   commit_hashes: string[];
-  commits: ProjectBranchCommit[];
   tip_commits: ProjectBranchCommit[];
   tip_metadata_available: boolean;
   history_heads: string[];
@@ -415,10 +417,13 @@ export type ProjectSummary = {
   id: string;
   name: string;
   remote: string | null;
+  remote_status: "configured" | "unset" | "failed" | null;
   main_path: string | null;
   lane_count: number | null;
   worktree_count: number;
   git: ProjectGitCounts;
+  git_status_failed: number;
+  git_status_available: boolean;
   latest_event: Commit | null;
   latest_observed_at: number;
   priority: number;
@@ -436,6 +441,7 @@ export type ProjectResponse = {
   snapshot?: { observed_at: number; status: "ready" | "refreshing" | "failed"; error: string | null };
   github: { open?: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; pulls: OpenPullRequest[] }; status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
   branch_rows: ProjectBranchRow[] | null;
+  branch_commits: Record<string, ProjectBranchCommit> | null;
   branch_connections: ProjectBranchConnections | null;
   id: string;
   name: string;

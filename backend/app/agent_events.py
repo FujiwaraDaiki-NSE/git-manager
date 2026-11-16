@@ -77,6 +77,15 @@ def task_key(project_id: str, branch: str) -> str:
     return f"{project_id}\x1f{branch}"
 
 
+class AgentDecision(BaseModel):
+    """Explicit question, choices, and references supplied by the agent."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    question: str
+    options: list[str]
+    links: list[str]
+
+
 class AgentEventRequest(BaseModel):
     """The wire contract accepted by REST and MCP report_agent_status."""
 
@@ -95,6 +104,8 @@ class AgentEventRequest(BaseModel):
     outcome: Outcome | None = Field(None, description="Explicit outcome, or null to clear it")
     summary: str | None = Field(None, description="Explicit latest summary, or null to clear it")
 
+    decision: AgentDecision | None = Field(None, description="Structured decision request; null means none")
+
     @field_validator("worktree")
     @classmethod
     def absolute_worktree(cls, value: str) -> str:
@@ -111,7 +122,7 @@ class AgentEventRequest(BaseModel):
 
     @model_validator(mode="after")
     def compatible_fields(self) -> "AgentEventRequest":
-        semantic = {"phase", "attention", "outcome", "summary"}
+        semantic = {"phase", "attention", "outcome", "summary", "decision"}
         supplied = self.model_fields_set
         if self.kind == "lifecycle":
             if self.action is None:
@@ -216,7 +227,8 @@ def _status_from_row(row: Mapping[str, Any]) -> str | None:
 def _row(row: sqlite3.Row) -> dict[str, Any]:
     data = dict(row)
     data["status"] = _status_from_row(data)
-    data.pop("payload", None)
+    payload = json.loads(data.pop("payload"))
+    data["decision"] = payload.get("decision")
     return data
 
 
@@ -249,6 +261,7 @@ def event_snapshot(row: Mapping[str, Any]) -> dict[str, Any]:
         "attention": row.get("attention") if row.get("kind") == "status" else None,
         "outcome": row.get("outcome") if row.get("kind") == "status" else None,
         "summary": row.get("summary") if row.get("kind") == "status" else None,
+        "decision": row.get("decision") if row.get("kind") == "status" else None,
         "status": status,
     }
 
@@ -289,6 +302,7 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
             event = _row(existing)
             try:
                 existing_payload = json.loads(existing["payload"])
+                existing_payload.setdefault("decision", None)
             except (TypeError, ValueError):
                 existing_payload = None
             if existing_payload != payload:
@@ -343,6 +357,7 @@ def append(request: AgentEventRequest, state: Mapping[str, Mapping[str, Any]]) -
         "attention": request.attention if request.kind == "status" else None,
         "outcome": request.outcome if request.kind == "status" else None,
         "summary": request.summary if request.kind == "status" else None,
+        "decision": payload["decision"] if request.kind == "status" else None,
     }
     # Caller publishes the SSE notification only after this function returns.
     return ReportAgentStatusResponse(
@@ -410,13 +425,13 @@ def projection(
     current: dict[str, Any] = {
         "task_id": None, "agent_id": None, "worktree": worktree, "project_id": None,
         "branch": None, "run_state": None, "phase": None, "attention": None,
-        "outcome": None, "summary": None, "occurred_at": None, "observed_at": None,
+        "outcome": None, "summary": None, "decision": None, "occurred_at": None, "observed_at": None,
         "event_id": None, "sequence": None,
     }
     for row in rows:
         current.update({"task_id": row["task_id"], "agent_id": row["agent_id"], "project_id": row["project_id"], "branch": row["branch"], "run_state": row["run_state"], "occurred_at": row["occurred_at"], "observed_at": row["observed_at"], "event_id": row["event_id"], "sequence": row["sequence"]})
         if row["kind"] == "status":
-            current.update({"phase": row["phase"], "attention": row["attention"], "outcome": row["outcome"], "summary": row["summary"]})
+            current.update({"phase": row["phase"], "attention": row["attention"], "outcome": row["outcome"], "summary": row["summary"], "decision": row["decision"]})
     return current
 
 

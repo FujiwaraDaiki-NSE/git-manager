@@ -1048,6 +1048,7 @@ def build(
         github_data=github_data,
         include_pairs=False,
     )
+    branch_commit_data = shared_branch_commits(branch_row_data)
     return {
         "id": project_id,
         "name": os.path.basename(project_id.rstrip("/")) or project_id,
@@ -1064,6 +1065,7 @@ def build(
         "lanes": lanes,
         "merge_relations": merge_relations,
         "branch_rows": branch_row_data,
+        "branch_commits": branch_commit_data,
         "branch_connections": branch_connections,
         "github": {key: value for key, value in github_data.items() if key != "pulls"},
         "events": events,
@@ -1141,22 +1143,24 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
         key=lambda commit: _iso_epoch(commit.get("date")),
         default=None,
     )
+    valid_rows = [row for row in rows if not row.get("error")]
+    git_status_failed = len(rows) - len(valid_rows)
     conflicts = sum(
         1
-        for row in rows
+        for row in valid_rows
         if any(
             isinstance(entry, dict)
             and entry.get("xy") in {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
             for entry in (row.get("entries") or [])
         )
     )
-    dirty = sum(1 for row in rows if isinstance(row.get("entries"), list) and row["entries"])
-    ahead = sum(1 for row in rows if isinstance(row.get("ahead"), int) and row["ahead"] > 0)
-    behind = sum(1 for row in rows if isinstance(row.get("behind"), int) and row["behind"] > 0)
+    dirty = sum(1 for row in valid_rows if isinstance(row.get("entries"), list) and row["entries"])
+    ahead = sum(1 for row in valid_rows if isinstance(row.get("ahead"), int) and row["ahead"] > 0)
+    behind = sum(1 for row in valid_rows if isinstance(row.get("behind"), int) and row["behind"] > 0)
     attention_row = next(
         (
             row
-            for row in rows
+            for row in valid_rows
             if any(
                 isinstance(entry, dict)
                 and entry.get("xy") in {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
@@ -1232,6 +1236,9 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
             "id": project_id,
             "name": os.path.basename(project_id.rstrip("/")) or project_id,
             "remote": main.get("remote"),
+            "remote_status": main.get("remote_status"),
+            "git_status_failed": git_status_failed,
+            "git_status_available": bool(valid_rows),
             "main_path": main.get("path"),
             "fetched_at": main.get("fetched_at"),
             "fetch_status": main.get("fetch_status"),
@@ -1265,3 +1272,14 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
             "agent_priority_counts": agent_priority_counts,
             "agent_state": agent_state,
     }
+
+
+def shared_branch_commits(rows: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Normalize response history bodies; internal analysis and pages stay unchanged."""
+    if rows is None:
+        return None
+    commits = {}
+    for row in rows:
+        for commit in row.pop("commits"):
+            commits[commit["hash"]] = commit
+    return commits

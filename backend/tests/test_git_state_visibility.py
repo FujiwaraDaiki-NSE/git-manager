@@ -257,3 +257,42 @@ def test_project_build_uses_one_destination_config_for_all_lanes(tmp_path, monke
     assert {lane['branch'] for lane in result['lanes']} == {'main', 'topic'}
     assert all(lane['destinations'] is not None for lane in result['lanes'])
     assert len(calls) == 1
+
+@pytest.mark.parametrize("failed,healthy", [(0, 1), (1, 0), (1, 1)])
+def test_summary_excludes_failed_git_status(tmp_path, failed, healthy):
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    rows = {}
+    for i in range(failed + healthy):
+        path = str(repo) if i == 0 else str(tmp_path / f"linked-{i}")
+        rows[path] = {
+            "path": path, "common_dir": str(repo), "is_worktree": i != 0,
+            "error": "git status failed" if i < failed else None,
+            "entries": [{"xy": "UU"}], "ahead": 2, "behind": 3,
+        }
+    summary = project.summary_rows(rows)[0]
+    assert summary["git_status_failed"] == failed
+    assert summary["git_status_available"] == bool(healthy)
+    for key in ("dirty", "conflict", "ahead", "behind"):
+        assert summary["git"][key] == healthy
+    if not healthy:
+        assert summary["next_lane"] is None
+
+
+def test_origin_status_distinguishes_missing_config_and_failures(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    assert gitinfo.collect(str(repo), fetch=False)["remote_status"] == "unset"
+    git(repo, "remote", "add", "other", "/tmp/other")
+    assert gitinfo.collect(str(repo), fetch=False)["remote_status"] == "unset"
+    git(repo, "remote", "add", "origin", "/tmp/origin")
+    result = gitinfo.collect(str(repo), fetch=False)
+    assert result["remote_status"] == "configured"
+    assert result["remote"] == "/tmp/origin"
+    monkeypatch.setattr(gitinfo, "_run_with_status", lambda *args: (None, None))
+    assert gitinfo.collect(str(repo), fetch=False)["remote_status"] == "failed"
+    original = gitinfo._run
+    monkeypatch.setattr(gitinfo, "_run", lambda repo, args, **kwargs: None if "status" in args else original(repo, args, **kwargs))
+    result = gitinfo.collect(str(repo), fetch=False)
+    assert result["error"]
+    assert result["remote_status"] == "failed"

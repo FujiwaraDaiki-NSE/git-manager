@@ -1,5 +1,6 @@
 "use client";
 
+import { resolveBranchCommits } from "./branch-commits.mjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CopyButton from "./copy-button";
 import { uniqueLocalForCommit } from "./project-flow.mjs";
@@ -46,9 +47,9 @@ function shortHash(value: string) {
   return value.slice(0, 8);
 }
 
-function metadataMap(row: ProjectBranchRow) {
+function metadataMap(project: ProjectResponse, row: ProjectBranchRow) {
   const result = new Map<string, ProjectBranchCommit>();
-  row.commits.forEach((commit) => result.set(commit.hash, commit));
+  resolveBranchCommits(project, row).forEach((commit) => result.set(commit.hash, commit));
   // Tip metadata is keyed by hash because the order of history_heads is not a
   // contract for metadata order.
   row.tip_commits.forEach((commit) => result.set(commit.hash, commit));
@@ -86,11 +87,10 @@ function commitEvent(
   };
 }
 
-function recordsForRow(project: ProjectResponse, row: ProjectBranchRow): HistoryRecord[] {
-  const metadata = metadataMap(row);
+function recordsForRow(project: ProjectResponse, row: ProjectBranchRow, commits: ProjectBranchCommit[]): HistoryRecord[] {
+  const metadata = new Map([...commits, ...row.tip_commits].map((commit) => [commit.hash, commit]));
   const hashes = Array.from(new Set([
     ...row.commit_hashes,
-    ...row.commits.map((commit) => commit.hash),
     ...row.tip_commits.map((commit) => commit.hash),
   ]));
   return hashes.map((hash) => {
@@ -170,7 +170,6 @@ export default function BranchHistoryExplorer({
       selectedRow.history_heads,
       [
         ...selectedRow.commit_hashes,
-        ...selectedRow.commits.map((commit) => commit.hash),
         ...selectedRow.tip_commits.map((commit) => commit.hash),
       ],
     );
@@ -193,10 +192,10 @@ export default function BranchHistoryExplorer({
 
   const records = useMemo(() => {
     if (!selectedRow) return [];
-    const initial = recordsForRow(project, selectedRow);
+    const initial = recordsForRow(project, selectedRow, resolveBranchCommits(project, selectedRow));
     const known = new Set(initial.map((commit) => commit.hash));
     const extras = extraCommits.filter((commit) => !known.has(commit.hash));
-    return [...initial, ...recordsForRow(project, { ...selectedRow, commits: extras, commit_hashes: extras.map((commit) => commit.hash), tip_commits: [] })];
+    return [...initial, ...recordsForRow(project, { ...selectedRow, commit_hashes: extras.map((commit) => commit.hash), tip_commits: [] }, extras)];
   }, [extraCommits, project, selectedRow]);
 
   const dateRangeError = useMemo(() => historyDateRangeError(startDate, endDate), [endDate, startDate]);
@@ -268,7 +267,7 @@ export default function BranchHistoryExplorer({
     }
   }, [hasBuffered, historyOffset, loading, project.main_path, selectedIdentity, selectedRow]);
 
-  const selectedTips = selectedRow?.history_heads.map((hash) => ({ hash, metadata: selectedRow ? metadataMap(selectedRow).get(hash) ?? null : null })) ?? [];
+  const selectedTips = selectedRow?.history_heads.map((hash) => ({ hash, metadata: selectedRow ? metadataMap(project, selectedRow).get(hash) ?? null : null })) ?? [];
 
   return (
     <section className="branch-history-explorer" aria-labelledby="branch-history-explorer-title">

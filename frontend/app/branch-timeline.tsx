@@ -1,5 +1,6 @@
 "use client";
 
+import { resolveBranchCommits } from "./branch-commits.mjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, Dispatch, MutableRefObject, SetStateAction, ReactNode } from "react";
 import {
@@ -599,12 +600,12 @@ export default function BranchTimeline({
   const now = project.observed_at * 1000;
   const rowCommits = useMemo(() => new Map(rows.map((row) => {
     const loaded = history[row.id]?.commits ?? [];
-    const source = range === "current" ? row.tip_commits : [...row.commits, ...loaded];
+    const source = range === "current" ? row.tip_commits : [...resolveBranchCommits(project, row), ...loaded];
     const unique = new Map(source.map((commit) => [commit.hash, commit]));
     const cutoff = range === "24h" ? now - 86400000 : range === "7d" ? now - 604800000 : null;
     const commits = [...unique.values()].filter((commit) => range === "current" || cutoff === null || (eventDate(commit) ?? -Infinity) >= cutoff);
     return [row.id, commits] as const;
-  })), [history, now, range, rows]);
+  })), [history, now, range, rows, project]);
   // Keep all edges in memory.  The SVG only draws endpoints that are present
   // in the current row window; the relation panel remains the complete index
   // for hidden rows and deleted/ambiguous refs.

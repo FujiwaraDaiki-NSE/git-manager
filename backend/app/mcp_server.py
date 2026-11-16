@@ -55,6 +55,7 @@ def report_agent_status(
     worktree: Annotated[str, Field(description="Gitルートの絶対パス")],
     status: Annotated[agent_events.Status, Field(description="現在の作業状態")],
     summary: Annotated[str | None, Field(description="短い説明。不要ならnull")],
+    decision: Annotated[agent_events.AgentDecision | None, Field(description="判断依頼のquestion・options・links。依頼なしはnull")] = None,
 ) -> str:
     """作業開始時、工程変更時、ユーザーの確認待ちになった時、最終回答前にブランチの現在の作業状況を報告する。worktreeには実際に作業中のGitルートの絶対パス、statusには現在の状態、summaryには作業内容や必要な確認の短い説明（不要ならnull）を指定する。hooksは判断状態を報告しない。レビュー待ち・入力待ちは完了に置き換えない。"""
     state = _state_provider()
@@ -74,6 +75,7 @@ def report_agent_status(
         attention=fields["attention"],
         outcome=fields["outcome"],
         summary=summary,
+        decision=decision,
     )
     response = agent_events.append(request, append_state)
     if response.snapshot is None:

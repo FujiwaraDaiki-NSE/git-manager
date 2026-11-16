@@ -1,5 +1,7 @@
 "use client";
 
+import { AgentDecisionDetails } from "./agent-decision";
+import { resolveBranchCommits } from "./branch-commits.mjs";
 import { WorktreeOverlaps, CommitSearch, RecoveryCandidates, PatchEquivalence } from "./repository-investigations";
 import { snapshotAge } from "./agent-attention.mjs";
 import { FetchFacts, OperationFacts, DestinationFacts } from "./git-state-facts";
@@ -199,14 +201,15 @@ function agentElapsed(occurredAt: string | null | undefined) {
 function AgentFact({ task, branch }: { task: AgentTask | null | undefined; branch?: string | null }) {
   if (!task) return <span className="agent-unknown">agent報告なし</span>;
   return (
-    <span className="agent-fact">
+    <div className="agent-fact">
+      <AgentDecisionDetails decision={task.decision} />
       <strong title={agentTaskState(task) === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined}>{agentStateLabel(agentTaskState(task))}</strong>
       <span>{branch || task.branch || "ブランチ未取得"}</span>
       <span>{task.phase ? agentStateLabel(task.phase) : "工程未取得"}</span>
       <span>{task.summary || "報告内容なし"}</span>
       <time dateTime={task.occurred_at ?? undefined}>{agentElapsed(task.occurred_at)}</time>
       {task.attention && task.attention !== task.status && <em>{agentStateLabel(task.attention)}</em>}
-    </span>
+    </div>
   );
 }
 
@@ -655,7 +658,7 @@ function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectRes
         <InfoField label="テストコマンド" value={project.test_commands ? project.test_commands.join(" / ") : null} />
         <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
-      <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent報告なし</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
+      <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent報告なし</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><AgentDecisionDetails decision={task.decision} /><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
       <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
       <WorktreeExplorer project={project} onOpenGit={onOpenGit} onSelectLane={onSelectLane} />
       <PrExplorer project={project} />
@@ -1094,7 +1097,7 @@ export default function ProjectControl() {
       ? branch.locals.find((item) => item.id === selectedLane) ?? null
       : project.lanes.find((item) => item.id === selectedLane) ?? null;
     const metadata = branch?.tip_commits.find((item) => item.hash === selectedHash)
-      ?? branch?.commits.find((item) => item.hash === selectedHash)
+      ?? (branch ? resolveBranchCommits(project, branch).find((item) => item.hash === selectedHash) : undefined)
       ?? null;
     return event || branch ? commitEventForBranch(project, selectedHash, branch?.name ?? lane?.branch ?? null, lane, metadata) : null;
   }, [project, selectedHash, selectedLane, urlState.branchRow]);

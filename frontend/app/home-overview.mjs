@@ -214,6 +214,7 @@ export function isDormantProject(project, acknowledgements, now) {
   const date = project.latest_event?.date;
   if (typeof date !== "string" || !Number.isFinite(Date.parse(date))
     || now - Date.parse(date) < 30 * 86400000) return false;
+  if (project.git_status_failed !== 0 || project.fetch_status?.result === "failure") return false;
   if (!["dirty", "conflict", "ahead"].every((key) => project.git?.[key] === 0)) return false;
   // The API publishes this exact combination when no agent has reported.
   // Missing fields remain unknown rather than an empty report history.

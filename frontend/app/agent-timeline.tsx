@@ -1,5 +1,7 @@
 "use client";
 
+import { AgentDecisionDetails } from "./agent-decision";
+
 import CopyButton from "./copy-button";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ACKNOWLEDGEMENTS_STORAGE_KEY, agentWorktreeCommand, isAcknowledged, parseAcknowledgements, reportIdentity, updateAcknowledgements } from "./agent-acknowledgements.mjs";
@@ -156,6 +158,7 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
   const canAcknowledge = reportKey !== null && reportIdentity(task) !== null;
   return (
     <li className={`agent-timeline-current-row status-${statusClass(agentTaskState(task))}${decision ? ` report-age-${freshness}` : ""}`}>
+      <AgentDecisionDetails decision={task.decision} />
       <ProjectBranch project={project} projectId={projectId} branch={task.branch}>
         <span className="agent-timeline-row-head"><strong>{projectLabel(project, projectId)}</strong><span>{branchLabel(task.branch)}</span></span>
         <span className="agent-timeline-status-line"><span title={agentTaskState(task) === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{currentStatus(task)}</span>{task.attention && <span className="agent-timeline-attention">注意: {agentStateLabel(task.attention)}</span>}</span>

@@ -284,7 +284,7 @@ def test_fastmcp_compact_status_persists_and_publishes(
     tools = asyncio.run(mcp_server.mcp.list_tools())
     assert [tool.name for tool in tools] == ["report_agent_status"]
     schema = tools[0].inputSchema
-    assert set(schema["properties"]) == {"worktree", "status", "summary"}
+    assert set(schema["properties"]) == {"worktree", "status", "summary", "decision"}
     assert set(schema["required"]) == {"worktree", "status", "summary"}
     assert tools[0].outputSchema is None
     before = datetime.now(timezone.utc)
@@ -675,3 +675,39 @@ def test_history_sequence_cursors_and_legacy_unpaged_response(event_context):
     assert [row["event_id"] for row in get("/api/agent-events", {"limit": 2}).json()["events"]] == ["second", "late"]
     assert get("/api/agent-events", {"after_sequence": all_rows[-1]["sequence"]}).json()["events"] == []
     assert get("/api/agent-events", {"limit": 0}).status_code == 422
+
+
+def test_decision_roundtrip_clear_and_legacy_retry(event_context):
+    worktree, state = event_context
+    decision = {"question": "進めますか？", "options": ["進める", "見送る"], "links": ["https://example.com"]}
+    body = status_payload(worktree, decision=decision)
+    response = post("/api/agent-events", body)
+    assert response.status_code == 200
+    assert response.json()["snapshot"]["decision"] == decision
+    assert agent_events.events()[0]["decision"] == decision
+    assert next(iter(agent_events.snapshots(project_id=worktree, state=state).values()))["decision"] == decision
+    assert post("/api/agent-events", body).json()["idempotent"] is True
+    assert post("/api/agent-events", {**body, "decision": None}).status_code == 409
+    clear = status_payload(worktree, "clear", occurred_at=ts(2).isoformat(), decision=None)
+    assert post("/api/agent-events", clear).status_code == 200
+    assert agent_events.projection(worktree)["decision"] is None
+    assert next(iter(agent_events.snapshots(project_id=worktree, state=state).values()))["decision"] is None
+    legacy = status_payload(worktree, "legacy", occurred_at=ts(3).isoformat())
+    assert post("/api/agent-events", legacy).status_code == 200
+    with sqlite3.connect(agent_events.db_path()) as db:
+        payload = json.loads(db.execute("SELECT payload FROM agent_events WHERE event_id = 'legacy'").fetchone()[0])
+        del payload["decision"]
+        db.execute("UPDATE agent_events SET payload = ? WHERE event_id = 'legacy'", (json.dumps(payload),))
+    assert agent_events.events()[-1]["decision"] is None
+    assert post("/api/agent-events", legacy).json()["idempotent"] is True
+
+
+def test_mcp_decision_and_strict_contract(event_context, monkeypatch):
+    worktree, state = event_context
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    monkeypatch.setattr(mcp_server, "_event_publisher", lambda _: None)
+    decision = {"question": "確認してください", "options": [], "links": []}
+    asyncio.run(mcp_server.mcp.call_tool("report_agent_status", mcp_status_payload(worktree, decision=decision)))
+    assert agent_events.events()[0]["decision"] == decision
+    for invalid in [{"question": "質問"}, {**decision, "options": [1]}, {**decision, "extra": True}]:
+        assert post("/api/agent-events", status_payload(worktree, decision=invalid)).status_code == 422

@@ -57,6 +57,7 @@ agent APIは認証不要。GitHub PR情報にはホスト環境変数GH_TOKEN / 
 
 - `gitdash` の `report_agent_status` が利用可能な場合、Gitリポジトリでの作業開始時、工程変更時、ユーザーの確認が必要になった時、最終回答前に実際の状態を報告する。同じ状態・説明の繰り返し送信は不要。
 - `worktree` は実際に作業するGitルートの絶対パス、`status` は明示的な状態、`summary` は短い説明（不要なら `null`）。worktreeへ移動した後は、そのworktreeを指定する。
+- 判断依頼がある場合は `decision: {question, options, links}` に質問・選択肢・参照URLを指定する（選択肢・参照URLなしは空配列）。依頼なし・解除は `decision: null` とする。
 - 調査は `investigating`、実装は `implementing`、テストは `testing`、レビューは `reviewing`。回答・判断を待つ場合は `waiting_for_user`、作業を進められない場合は `blocked` とし、何を確認・解決すべきか説明する。
 - レビュー依頼は `review_required`、必要な確認が済んでマージ判断を待つ場合は `merge_ready`、依頼を完了した場合は `completed`、作業を中断する場合は `stopped`。最終回答するという理由だけで、レビュー待ち・入力待ちを完了に置き換えない。
 - 同じブランチを分担するサブエージェントの報告は親がまとめる。別ブランチで作業する場合は各担当がそのブランチを報告する。

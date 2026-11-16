@@ -11,7 +11,10 @@ export function createAttentionTracker() {
     const previous = current.get(key);
     if (previous && (previous.event_id === event.event_id || compareAgentEvents(event, previous) <= 0)) return false;
     current.set(key, event);
-    return previous?.status !== event.status && (event.status === 'waiting_for_user' || event.status === 'blocked');
+    const statusChanged = previous?.status !== event.status;
+    const questionChanged = previous !== undefined && event.decision != null && previous.decision?.question !== event.decision.question;
+    return (statusChanged && (event.status === 'waiting_for_user' || event.status === 'blocked'))
+      || (event.status === 'waiting_for_user' && questionChanged);
   };
 }
 

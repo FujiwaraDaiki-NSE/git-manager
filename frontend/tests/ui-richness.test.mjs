@@ -42,3 +42,9 @@ test('scroll shadows indicate only the remaining direction', () => {
  assert.deepEqual(scrollEdges(100,100,200),{left:true,right:false});
  assert.deepEqual(scrollEdges(0,200,200),{left:false,right:false});
 });
+
+test('remoteの状態をnullから推測しない', () => {
+ assert.equal(remoteLabel(null, 'unset'), 'origin未設定');
+ assert.equal(remoteLabel(null, 'failed'), 'リモート取得失敗');
+ assert.equal(remoteLabel(null, null), 'リモート未取得');
+});

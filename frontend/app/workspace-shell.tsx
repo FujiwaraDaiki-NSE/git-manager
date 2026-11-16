@@ -1,8 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
-import { currentAgentTasks } from "./agent-timeline-tools.mjs";
-import { agentTaskState } from "./agent-overview.mjs";
+import { workspaceAttention } from "./home-next-check.mjs";
 import { CodeSizeControl, PaneSeparator, paneStyle, usePaneWidth } from "./ui-preferences";
 import FaviconBadge from "./favicon-badge";
 import { aggregateAgentCounts } from "./home-overview.mjs";
@@ -25,11 +24,7 @@ function WorkspaceContent({ children }: { children: ReactNode }) {
     catch { setStorageIssue(true); }
   };
   const waitingCount = useMemo(() => aggregateAgentCounts(projectSummaries).waiting_for_user, [projectSummaries]);
-  const tasks = currentAgentTasks(projectSummaries);
-  const waiting = tasks.filter(({ task }) => agentTaskState(task) === "waiting_for_user").length;
-  const blocked = tasks.filter(({ task }) => agentTaskState(task) === "blocked").length;
-  const unknown = agentDataLoading || agentDataError !== null || projectSummaries.some((project) => project.agent_tasks === null);
-  const attention = `全プロジェクトの報告（確認済みを含む）：入力待ち ${waiting}件 · 問題あり ${blocked}件${unknown ? " · 一部未取得" : ""}`;
+  const attention = workspaceAttention(projectSummaries, agentDataLoading, agentDataError);
   return <div style={paneStyle("--agent-sidebar-width", sidebarWidth)} className={`workspace-agent-layout${collapsed ? " is-sidebar-collapsed" : ""}`}>
     <Suspense fallback={null}><FaviconBadge waiting={waitingCount} /></Suspense>
     <div className="agent-sidebar-controls"><CodeSizeControl />
