@@ -1,8 +1,12 @@
 import "./agent-decision.css";
 import type { AgentDecision } from "./types";
 
-export function AgentDecisionDetails({ decision }: { decision: AgentDecision | null | undefined }) {
+export function AgentDecisionDetails({ decision, compact }: { decision: AgentDecision | null | undefined; compact?: boolean }) {
   if (decision == null) return null;
+  if (compact) return <div className="agent-decision agent-decision-compact">
+    <strong title={decision.question}>{decision.question}</strong>
+    <span>選択肢 {decision.options.length}件</span>
+  </div>;
   return <div className="agent-decision">
     <strong>{decision.question}</strong>
     {decision.options.length > 0 && <ul>{decision.options.map((option, index) => <li key={index}>{option}</li>)}</ul>}

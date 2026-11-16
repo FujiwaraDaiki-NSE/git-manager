@@ -1,5 +1,6 @@
 "use client";
 import { nextAgentCheck } from "./home-next-check.mjs";
+import { AgentDecisionDetails } from "./agent-decision";
 import { remoteLabel } from "./remote-label.mjs";
 
 import { homeDocumentTitle } from "./agent-attention.mjs";
@@ -207,7 +208,7 @@ function ProjectCard({
         if (params && homeQuery) params.set("home", homeQuery);
         const nextHref = task ? (params ? `/project?${params}` : null) : workHref("all", branch);
         const label = branch === "(detached)" ? "HEAD切り離し（ブランチなし）" : branch;
-        return <div className="project-card-footer"><span>次に確認 {nextHref ? <Link href={nextHref} prefetch={false}><strong>{label}</strong><span aria-hidden="true"> →</span></Link> : <strong>{label}</strong>}{task && <span> · {task.status === "waiting_for_user" ? "agentが入力待ち" : "agentが問題を報告"}</span>}</span></div>;
+        return <div className="project-card-footer"><span>次に確認 {nextHref ? <Link href={nextHref} prefetch={false}><strong>{label}</strong><span aria-hidden="true"> →</span></Link> : <strong>{label}</strong>}{task && <span> · {task.status === "waiting_for_user" ? "agentが入力待ち" : "agentが問題を報告"}</span>}</span><AgentDecisionDetails decision={task?.decision} compact /></div>;
       })()}
       {project.fetch_status?.result === "failure" && <span className="fact fact-danger" role="status">⚠ fetch失敗</span>}
       <details className="project-card-extra">
@@ -235,7 +236,7 @@ function SkeletonGrid() {
 
 export default function Page() {
   useProjectsLiveUpdates();
-  const { scanning, fetching, connected, projectSummaries: projects, projectsLoading: loading, projectsError: error, refreshProjects } = useRepoStream();
+  const { scanning, fetching, connected, projectSummaries: projects, projectsLoading: loading, projectsCachedAt, projectsError: error, refreshProjects } = useRepoStream();
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
   const [deferredOrder, setDeferredOrder] = useState<string[] | null>(null);
   const [interactionId, setInteractionId] = useState<string | null>(null);
@@ -367,9 +368,9 @@ export default function Page() {
   const visible = useMemo(() => invalidUrlParams.length > 0 ? [] : ordered.filter((project) => projectMatchesView(project, view, favorites) && (!view.hideDormant || !dormantIds.has(project.id))), [dormantIds, favorites, invalidUrlParams.length, ordered, view]);
   const totals = useMemo(() => aggregateAgentCounts(projects), [projects]);
   useEffect(() => {
-    document.title = homeDocumentTitle(totals.waiting_for_user);
+    document.title = `${projectsCachedAt === null ? "" : "前回取得 · "}${homeDocumentTitle(totals.waiting_for_user)}`;
     return () => { document.title = "gitdash"; };
-  }, [totals.waiting_for_user]);
+  }, [totals.waiting_for_user, projectsCachedAt]);
   const unknownProjectTotal = useMemo(() => countProjectsWithUnknownAgentCounts(projects), [projects]);
   const gitTotals = useMemo(() => ({ conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0), dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0), lanes: projects.every((item) => item.lane_count !== null) ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0) : null }), [projects]);
   const hasActiveFilters = Boolean(view.query.trim() || view.agentFilter !== "all" || view.gitFilter !== "all" || view.favoritesOnly || view.hideDormant || invalidUrlParams.length);
@@ -446,6 +447,7 @@ export default function Page() {
       {invalidUrlParams.length === 0 && deferredOrder && view.sort === "priority" && <div className="order-update" role="status"><span>優先度の並び順に更新があります</span><button type="button" onClick={applyOrder}>並び順を更新</button></div>}
       {invalidUrlParams.length === 0 && <div className="home-results" role="status" aria-live="polite"><span>{loading && !projects.length ? "プロジェクトを読み込み中…" : `${visible.length} / ${projects.length} プロジェクトを表示中`}</span>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
       {invalidUrlParams.length === 0 && <WorkspaceExport projects={visible} view={view} disabled={loading || error !== null} />}
+      {projectsCachedAt !== null && <div className="home-state" role="status"><strong>前回取得したデータを表示中（{Math.max(0, Math.floor((Date.now() - projectsCachedAt) / 60000))}分前）{loading ? "・最新を取得中…" : ""}</strong><span>一覧・件数・タブタイトルは前回取得時点の情報です。ファビコンの入力待ち件数は最新取得まで表示しません。</span></div>}
       {invalidUrlParams.length === 0 && loading && projects.length === 0 && <SkeletonGrid />}
       {error && <div className="home-state home-state-error" role="alert"><strong>{projects.length ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
       {invalidUrlParams.length === 0 && !loading && !error && visible.length === 0 && <div className="home-state home-empty"><h3>該当するプロジェクトがありません</h3><p>{hasActiveFilters ? "現在の条件に一致するプロジェクトはありません。条件をリセットして一覧を確認できます。" : "登録されたプロジェクトはありません。"}</p>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}

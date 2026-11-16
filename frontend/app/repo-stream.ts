@@ -4,6 +4,7 @@ import { createContext, createElement, useCallback, useContext, useEffect, useRe
 import { createAttentionTracker } from "./agent-attention.mjs";
 import { mergeAgentSnapshot } from "./agent-overview.mjs";
 import { applyBufferedAgentEvents, mergeAgentEvents } from "./agent-timeline-tools.mjs";
+import { readProjectsCache, saveProjectsCache } from "./projects-cache.mjs";
 import type { AgentEvent, AgentEventEnvelope, ProjectSummary, Repo } from "./types";
 
 export type RepoStreamState = {
@@ -19,6 +20,7 @@ export type RepoStreamState = {
   agentDataLoading: boolean;
   agentDataError: string | null;
   projectsLoading: boolean;
+  projectsCachedAt: number | null;
   projectsError: string | null;
   refreshProjects: () => void;
   subscribeProjectsLiveUpdates: () => () => void;
@@ -64,6 +66,7 @@ function useRepoStreamState(): RepoStreamState {
   const [agentDataLoading, setAgentDataLoading] = useState(true);
   const [agentDataError, setAgentDataError] = useState<string | null>(null);
 
+  const [projectsCachedAt, setProjectsCachedAt] = useState<number | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [historyHasMore, setHistoryHasMore] = useState(false);
@@ -86,6 +89,14 @@ function useRepoStreamState(): RepoStreamState {
   useEffect(() => {
     let disposed = false;
     let projectsInitialized = false;
+    // Read after hydration so server and initial client output agree.
+    try {
+      const cached = readProjectsCache(window.localStorage);
+      if (cached !== null) {
+        setProjectSummaries(cached.response.projects);
+        setProjectsCachedAt(cached.savedAt);
+      }
+    } catch { /* Accessing localStorage itself can be denied. */ }
     const observeAttention = createAttentionTracker();
     let opened = false;
     let scanActive = false;
@@ -140,6 +151,8 @@ function useRepoStreamState(): RepoStreamState {
           for (const project of projects) project.agent_tasks?.forEach(observeAttention);
           projectsInitialized = true;
           setProjectSummaries(projects);
+          setProjectsCachedAt(null);
+          try { saveProjectsCache(window.localStorage, value, Date.now()); } catch { /* Storage access denied. */ }
           setProjectsError(null);
         }).catch((reason: unknown) => {
           if (!disposed && !controller.signal.aborted) setProjectsError(message(reason));
@@ -295,7 +308,7 @@ function useRepoStreamState(): RepoStreamState {
     };
   }, []);
 
-  return { subscribeAgentAttention, subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsError, refreshProjects, loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
+  return { subscribeAgentAttention, subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsCachedAt, projectsError, refreshProjects, loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
 }
 
 const RepoStreamContext = createContext<RepoStreamState | null>(null);

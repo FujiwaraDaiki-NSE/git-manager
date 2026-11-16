@@ -3,11 +3,12 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import * as cache from "../app/projects-cache.mjs";
 import * as attention from "../app/agent-attention.mjs";
 import * as overview from "../app/agent-overview.mjs";
 import * as timeline from "../app/agent-timeline-tools.mjs";
 
-function createStream() {
+function createStream(storage) {
   const requests = [];
   const updates = [];
   const effects = [];
@@ -43,7 +44,8 @@ function createStream() {
   const exports = {};
   vm.runInNewContext(code, {
     exports,
-    require: (name) => name === "react" ? react : name.includes("agent-overview") ? overview : name.includes("agent-attention") ? attention : timeline,
+    require: (name) => name === "react" ? react : name.includes("projects-cache") ? cache : name.includes("agent-overview") ? overview : name.includes("agent-attention") ? attention : timeline,
+    window: { localStorage: storage },
     EventSource, AbortController, URLSearchParams,
     setTimeout: (callback) => { timers.push(callback); return callback; },
     clearTimeout: (callback) => { const index = timers.indexOf(callback); if (index >= 0) timers.splice(index, 1); },
@@ -169,5 +171,22 @@ test("attention subscribes only to new live transitions after initial snapshots 
   unsubscribe();
   stream.emit("agent_event", event(7, "waiting_for_user"));
   assert.equal(notices.length, 3);
+  cleanup();
+});
+
+
+test("cached projects render before requests complete, survive failure and are replaced and saved on retry", async () => {
+  let raw = JSON.stringify({ version: cache.PROJECTS_CACHE_VERSION, savedAt: 1234, response: { projects: [{ id: "cached", agent_tasks: [] }] } });
+  const { requests, current, updates, cleanup } = createStream({ getItem: () => raw, setItem: (_key, value) => { raw = value; } });
+  assert.ok(updates.some((value) => Array.isArray(value) && value[0]?.id === "cached"));
+  assert.ok(updates.includes(1234));
+  requests[0].reject(new Error("offline"));
+  await new Promise(setImmediate);
+  assert.equal(JSON.parse(raw).response.projects[0].id, "cached");
+  current.refreshProjects();
+  requests[1].resolve({ ok: true, json: async () => ({ projects: [{ id: "fresh", agent_tasks: [] }] }) });
+  await new Promise(setImmediate);
+  assert.ok(updates.some((value) => Array.isArray(value) && value[0]?.id === "fresh"));
+  assert.equal(JSON.parse(raw).response.projects[0].id, "fresh");
   cleanup();
 });

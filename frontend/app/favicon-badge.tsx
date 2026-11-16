@@ -1,9 +1,11 @@
 "use client";
 
+import { useRepoStream } from "./repo-stream";
 import { useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 export default function FaviconBadge({ waiting }: { waiting: number | null }) {
+  const { projectsCachedAt } = useRepoStream();
   const pathname = usePathname();
   const projectPath = useSearchParams().get("path");
   useEffect(() => {
@@ -12,7 +14,7 @@ export default function FaviconBadge({ waiting }: { waiting: number | null }) {
     const originalHref = icon.href;
     const originalType = icon.type;
     let disposed = false;
-    if (waiting !== null && waiting > 0) {
+    if (projectsCachedAt === null && waiting !== null && waiting > 0) {
       const image = new Image();
       image.onload = () => {
         if (disposed) return;
@@ -49,6 +51,6 @@ export default function FaviconBadge({ waiting }: { waiting: number | null }) {
       icon.href = originalHref;
       icon.type = originalType;
     };
-  }, [waiting, pathname, projectPath]);
+  }, [waiting, pathname, projectPath, projectsCachedAt]);
   return null;
 }

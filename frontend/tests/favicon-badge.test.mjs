@@ -11,11 +11,12 @@ test('favicon shows the supplied waiting count, restores the base at zero and re
   const icon = { href: '/favicon.svg', type: 'image/svg+xml' };
   const images = [], labels = [];
   let effect;
+  let projectsCachedAt = null;
   const context = { drawImage() {}, beginPath() {}, roundRect() {}, fill() {}, measureText: () => ({ width: 10 }), fillText: label => labels.push(label) };
   const exports = {};
   vm.runInNewContext(code, {
     exports,
-    require: name => name === "react" ? { useEffect: callback => { effect = callback; } } : { usePathname: () => "/", useSearchParams: () => ({ get: () => null }) },
+    require: name => name === "react" ? { useEffect: callback => { effect = callback; } } : name === "./repo-stream" ? { useRepoStream: () => ({ projectsCachedAt }) } : { usePathname: () => "/", useSearchParams: () => ({ get: () => null }) },
     document: { querySelector: () => icon, createElement: () => ({ getContext: () => context, toDataURL: () => `data:image/png;${labels.at(-1)}` }) },
     Image: class { constructor() { images.push(this); } },
   });
@@ -37,4 +38,9 @@ test('favicon shows the supplied waiting count, restores the base at zero and re
   cleanupTwelve();
   assert.equal(icon.href, '/favicon.svg');
   assert.equal(icon.type, 'image/svg+xml');
+  projectsCachedAt = 1234;
+  exports.default({ waiting: 7 });
+  effect();
+  assert.equal(images.length, 2);
+  assert.equal(icon.href, '/favicon.svg');
 });

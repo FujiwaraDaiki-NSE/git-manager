@@ -7,3 +7,9 @@
 .agent-decision ul { margin: 6px 0; padding-left: 20px; }
 .agent-decision a { text-decoration: underline; }
 .related-agent-task > .agent-decision { grid-column: 1 / -1; }
+.agent-decision-compact > strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
