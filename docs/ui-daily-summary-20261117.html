@@ -1,0 +1,25 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-17</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>agentの判断依頼の構造化、Git状態の正確な集計、表示の高速化 — 2026-11-17</h1>
+<p>agentが「何を判断してほしいか」を質問・選択肢・参照URLとして報告できるようにし、ホームカードとタイムライン・詳細に表示しました。ホームの「次に確認」はagentが入力待ちのブランチを優先します。Git状態の取得失敗を「変更なし」と数えていた問題などを修正し、詳細APIの転送量とホームの初回表示を改善しました。</p>
+<p>開始時30点 + 検証済み加点30点 = <b>60点</b>（100点未達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+<table><thead><tr><th>No.</th><th>改善内容</th><th>分類・点数</th><th>検証根拠</th></tr></thead><tbody>
+<tr><td>1</td><td>agent報告に <code>decision: {question, options, links} | null</code> を追加（REST・MCP <code>report_agent_status</code>）。タイムラインのカードとプロジェクト詳細で質問を先頭に、選択肢とリンク（http/httpsのみクリック可）を表示</td><td>機能 +5</td><td>実報告で表示を確認。<code>javascript:</code> はリンクにならない。<code>decision: null</code> の後続報告で表示が消える</td></tr>
+<tr><td>2</td><td>ホームカードの「次に確認」が、未確認の入力待ち・問題ありagentブランチを優先し、そのブランチを選択した詳細へリンク</td><td>機能 +5</td><td>design_db: <code>fix/agent-aggregate-result-guidance · agentが入力待ち</code>、リンク先で対象ブランチが選択される</td></tr>
+<tr><td>3</td><td>ホームカードの「次に確認」の下に判断依頼の質問（2行で省略、全文はtitle）と選択肢数を表示</td><td>機能 +5</td><td>git-managerに一時的な入力待ちを報告して表示を確認後、解除して元の表示に戻ることを確認</td></tr>
+<tr><td>4</td><td><code>/api/project</code> のコミット本文をハッシュ単位の <code>branch_commits</code> に共有し、行は <code>commit_hashes</code> で参照</td><td>高速化 +5</td><td>design_db 実測: 14.6MB → 6.2MB、ブラウザのJSON解析 21–25ms → 6–8ms。取得時間は約550 → 約520ms（小幅）</td></tr>
+<tr><td>5</td><td>前回取得した一覧をlocalStorageに保存し、次回は即座に描画（「前回取得したデータを表示中（N分前）・最新を取得中…」を明示、ファビコン件数は最新取得まで非表示）</td><td>高速化 +5</td><td>最初のカード描画 約1,000ms → 54–70ms（8回）。最新データへの置き換えは従来どおり約1.0秒</td></tr>
+<tr><td>6</td><td>上部バーが読込中に「入力待ち 0件」と表示 → 「取得中…」</td><td>バグ +1</td><td>初回読込中の表示を確認</td></tr>
+<tr><td>7</td><td>上部バーが報告0件のプロジェクト（<code>agent_tasks: null</code>）を未取得扱いし、常に「一部未取得」と表示</td><td>バグ +1</td><td>取得完了後「入力待ち 7件 · 問題あり 1件」のみ</td></tr>
+<tr><td>8</td><td><code>git status</code> 失敗のworktreeを変更なし・ahead/behind 0として集計 → 集計から除外し「Git状態の取得失敗 N件」を表示</td><td>バグ +1</td><td>実データで26 worktreeが失敗。3プロジェクトに19/4/3件を表示</td></tr>
+<tr><td>9</td><td>休眠フィルターがfetch失敗・Git状態取得失敗のプロジェクトも隠していた</td><td>バグ +1</td><td>非表示 28件 → 22件（fetch失敗5件・取得失敗1件が表示される）</td></tr>
+<tr><td>10</td><td>remoteの一律「リモート未取得」を、明示的な <code>remote_status</code> により「origin未設定」「リモート取得失敗」に区別</td><td>文言 +1</td><td>25プロジェクトが「origin未設定」</td></tr>
+</tbody></table>
+<h2>加点しなかったもの</h2>
+<ul>
+<li>入力待ちのまま質問が変わった場合のデスクトップ通知：単体テストのみ（組み込みブラウザでは通知許可を確認できない）。</li>
+<li><code>/api/projects</code> 高速化：603 checkoutの合成フィクスチャで内訳を計測（rev-list 495回が最大）したが、10%以上の改善案がなく変更なし。本番で観測した summary_rows 約0.6秒とエンドポイント約0.95秒の差は再現せず未解明。</li>
+<li>休眠判定に behind を含める案：更新されないOSSのクローンが常に behind になり、フィルターの意味がなくなるため不採用。</li>
+</ul>
+<h2>確認</h2>
+<p>frontend 417件成功、backend 400件成功（既存のStarlette警告1件）、TypeScript・本番ビルド成功、Codexレビュー指摘なし（2回）。Claude組み込みブラウザで実データを確認。<code>gitdash-compose up -d --build</code> で反映済み。アクセス先 http://localhost:4412</p>
+</html>
