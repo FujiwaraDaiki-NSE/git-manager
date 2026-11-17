@@ -849,8 +849,7 @@ def test_unborn_branch_is_not_reported_as_detached(tmp_path: Path) -> None:
     assert not created["lanes"][0].get("unborn", False)
 
 
-def test_summary_parallel_comparisons_match_serial_and_read_changed_refs(tmp_path: Path, monkeypatch) -> None:
-    from concurrent.futures import ThreadPoolExecutor
+def test_summary_batched_comparisons_match_individual_and_read_changed_refs(tmp_path: Path, monkeypatch) -> None:
     from app import agent_events
 
     repo = tmp_path / "repo"
@@ -875,10 +874,11 @@ def test_summary_parallel_comparisons_match_serial_and_read_changed_refs(tmp_pat
 
     def compare():
         actual = project.summary_rows(state)
-        # One worker executes every comparison serially in input order, as
-        # before the optimization; compare the entire ordered response.
+        # Compare the entire response against the original per-branch reader.
         with monkeypatch.context() as serial:
-            serial.setattr(project, "ThreadPoolExecutor", lambda **kwargs: ThreadPoolExecutor(max_workers=1))
+            serial.setattr(project, "_summary_counts", lambda repo, base, branches: [
+                project._count_against_default(repo, base, f"refs/heads/{branch}") for branch in branches
+            ])
             expected = project.summary_rows(state)
         assert actual == expected
         return actual
@@ -921,3 +921,34 @@ def test_summary_branch_count_matches_full_reader_after_ref_changes(tmp_path: Pa
     git(repo, "branch", "-D", "topic")
     assert compare() == 1
     assert detail.count_local_branches(str(tmp_path / "missing")) is None
+
+
+def test_summary_shared_walk_matches_git_for_merges_unrelated_and_shallow_history(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    git(repo, "branch", "base")
+    git(repo, "switch", "-qc", "side")
+    commit(repo, "side")
+    git(repo, "switch", "-q", "main")
+    commit(repo, "main")
+    git(repo, "merge", "--no-ff", "-qm", "merge", "side")
+    git(repo, "branch", "same")
+    git(repo, "switch", "--orphan", "unrelated")
+    commit(repo, "unrelated")
+    git(repo, "switch", "main")
+    branches = ["base", "side", "main", "same", "unrelated", "missing", "side"]
+
+    def compare(path):
+        expected = [project._count_against_default(str(path), "refs/heads/main", f"refs/heads/{branch}") for branch in branches]
+        assert project._summary_counts(str(path), "refs/heads/main", branches) == expected
+        assert project._summary_counts(str(path), "refs/heads/missing", branches) == [(None, None)] * len(branches)
+        assert project._summary_counts(str(path), "refs/heads/main", []) == []
+
+    compare(repo)
+    git(repo, "pack-refs", "--all", "--prune")
+    compare(repo)
+    shallow = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth=2", "--no-single-branch", repo.as_uri(), str(shallow)], check=True)
+    for branch in ["base", "side", "same", "unrelated"]:
+        git(shallow, "branch", branch, f"origin/{branch}")
+    compare(shallow)

@@ -1116,6 +1116,42 @@ def summary_rows(state: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]
     return summaries
 
 
+def _summary_counts(repo: str, default_ref: str, branches: list[str]) -> list[tuple[int | None, int | None]]:
+    """Walk shared history once, propagating a bit per requested tip."""
+    if not branches:
+        return []
+    refs = [default_ref, *(f"refs/heads/{branch}" for branch in branches)]
+    raw = gitinfo._run(repo, ["for-each-ref", "--format=%(refname)%09%(objectname)", *refs])
+    hashes = dict(line.split("\t") for line in raw.splitlines()) if raw is not None else {}
+    tips = [hashes.get(ref) for ref in refs]
+    if tips[0] is None:
+        return [(None, None)] * len(branches)
+    raw = gitinfo._run(repo, ["rev-list", "--topo-order", "--parents", *dict.fromkeys(tip for tip in tips if tip), "--"])
+    if raw is None:
+        return [(None, None)] * len(branches)
+    masks: dict[str, int] = {}
+    # Bit zero is the default; each other bit identifies one input branch.
+    for index, tip in enumerate(tips):
+        if tip is not None:
+            masks[tip] = masks.get(tip, 0) | (1 << index)
+    frequencies: dict[int, int] = {}
+    # Topological order visits all children before their parents, so each
+    # commit's mask is complete when counted. Discard processed frontier nodes.
+    for line in raw.splitlines():
+        commit, *parents = line.split()
+        mask = masks.pop(commit, 0)
+        frequencies[mask] = frequencies.get(mask, 0) + 1
+        for parent in parents:
+            masks[parent] = masks.get(parent, 0) | mask
+    result = []
+    for index, tip in enumerate(tips[1:], 1):
+        bit = 1 << index
+        ahead = sum(count for mask, count in frequencies.items() if mask & bit and not mask & 1)
+        behind = sum(count for mask, count in frequencies.items() if mask & 1 and not mask & bit)
+        result.append((ahead, behind) if tip is not None else (None, None))
+    return result
+
+
 def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     agent_snapshots = agent_events.snapshots(project_id=project_id, state=state)
     snapshot_values = list(agent_snapshots.values())
@@ -1199,13 +1235,7 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
                 if isinstance(row.get("branch"), str) and row["branch"]
                 and row["branch"] != default_branch
             ]
-            # Keep comparisons bounded (four projects × four Git readers).
-            # map retains row order, including the original tie-breaking order.
-            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="summary-count") as executor:
-                counts = list(executor.map(
-                    lambda branch: _count_against_default(repo, default_ref, f"refs/heads/{branch}"),
-                    branches,
-                ))
+            counts = _summary_counts(repo, default_ref, branches)
             for branch, (ahead_count, behind_count) in zip(branches, counts):
                 if ahead_count is None or behind_count is None:
                     continue

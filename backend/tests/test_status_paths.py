@@ -24,7 +24,10 @@ def test_status_preserves_unicode_whitespace_quotes_and_rename_paths(tmp_path):
     result = gitinfo._parse_status_v2(raw)
     assert result['branch'] == 'main'
     assert {entry['path'] for entry in result['entries']} == {*names, renamed}
-    assert next(entry for entry in result['entries'] if entry['path'] == renamed)['xy'] == 'R.'
+    assert next(entry for entry in result['entries'] if entry['path'] == renamed) == {
+        'xy': 'R.', 'path': renamed, 'original_path': old,
+    }
+    assert all(entry['original_path'] is None for entry in result['entries'] if entry['path'] != renamed)
     assert len(result['entries']) == len(names) + 1
 
 
@@ -40,7 +43,7 @@ def test_unmerged_unicode_path_retains_conflict_state(tmp_path):
     assert result.returncode == 1
     raw=gitinfo._run(str(repo),['status','--porcelain=v2','--branch','-z'])
     assert raw is not None
-    assert gitinfo._parse_status_v2(raw)['entries'] == [{'xy':'UU','path':name}]
+    assert gitinfo._parse_status_v2(raw)['entries'] == [{'xy':'UU','path':name,'original_path':None}]
 
 
 def test_collect_status_does_not_rewrite_the_index(tmp_path):
@@ -60,3 +63,18 @@ def test_collect_status_does_not_rewrite_the_index(tmp_path):
     result = gitinfo.collect(str(repo), fetch=False)
     assert result['entries'] == []
     assert index.read_bytes() == before
+
+
+def test_status_source_paths_are_explicit_and_preserved():
+    original = ' 元\tの\n名前.txt '
+    destination = ' 新\tしい\n名前.txt '
+    for code in ('R', 'C'):
+        raw = (f'2 {code}. N... 100644 100644 100644 abc def {code}100 {destination}\0'
+               f'{original}\0'
+               '1 .M N... 100644 100644 100644 abc def tracked.txt\0'
+               '? untracked.txt\0')
+        assert gitinfo._parse_status_v2(raw)['entries'] == [
+            {'xy': f'{code}.', 'path': destination, 'original_path': original},
+            {'xy': '.M', 'path': 'tracked.txt', 'original_path': None},
+            {'xy': '??', 'path': 'untracked.txt', 'original_path': None},
+        ]

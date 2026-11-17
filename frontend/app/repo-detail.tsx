@@ -1,4 +1,5 @@
 "use client";
+import { statusDiffStages, hasNoUncommittedChanges, responseErrorMessage } from "./repo-detail-tools.mjs";
 import { OperationFacts } from "./git-state-facts";
 
 import PatchView from "./patch-view";
@@ -55,7 +56,9 @@ type BranchSort = "name" | "date";
 type StatusFileFilter = "all" | "staged" | "unstaged" | "untracked" | "conflict";
 type StatusFileOrder = "asc" | "desc";
 
-const GRAPH_LIMIT = 200;
+const GRAPH_LIMIT_STEP = 200;
+// Keep in sync with backend/app/main.py MAX_GRAPH_LIMIT.
+const MAX_GRAPH_LIMIT = 2_000;
 const COMMIT_FETCH_DEBOUNCE_MS = 150;
 
 function shellQuote(value: string) {
@@ -63,8 +66,22 @@ function shellQuote(value: string) {
 }
 
 async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(url, { cache: "no-store", signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  let response: Response;
+  try {
+    response = await fetch(url, { cache: "no-store", signal });
+  } catch (reason) {
+    if (signal.aborted) throw reason;
+    throw new Error("通信に失敗しました。");
+  }
+  if (!response.ok) {
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      // JSON本文がない場合は、確認できたHTTPステータスを表示する。
+    }
+    throw new Error(responseErrorMessage(response.status, body));
+  }
   return (await response.json()) as T;
 }
 
@@ -116,8 +133,8 @@ function StatusBlock({ repo }: { repo: Repo }) {
           </span>
         ))}
       </div>
-      {badges.some((badge) => badge.token === "clean") && (
-        <div className="muted-line">nothing to commit, working tree clean</div>
+      {hasNoUncommittedChanges(repo) && (
+        <div className="muted-line">未コミットの変更なし</div>
       )}
     </div>
   );
@@ -212,19 +229,18 @@ function StatusPane({ repo }: { repo: Repo }) {
         <div className="status-file-filters" role="group" aria-label="変更ファイルの状態で絞り込み">{filters.map(({ key, label }) => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}<span>{entries.filter((entry) => fileStatusGroups(entry.xy)[key]).length}</span></button>)}</div>
         <div className="status-file-list">
           {visible.map((entry) => {
-            const groups = fileStatusGroups(entry.xy);
-            const rowStage: WorktreeDiffStage | null = groups.staged ? "staged" : groups.unstaged ? "unstaged" : null;
+            const rowStages = statusDiffStages(entry.xy, filter);
             return <div className="status-file-row" key={entry.xy + entry.path}>
               <code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code>
-              <code className="status-file-path">{entry.path}</code>
+              <code className="status-file-path">{entry.original_path !== null && <>{entry.original_path} → </>}{entry.path}</code>
               <span className="status-file-description">{fileStatusDescription(entry.xy)}</span>
               <span className="status-file-copy"><CopyButton value={entry.path} label={`${entry.path} のパスをコピー`} /></span>
-              {rowStage
-                ? <button className="status-file-diff-button" type="button" onClick={() => { setDiffStage(rowStage); setSelectedDiffFile(entry.path); }}>差分を表示</button>
+              {rowStages.length > 0
+                ? rowStages.map((stage) => <button key={stage} className="status-file-diff-button" type="button" onClick={() => { setDiffStage(stage); setSelectedDiffFile(entry.path); }}>{rowStages.length === 1 ? "差分を表示" : stage === "staged" ? "ステージ済み差分" : "未ステージ差分"}</button>)
                 : <span className="status-file-diff-excluded">差分対象外</span>}
             </div>;
           })}
-          {visible.length === 0 && <div className="status-file-empty">{entries.length === 0 ? "未コミットの変更はありません。" : "条件に一致する変更ファイルはありません。"}{hasFilters && <button className="subtle-button" type="button" onClick={clearFilters}>絞り込みを解除</button>}</div>}
+          {visible.length === 0 && <div className="status-file-empty">{hasNoUncommittedChanges(repo) ? "未コミットの変更なし" : "条件に一致する変更ファイルはありません。"}{hasFilters && <button className="subtle-button" type="button" onClick={clearFilters}>絞り込みを解除</button>}</div>}
         </div>
         {entries.length > 0 && <div className="status-file-diff-tools" aria-labelledby="status-file-diff-title">
           <div className="status-file-diff-heading">
@@ -302,7 +318,7 @@ function CommitPane({
           <button className="copy" type="button" onClick={onRetry}>
             再取得
           </button>
-          {error && <span className="sr-only">{error}</span>}
+          {error && <span>{error}</span>}
         </div>
       )}
       {state === "ready" && detail && (
@@ -437,7 +453,7 @@ function BranchesPane({
           <button className="copy" type="button" onClick={onRetry}>
             再取得
           </button>
-          {error && <span className="sr-only">{error}</span>}
+          {error && <span>{error}</span>}
         </div>
       )}
       {data && (
@@ -513,6 +529,7 @@ export default function RepoDetail({
   onTabChange,
 }: RepoDetailProps) {
   const [allRefs, setAllRefs] = useState(false);
+  const [graphLimit, setGraphLimit] = useState(GRAPH_LIMIT_STEP);
   const [graph, setGraph] = useState<GraphResponse | null>(null);
   const [graphState, setGraphState] = useState<LoadState>("idle");
   const [graphError, setGraphError] = useState<string | null>(null);
@@ -539,6 +556,7 @@ export default function RepoDetail({
 
   useEffect(() => {
     setGraph(null);
+    setGraphLimit(GRAPH_LIMIT_STEP);
   }, [repo.path, allRefs]);
 
   useEffect(() => {
@@ -550,7 +568,7 @@ export default function RepoDetail({
     setGraphState("loading");
     setGraphError(null);
     void getJson<GraphResponse>(
-      `/api/repo/graph?${apiQuery(repo.path, { all: String(allRefs), limit: String(GRAPH_LIMIT) })}`,
+      `/api/repo/graph?${apiQuery(repo.path, { all: String(allRefs), limit: String(graphLimit) })}`,
       controller.signal,
     )
       .then((value) => {
@@ -571,6 +589,7 @@ export default function RepoDetail({
     activeTab,
     allRefs,
     graphRetry,
+    graphLimit,
     repo.branch,
     repo.last_commit?.hash,
     repo.checked_at,
@@ -790,7 +809,7 @@ export default function RepoDetail({
               >
                 再取得
               </button>
-              {graphError && <span className="sr-only">{graphError}</span>}
+              {graphError && <span>{graphError}</span>}
             </div>
           )}
           {graph && (
@@ -809,9 +828,20 @@ export default function RepoDetail({
               ) : (
                 <div className="muted-line">コミットがありません</div>
               )}
-              {graph.truncated && (
+              {(graph.truncated || graph.rows.length >= MAX_GRAPH_LIMIT) && (
                 <div className="truncated" role="status">
-                  {GRAPH_LIMIT} 件まで表示しています。
+                  {graph.rows.length} 件まで表示しています。
+                  {graph.rows.length >= MAX_GRAPH_LIMIT ? (
+                    <span>表示上限の {MAX_GRAPH_LIMIT.toLocaleString()} 件に達しました。</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={graphState === "loading"}
+                      onClick={() => setGraphLimit(Math.min(graph.rows.length + GRAPH_LIMIT_STEP, MAX_GRAPH_LIMIT))}
+                    >
+                      さらに表示（+{Math.min(GRAPH_LIMIT_STEP, MAX_GRAPH_LIMIT - graph.rows.length)}件）
+                    </button>
+                  )}
                 </div>
               )}
             </>

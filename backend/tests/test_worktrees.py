@@ -709,3 +709,21 @@ def test_empty_git_dir_is_excluded_from_scan_and_cached_state(
     main.STATE.update(cached)
     asyncio.run(main._discover())
     assert set(main.STATE) == {str(nested)}
+
+
+def test_cached_entries_without_original_path_are_discarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old, new = tmp_path / "old", tmp_path / "new"
+    for path in (old, new):
+        path.mkdir()
+        git(path, "init", "-q", "-b", "main")
+    monkeypatch.setattr(main.paths, "to_container", lambda path: path)
+    base = {"common_dir": "x", "is_worktree": False, "worktree_state": None}
+    cached = {
+        str(old): {**base, "entries": [{"xy": "M.", "path": "a"}]},
+        str(new): {**base, "entries": [{"xy": "M.", "path": "a", "original_path": None}]},
+    }
+    monkeypatch.setattr(main.store, "load", lambda: cached)
+
+    assert set(main._load_cached_state()) == {str(new)}

@@ -966,6 +966,9 @@ def _load_cached_state() -> dict[str, dict[str, Any]]:
             continue
         if repo.get("worktree_state") not in {"ok", "prunable", "locked", None}:
             continue
+        # Status entries from before original_path existed are a stale schema.
+        if any(isinstance(entry, dict) and "original_path" not in entry for entry in repo.get("entries") or []):
+            continue
         if not (
             scanner.repo_layout(paths.to_container(host_path)) is not None
             or repo.get("worktree_state") in {"prunable", "locked"}

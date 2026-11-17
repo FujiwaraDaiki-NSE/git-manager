@@ -125,7 +125,7 @@ def _parse_status_v2(out: str) -> dict[str, Any]:
     upstream: str | None = None
     detached = False
     ahead = behind = 0
-    entries: list[dict[str, str]] = []
+    entries: list[dict[str, str | None]] = []
 
     records = iter(out.split("\0"))
     for line in records:
@@ -142,17 +142,16 @@ def _parse_status_v2(out: str) -> dict[str, Any]:
                     behind = int(token[1:])
         elif line.startswith("1 "):
             fields = line.split(" ", 8)
-            entries.append({"xy": fields[1], "path": fields[8]})
+            entries.append({"xy": fields[1], "path": fields[8], "original_path": None})
         elif line.startswith("2 "):
             fields = line.split(" ", 9)
             # In -z mode the destination is followed by a separate source record.
-            entries.append({"xy": fields[1], "path": fields[9]})
-            next(records, None)
+            entries.append({"xy": fields[1], "path": fields[9], "original_path": next(records, None)})
         elif line.startswith("u "):
             fields = line.split(" ", 10)
-            entries.append({"xy": fields[1], "path": fields[10]})
+            entries.append({"xy": fields[1], "path": fields[10], "original_path": None})
         elif line.startswith("? "):
-            entries.append({"xy": "??", "path": line[2:]})
+            entries.append({"xy": "??", "path": line[2:], "original_path": None})
 
     return {
         "branch": branch,

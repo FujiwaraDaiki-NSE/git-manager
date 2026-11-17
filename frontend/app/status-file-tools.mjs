@@ -69,7 +69,8 @@ export function listStatusFileExtensions(entries) {
 export function searchStatusFiles(entries, query) {
   const normalized = query.trim().toLocaleLowerCase();
   if (normalized.length === 0) return [...entries];
-  return entries.filter((entry) => entry.path.toLocaleLowerCase().includes(normalized));
+  return entries.filter((entry) => entry.path.toLocaleLowerCase().includes(normalized)
+    || (entry.original_path !== null && entry.original_path.toLocaleLowerCase().includes(normalized)));
 }
 
 export function filterStatusFilesByDirectory(entries, directory) {
@@ -133,7 +134,7 @@ function entryKind(entry) {
     return "unsupported";
   }
   if (entry.xy === "??") return "untracked";
-  // The API omits the source path, so a rename cannot be represented fully.
+  // Rename/copy diff commands remain excluded from this path-only command builder.
   if (/[RC]/.test(entry.xy)) return "unsupported";
   if (conflictCodes.has(entry.xy)) return "conflict";
   if (
@@ -165,8 +166,7 @@ function diffCommand(repoPath, mode, paths) {
 
 /**
  * Build independent, read-only diff commands for the visible tracked rows.
- * The backend exposes only the current path for a rename, so no source path
- * is guessed or synthesized here.
+ * Rename/copy rows remain excluded; source paths are used only for display and search.
  */
 export function buildStatusDiffCommands(repoPath, entries) {
   if (typeof repoPath !== "string" || repoPath.length === 0) {

@@ -22,7 +22,7 @@ const entries = [
   { xy: "MM", path: "src/.env.local" },
   { xy: "UU", path: "src/conflict.js" },
   { xy: "M.", path: "docs/read me.md" },
-];
+].map((entry) => ({ ...entry, original_path: null }));
 
 test("directory options use exact parent directories and keep root explicit", () => {
   assert.equal(statusFileDirectory("README"), STATUS_FILE_DIRECTORY_ROOT);
@@ -108,10 +108,21 @@ test("a directory named all does not collide with the all-directories option", (
   assert.deepEqual(filterStatusFilesByDirectory(rows, "/"), rows);
 });
 
-test("renames are excluded because their original paths are not published", () => {
+test("renames remain excluded from path-only diff commands", () => {
   const rows = [{xy: "R.", path: "renamed.ts"}, {xy: ".R", path: "other.ts"}, {xy: "C.", path: "copied.ts"}];
   const result = buildStatusDiffCommands("/repo", rows);
   assert.equal(result.staged, null);
   assert.equal(result.unstaged, null);
   assert.deepEqual(result.excluded.unsupported, rows);
+});
+
+test("rename and copy search matches original and destination without changing exports", () => {
+  for (const xy of ["R.", "C."]) {
+    const entry = { xy, path: "new/destination.txt", original_path: "old/元の名前.txt" };
+    assert.deepEqual(searchStatusFiles([entry], "OLD/元"), [entry]);
+    assert.deepEqual(searchStatusFiles([entry], "DESTINATION"), [entry]);
+    assert.deepEqual(searchStatusFiles([entry], "missing"), []);
+    assert.equal(statusFilesCsv([entry]), statusFilesCsv([{ ...entry, original_path: null }]));
+    assert.equal(buildStatusDiffCommands("/repo", [entry]).staged, null);
+  }
 });
