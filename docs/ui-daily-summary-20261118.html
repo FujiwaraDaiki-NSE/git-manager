@@ -1,0 +1,24 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-18</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>Git詳細の事実表示、ホーム集計の高速化と正確化 — 2026-11-18</h1>
+<p>Gitが返しているのに捨てていた情報（名前変更の元パス、APIのエラー理由）を表示し、200件で打ち切られていたコミットグラフを広げられるようにしました。ホームの <code>/api/projects</code> は約2倍速くなりました。作業一覧ではagent報告の内容でも検索できます。</p>
+<p>開始時30点 + 検証済み加点30点 = <b>60点</b>（100点未達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+<table><thead><tr><th>No.</th><th>改善内容</th><th>分類・点数</th><th>検証根拠</th></tr></thead><tbody>
+<tr><td>1</td><td><code>/api/projects</code>: worktreeブランチと既定ブランチの ahead/behind を、ブランチごとの <code>rev-list</code> からリポジトリごと1回の履歴走査（ブランチごとのビットマスク）に変更（480→35回）</td><td>高速化 +5</td><td>本番HTTP 0.95〜0.99s → 0.48〜0.50s（5回）。レスポンスはバイト一致（SHA-256一致）</td></tr>
+<tr><td>2</td><td>変更ファイル一覧で名前変更・コピーを「元 → 先」表示、元・先どちらでも検索可（APIに <code>original_path</code>、それ以外は <code>null</code>）</td><td>機能 +5</td><td>fixtureの <code>git mv</code>（日本語・空白パス）で表示と旧名検索を確認</td></tr>
+<tr><td>3</td><td>コミットグラフ「さらに表示（+200件）」。API上限2,000件まで全体を再取得し、取得中も現在のグラフと選択を維持</td><td>機能 +5</td><td>262コミットのfixtureで limit=200→400 の再取得、全件表示で省略表示が消えることを確認</td></tr>
+<tr><td>4</td><td>作業一覧の検索対象に、行に表示しているagent報告の要約と判断依頼の質問を追加</td><td>機能 +5</td><td>git-managerで報告文の語で検索して main が 1/45 件に絞られることを確認</td></tr>
+<tr><td>5</td><td>Git詳細の読み取りAPI失敗時に、backendの <code>detail</code>（なければHTTPステータス／通信失敗）を「再取得」の横に表示</td><td>リッチ +2</td><td>グラフAPIを502＋detailに差し替えて表示を確認</td></tr>
+<tr><td>6</td><td>ホームのGit集計で、取得失敗がある場合は「取得できた範囲で N 作業ディレクトリに変更 · Git状態の取得失敗 M件」と明示</td><td>リッチ +2</td><td>実データで「取得できた範囲で 101 … 取得失敗 26件」を確認</td></tr>
+<tr><td>7</td><td>作業一覧で、絞り込みが有効なときは常に「絞り込みをすべて解除」を表示（以前は0件時のみ）。検索だけ消すボタンは「検索をクリア」</td><td>リッチ +2</td><td>検索で1件にした状態から解除→45/45件、ボタンが消えることを確認</td></tr>
+<tr><td>8</td><td>「未ステージ」で絞った <code>MM</code> 行の差分ボタンがステージ済み差分を開いていた。絞り込み中の段階を開き、両段階に変更がある行は2ボタン</td><td>バグ +1</td><td>fixtureで未ステージ差分（<code>+unstaged</code>）が開くことを確認</td></tr>
+<tr><td>9</td><td>ahead/stash等のバッジがあると「未コミットの変更なし」が出なかった。変更0件・取得済みなら独立表示</td><td>バグ +1</td><td>fixtureで「ahead 1」と併記、取得中は非表示を確認</td></tr>
+<tr><td>10</td><td>作業一覧の列見出し「最終活動」→「最終コミット」（中身は最終コミット）</td><td>文言 +1</td><td>実画面で見出しを確認</td></tr>
+<tr><td>11</td><td>お気に入りの保存失敗が「読み込めません」と表示されていた。読み込み・形式・保存・削除の失敗を区別し、再設定ボタンを「保存データを削除してお気に入りを解除」に</td><td>文言 +1</td><td><code>setItem</code> を失敗させて保存失敗の文言を確認</td></tr>
+</tbody></table>
+<h2>加点しなかったもの</h2>
+<ul>
+<li>プロジェクト詳細の初回（コールド）表示の並列化: ハーネスでは 8.2s→6.3s だったが、本番の初回は約3.2sでほぼ変わらず（GitHub PR取得 約3s が律速）。効果を本番で確認できないため取り消し。</li>
+<li>旧形式のキャッシュ（<code>original_path</code> なし）を起動時に破棄する修正: 同日の自分の変更による不具合（Codexレビューで指摘）なので加点なし。</li>
+</ul>
+<h2>確認</h2>
+<p>backend 403 passed、frontend 422/422、tsc・next build 成功。Claude組み込みブラウザで実データと一時fixture（確認後に削除）を使ってGUI確認。<code>gitdash-compose up -d --build</code> で反映、http://localhost:4412。</p>
