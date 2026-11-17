@@ -67,3 +67,16 @@ test("work lanes sort attention before clean, and unknown dates after known date
   assert.deepEqual(sortWorkLanes(lanes, "name").map((lane) => lane.id), ["a", "b", "z"]);
   assert.deepEqual(lanes.map((lane) => lane.id), ["a", "z", "b"]);
 });
+
+test("lane search includes visible agent reports and tolerates null reports", () => {
+  const lane = { name: "main", branch: null, path: null, agent: {
+    summary: "APIの検証が完了",
+    decision: { question: "公開してよいですか", options: [], links: [] },
+    worktree: "/hidden/worktree",
+  } };
+  assert.equal(laneMatchesSearch(lane, normalizedSearchQuery("APIの検証")), true);
+  assert.equal(laneMatchesSearch(lane, "公開してよい"), true);
+  assert.equal(laneMatchesSearch(lane, "hidden/worktree"), false);
+  assert.equal(laneMatchesSearch({ ...lane, agent: null }, "検証"), false);
+  assert.equal(laneMatchesSearch({ ...lane, agent: { summary: null, decision: null } }, "公開"), false);
+});

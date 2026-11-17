@@ -8,7 +8,7 @@ export function normalizedSearchQuery(value) {
 
 export function laneMatchesSearch(lane, query) {
   if (!query) return true;
-  return [lane.name, lane.branch, lane.path].some((value) => includesSearchQuery(value, query));
+  return [lane.name, lane.branch, lane.path, lane.agent?.summary, lane.agent?.decision?.question].some((value) => includesSearchQuery(value, query));
 }
 
 export function activityMatchesSearch(event, query) {

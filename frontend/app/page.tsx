@@ -244,7 +244,7 @@ export default function Page() {
   const [invalidUrlParams, setInvalidUrlParams] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favoritesReady, setFavoritesReady] = useState(false);
-  const [favoritesStorageIssue, setFavoritesStorageIssue] = useState(false);
+  const [favoritesStorageIssue, setFavoritesStorageIssue] = useState<"read" | "format" | "write" | "reset" | null>(null);
   const gridRef = useRef<HTMLElement>(null);
   const [acknowledgements, setAcknowledgements] = useState<Acknowledgements | null>(null);
   useEffect(() => {
@@ -328,12 +328,12 @@ export default function Page() {
     try {
       raw = window.localStorage.getItem(FAVORITES_STORAGE_KEY);
     } catch {
-      setFavoritesStorageIssue(true);
+      setFavoritesStorageIssue("read");
       return;
     }
     const parsed = parseFavoriteIds(raw);
     if (parsed === null) {
-      setFavoritesStorageIssue(true);
+      setFavoritesStorageIssue("format");
       return;
     }
     setFavorites(new Set(parsed));
@@ -345,7 +345,7 @@ export default function Page() {
     try {
       window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify([...favorites].sort()));
     } catch {
-      setFavoritesStorageIssue(true);
+      setFavoritesStorageIssue("write");
       setFavoritesReady(false);
     }
   }, [favorites, favoritesReady, favoritesStorageIssue]);
@@ -372,7 +372,7 @@ export default function Page() {
     return () => { document.title = "gitdash"; };
   }, [totals.waiting_for_user, projectsCachedAt]);
   const unknownProjectTotal = useMemo(() => countProjectsWithUnknownAgentCounts(projects), [projects]);
-  const gitTotals = useMemo(() => ({ conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0), dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0), lanes: projects.every((item) => item.lane_count !== null) ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0) : null }), [projects]);
+  const gitTotals = useMemo(() => ({ conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0), dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0), failed: projects.reduce((sum, item) => sum + item.git_status_failed, 0), available: projects.some((item) => item.git_status_available), lanes: projects.every((item) => item.lane_count !== null) ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0) : null }), [projects]);
   const hasActiveFilters = Boolean(view.query.trim() || view.agentFilter !== "all" || view.gitFilter !== "all" || view.favoritesOnly || view.hideDormant || invalidUrlParams.length);
   const startInteraction = (id?: string) => setInteractionId(id || "grid");
   const finishInteraction = () => setInteractionId(null);
@@ -404,10 +404,10 @@ export default function Page() {
     try {
       window.localStorage.removeItem(FAVORITES_STORAGE_KEY);
       setFavorites(new Set());
-      setFavoritesStorageIssue(false);
+      setFavoritesStorageIssue(null);
       setFavoritesReady(true);
     } catch {
-      setFavoritesStorageIssue(true);
+      setFavoritesStorageIssue("reset");
     }
   };
   const retry = refreshProjects;
@@ -432,7 +432,7 @@ export default function Page() {
         <button type="button" aria-pressed={view.favoritesOnly} onClick={() => applyView({ favoritesOnly: !view.favoritesOnly })}>{view.favoritesOnly ? "★ お気に入りのみ" : "☆ お気に入り"}</button>
         <button type="button" aria-pressed={view.hideDormant} title="最新コミットが30日以上前で、変更・未push・未確認の判断待ち・実行中がないプロジェクト" onClick={() => applyView({ hideDormant: !view.hideDormant })}>休眠プロジェクトを隠す<span className="filter-count">{dormantIds.size}件{view.hideDormant ? "を非表示" : ""}</span></button>
         <div role="group" aria-label="カード密度"><button type="button" aria-pressed={view.density === "comfortable"} onClick={() => applyView({ density: "comfortable" })}>ゆったり</button><button type="button" aria-pressed={view.density === "compact"} onClick={() => applyView({ density: "compact" })}>コンパクト</button></div>
-        <span className="toolbar-note">{loading && !projects.length ? "Git件数を取得中…" : <>{gitTotals.lanes === null ? "ブランチ数は一部未取得" : `${gitTotals.lanes} ブランチ`} · {gitTotals.dirty} 作業ディレクトリに変更</>}</span>
+        <span className="toolbar-note">{loading && !projects.length ? "Git件数を取得中…" : <>{gitTotals.lanes === null ? "ブランチ数は一部未取得" : `${gitTotals.lanes} ブランチ`} · {gitTotals.failed === 0 ? `${gitTotals.dirty} 作業ディレクトリに変更` : `${gitTotals.available ? `取得できた範囲で ${gitTotals.dirty} 作業ディレクトリに変更` : "変更件数は未取得"} · Git状態の取得失敗 ${gitTotals.failed}件`}</>}</span>
       </section>}
       {hasActiveFilters && invalidUrlParams.length === 0 && <div className="active-filters" aria-label="選択中の検索条件">
         <span>絞り込み</span>
@@ -442,7 +442,7 @@ export default function Page() {
         {view.gitFilter !== "all" && <button type="button" onClick={() => applyView({ gitFilter: "all" })} aria-label="Gitの絞り込みを解除">{gitFilters.find((item) => item.key === view.gitFilter)?.label}<span aria-hidden="true">×</span></button>}
         {view.favoritesOnly && <button type="button" onClick={() => applyView({ favoritesOnly: false })} aria-label="お気に入りの絞り込みを解除">★ お気に入り<span aria-hidden="true">×</span></button>}
       </div>}
-      {favoritesStorageIssue && <div className="home-results" role="alert"><span>お気に入りの保存データを読み込めません。お気に入り機能を再設定できます。</span><button type="button" onClick={resetFavoriteStorage}>保存を再設定</button></div>}
+      {favoritesStorageIssue && <div className="home-results" role="alert"><span>{favoritesStorageIssue === "read" ? "お気に入りの保存データを読み込めません。" : favoritesStorageIssue === "format" ? "お気に入りの保存データの形式が正しくありません。" : favoritesStorageIssue === "write" ? "お気に入りの変更を保存できませんでした。この画面には反映されていますが、再読み込み後は失われる可能性があります。" : "お気に入りの保存データを削除できませんでした。"} 保存データを削除すると、この画面のお気に入りもすべて解除されます。</span><button type="button" onClick={resetFavoriteStorage}>保存データを削除してお気に入りを解除</button></div>}
       {invalidUrlParams.length > 0 && <div className="home-state home-state-error" role="alert"><span>URLの絞り込み条件を認識できませんでした: {invalidUrlParams.join("、")}</span><button type="button" onClick={resetView}>条件をリセット</button></div>}
       {invalidUrlParams.length === 0 && deferredOrder && view.sort === "priority" && <div className="order-update" role="status"><span>優先度の並び順に更新があります</span><button type="button" onClick={applyOrder}>並び順を更新</button></div>}
       {invalidUrlParams.length === 0 && <div className="home-results" role="status" aria-live="polite"><span>{loading && !projects.length ? "プロジェクトを読み込み中…" : `${visible.length} / ${projects.length} プロジェクトを表示中`}</span>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}

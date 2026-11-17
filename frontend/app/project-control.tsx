@@ -394,13 +394,14 @@ function WorkLanes({
       <div className="project-search-toolbar lane-explorer-tools" role="search" aria-label="作業レーンを検索・絞り込み">
         <label>
           <span>検索</span>
-          <input aria-label="作業レーンを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="ブランチ・パス・名前" />
+          <input aria-label="作業レーンを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="ブランチ・パス・名前・agent報告" />
         </label>
-        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>クリア</button>
+        <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>検索をクリア</button>
         <label><span>並び順</span><select aria-label="作業一覧の並び順" value={order} onChange={(event) => onOrder(event.target.value as LaneOrder)}><option value="name">名前</option><option value="attention">要確認順</option><option value="latest">最新コミット順</option></select></label>
         <label className="lane-explorer-author-filter"><span>最終コミット作成者（完全一致）</span><select aria-label="最終コミット作成者で絞り込み" value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)}><option value="">すべて</option>{authors.map((author) => <option key={author} value={encodeLaneAuthor(author)}>{author}</option>)}{includesUnknownAuthor && <option value={UNKNOWN_LANE_AUTHOR_FILTER}>作成者未取得</option>}</select></label>
         <div className="lane-explorer-actions">
           <span className="lane-explorer-status" role="status">{lanes.length} / {visibleLanes.length} 件</span>
+          {activeFilters && <button className="subtle-button" type="button" onClick={resetFilters}>絞り込みをすべて解除</button>}
           <button className="subtle-button" type="button" disabled={lanes.length === 0} onClick={exportCsv}>一致するレーンをCSV保存</button>
           {lanes.length > 0 && <CopyButton value={handoffSummary} label="一致する作業レーンの概要をコピー" />}
           {exportStatus && <span className="lane-explorer-status" role="status">{exportStatus}</span>}
@@ -411,7 +412,7 @@ function WorkLanes({
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
-            <tr><th scope="col">作業</th><th scope="col">Git状態 / ブランチ作業</th><th scope="col">最終活動</th><th scope="col">既定ブランチとの差</th><th scope="col">最新メッセージ</th><th scope="col">合流関係</th><th scope="col">次の工程 / 注意</th><th scope="col" aria-label="操作" /></tr>
+            <tr><th scope="col">作業</th><th scope="col">Git状態 / ブランチ作業</th><th scope="col">最終コミット</th><th scope="col">既定ブランチとの差</th><th scope="col">最新メッセージ</th><th scope="col">合流関係</th><th scope="col">次の工程 / 注意</th><th scope="col" aria-label="操作" /></tr>
           </thead>
           <tbody id="project-lane-results">
             {lanes.map((lane) => (
