@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import pytest
@@ -115,6 +116,14 @@ def test_routes_require_explicit_inputs_and_reject_unknown_repo(repo):
             assert client.get('/api/repo/patch-equivalence', params={'path': str(repo), 'left': 'main', 'right': 'main'}).json()['commits'] == []
             params = dict(path=str(repo), scope='--all', grep='', author='', since='', until='', file='', offset=0, tz_offset=540)
             assert len(client.get('/api/repo/commit-search', params=params).json()['commits']) == 1
+            for invalid in ('not-json', '{}', '[null]', '["main"]', '["--all"]', json.dumps(['f' * 40]), json.dumps([git(repo, 'rev-parse', 'HEAD:shared.txt')])):
+                response = client.get('/api/repo/commit-search', params={**params, 'fixed_shas': invalid})
+                assert response.status_code == 400, response.text
+            sha = git(repo, 'rev-parse', 'HEAD')
+            response = client.get('/api/repo/commit-search', params={**params, 'fixed_shas': json.dumps([sha])})
+            assert response.status_code == 200
+            assert response.json()['fixed_shas'] == [sha]
+
 
 
 def test_search_date_bounds_cover_whole_calendar_days(tmp_path):
@@ -128,3 +137,63 @@ def test_search_date_bounds_cover_whole_calendar_days(tmp_path):
     # 2026-01-02T15:30Z is 2026-01-03 00:30 in UTC+9, so it is outside Jan 2 in that zone.
     jst = investigation.search(str(repo), '--all', '', '', '2026-01-02', '2026-01-02', '', 0, 540)
     assert jst['commits'] == []
+
+
+@pytest.mark.parametrize("scope", ["--all", "main"])
+def test_search_snapshot_survives_ref_advance(repo, scope):
+    for i in range(52):
+        git(repo, 'commit', '--allow-empty', '-m', f'history {i}')
+    expected = git(repo, 'log', '--format=%H', scope).splitlines()
+    first = investigation.search(str(repo), scope, '', '', '', '', '', 0, 540)
+    git(repo, 'commit', '--allow-empty', '-m', 'new commit')
+    git(repo, 'branch', 'new-ref')
+    second = investigation.search(str(repo), scope, '', '', '', '', '', 50, 540, json.dumps(first['fixed_shas']))
+    actual = [c['hash'] for c in first['commits'] + second['commits']]
+    assert actual == expected
+    assert len(actual) == len(set(actual)) == 53
+    assert second['fixed_shas'] == first['fixed_shas']
+    refreshed = investigation.search(str(repo), scope, '', '', '', '', '', 0, 540)
+    assert refreshed['commits'][0]['subject'] == 'new commit'
+
+
+def test_empty_snapshot_does_not_use_head(repo):
+    result = investigation.search(str(repo), '--all', '', '', '', '', '', 0, 540, '[]')
+    assert result['commits'] == []
+    assert result['fixed_shas'] == []
+
+
+def test_large_snapshot_post_uses_one_batch_validation(repo, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Lock
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.investigation_routes import create_router
+
+    for i in range(52):
+        git(repo, 'commit', '--allow-empty', '-m', f'page {i}')
+    expected = git(repo, 'log', '--format=%H').splitlines()[50:]
+    shas = [git(repo, 'rev-parse', 'HEAD')] * 1800
+    original = subprocess.run
+    validations = []
+
+    def tracked(args, **kwargs):
+        if 'cat-file' in args:
+            validations.append((args, kwargs['input']))
+        assert 'rev-parse' not in args
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(investigation.subprocess, 'run', tracked)
+    body = dict(path=str(repo), scope='--all', grep='', author='', since='', until='',
+                file='', offset=50, tz_offset=540, fixed_shas=shas)
+    with ThreadPoolExecutor() as pool:
+        app = FastAPI()
+        app.include_router(create_router(lambda path: path, lambda _: Lock(), pool))
+        with TestClient(app) as client:
+            response = client.post('/api/repo/commit-search', json=body)
+            assert response.status_code == 200, response.text
+            assert [c['hash'] for c in response.json()['commits']] == expected
+            assert response.json()['fixed_shas'] == shas
+            assert len(validations) == 1
+            assert validations[0][1].splitlines() == shas
+            for invalid in (['f' * 40], ['--all']):
+                assert client.post('/api/repo/commit-search', json={**body, 'fixed_shas': invalid}).status_code == 400

@@ -296,3 +296,92 @@ def test_origin_status_distinguishes_missing_config_and_failures(tmp_path, monke
     result = gitinfo.collect(str(repo), fetch=False)
     assert result["error"]
     assert result["remote_status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    'mode,merge,push_remote,ref,command,reason',
+    [
+        ('nothing', 'main', None, None, 'git config --show-origin --get push.default', 'push.default=nothing'),
+        ('simple', 'different', None, None, 'git push origin HEAD:refs/heads/different', '名前が異なる'),
+        ('upstream', 'different', None, 'refs/heads/different', 'git push', None),
+        ('simple', 'different', 'publish', 'refs/heads/main', 'git push', None),
+        ('upstream', 'main', 'publish', None, "git config --show-origin --get-regexp '^(branch\\.|remote\\.)'", 'remoteが異なる'),
+        ('simple', 'main', None, 'refs/heads/main', 'git push', None),
+        ('nothing', 'main', 'publish', None, 'git config --show-origin --get push.default', 'push.default=nothing'),
+    ],
+)
+def test_ahead_push_command_agrees_with_destinations(tmp_path, mode, merge, push_remote, ref, command, reason):
+    repo = tmp_path / 'repo'
+    init_repo(repo)
+    for name in ('origin', 'publish'):
+        git(repo, 'remote', 'add', name, f'https://example.test/{name}.git')
+    git(repo, 'config', 'branch.main.remote', 'origin')
+    git(repo, 'config', 'branch.main.merge', f'refs/heads/{merge}')
+    git(repo, 'config', 'push.default', mode)
+    if push_remote is not None:
+        git(repo, 'config', 'branch.main.pushRemote', push_remote)
+    git(repo, 'update-ref', f'refs/remotes/origin/{merge}', 'HEAD')
+    git(repo, 'commit', '--allow-empty', '-qm', 'ahead')
+
+    facts = gitinfo.branch_destinations(str(repo), 'main')
+    result = gitinfo.collect(str(repo))
+    assert (result['entries'], result['ahead'], result['behind']) == ([], 1, 0)
+    assert facts['push_remote'] == (push_remote if push_remote is not None else 'origin')
+    assert facts['push_ref'] == ref
+    assert result['next_command']['command'] == command
+    assert result['next_command'] == facts['push_next_command']
+    if reason is not None:
+        assert reason in facts['push_ref_reason']
+        assert facts['push_ref_reason'] in result['next_command']['reason']
+    else:
+        assert facts['push_ref_reason'] is None
+
+
+def test_remote_push_refspec_overrides_nothing_for_next_command(tmp_path):
+    repo = tmp_path / 'repo'
+    init_repo(repo)
+    git(repo, 'remote', 'add', 'origin', 'https://example.test/origin.git')
+    git(repo, 'config', 'branch.main.remote', 'origin')
+    git(repo, 'config', 'branch.main.merge', 'refs/heads/main')
+    git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    git(repo, 'config', 'push.default', 'nothing')
+    git(repo, 'config', 'remote.origin.push', 'refs/heads/main:refs/heads/review/main')
+    git(repo, 'commit', '--allow-empty', '-qm', 'ahead')
+    facts = gitinfo.branch_destinations(str(repo), 'main')
+    assert facts['push_ref'] == 'refs/heads/review/main'
+    assert facts['push_ref_reason'] is None
+    assert gitinfo.collect(str(repo))['next_command']['command'] == 'git push'
+
+
+@pytest.mark.parametrize('state', ['clean', 'conflict', 'unstaged', 'behind', 'diverged'])
+def test_collect_does_not_resolve_destinations_before_ahead(tmp_path, monkeypatch, state):
+    repo = tmp_path / 'repo'
+    init_repo(repo)
+    git(repo, 'remote', 'add', 'origin', 'https://example.test/origin.git')
+    git(repo, 'config', 'branch.main.remote', 'origin')
+    git(repo, 'config', 'branch.main.merge', 'refs/heads/main')
+    git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+
+    if state in ('conflict', 'unstaged', 'behind', 'diverged'):
+        git(repo, 'commit', '--allow-empty', '-qm', 'local')
+    if state in ('behind', 'diverged'):
+        parent = git(repo, 'rev-parse', 'HEAD^').strip() if state == 'diverged' else git(repo, 'rev-parse', 'HEAD').strip()
+        remote_tip = git(repo, 'commit-tree', 'HEAD^{tree}', '-p', parent, '-m', 'remote').strip()
+        git(repo, 'update-ref', 'refs/remotes/origin/main', remote_tip)
+    if state == 'unstaged':
+        tracked = repo / 'tracked.txt'
+        tracked.write_text('initial')
+        git(repo, 'add', 'tracked.txt')
+        git(repo, 'commit', '-qm', 'tracked')
+        tracked.write_text('changed')
+    if state == 'conflict':
+        blob = subprocess.run(['git', '-C', str(repo), 'hash-object', '-w', '--stdin'], input='conflict\n', text=True, check=True, capture_output=True).stdout.strip()
+        subprocess.run(['git', '-C', str(repo), 'update-index', '--index-info'], input=f'100644 {blob} 1\tconflicted\n100644 {blob} 2\tconflicted\n100644 {blob} 3\tconflicted\n', text=True, check=True, capture_output=True)
+
+    def unexpected_resolution(*args, **kwargs):
+        pytest.fail('ahead分岐より前に送信先を解決しました')
+
+    monkeypatch.setattr(gitinfo, 'branch_destinations', unexpected_resolution)
+    result = gitinfo.collect(str(repo))
+    expected = {'clean': None, 'conflict': 'git status', 'unstaged': 'git add -p', 'behind': 'git pull --ff-only', 'diverged': 'git pull --rebase'}[state]
+    assert (result['next_command']['command'] if result['next_command'] else None) == expected

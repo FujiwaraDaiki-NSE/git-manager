@@ -26,3 +26,19 @@ test('workspace distinguishes initial loading, no reports, refresh and actual fa
   assert.match(workspaceAttention(projects, false, 'failed'), /一部未取得/);
   assert.match(workspaceAttention([], false, 'failed'), /取得失敗/);
 });
+
+test('next check prioritizes waiting/blocked, review, merge and excludes acknowledged reports', () => {
+  const waiting = task('waiting', 'waiting_for_user', 1);
+  const blocked = task('blocked', 'blocked', 2);
+  const review = task('review', 'review_required', 3);
+  const newerReview = task('newer-review', 'review_required', 4);
+  const merge = task('merge', 'merge_ready', 5);
+  const newerMerge = task('newer-merge', 'merge_ready', 6);
+  const project = { agent_tasks: [merge, review, waiting, newerMerge, newerReview, blocked] };
+  let acknowledgements = {};
+  for (const expected of [blocked, waiting, newerReview, review, newerMerge, merge]) {
+    assert.equal(nextAgentCheck(project, acknowledgements), expected);
+    acknowledgements = updateAcknowledgements([expected], acknowledgements, true);
+  }
+  assert.equal(nextAgentCheck(project, acknowledgements), null);
+});

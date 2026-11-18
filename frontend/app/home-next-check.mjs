@@ -2,11 +2,13 @@ import { isAcknowledged } from './agent-acknowledgements.mjs';
 import { agentTaskState, compareAgentEvents } from './agent-overview.mjs';
 import { currentAgentTasks } from './agent-timeline-tools.mjs';
 
+const nextCheckPriority = { waiting_for_user: 0, blocked: 0, review_required: 1, merge_ready: 2 };
+
 export function nextAgentCheck(project, acknowledgements) {
   if (acknowledgements === null) return null;
   return currentAgentTasks([project]).map(({ task }) => task)
-    .filter((task) => ['waiting_for_user', 'blocked'].includes(agentTaskState(task)) && !isAcknowledged(task, acknowledgements))
-    .sort((a, b) => compareAgentEvents(b, a))[0] ?? null;
+    .filter((task) => Object.hasOwn(nextCheckPriority, agentTaskState(task)) && !isAcknowledged(task, acknowledgements))
+    .sort((a, b) => nextCheckPriority[agentTaskState(a)] - nextCheckPriority[agentTaskState(b)] || compareAgentEvents(b, a))[0] ?? null;
 }
 
 export function workspaceAttention(projects, loading, error) {

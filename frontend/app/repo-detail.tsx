@@ -5,6 +5,7 @@ import { OperationFacts } from "./git-state-facts";
 import PatchView from "./patch-view";
 import CommitFiles from "./commit-files";
 import CopyButton from "./copy-button";
+import { commandTarget, worktreeCommand } from "./next-command-tools.mjs";
 import Submodules from "./submodules";
 import { fileStatusDescription, fileStatusGroups } from "./file-status.mjs";
 import {
@@ -528,6 +529,8 @@ export default function RepoDetail({
   activeTab,
   onTabChange,
 }: RepoDetailProps) {
+  const nextCommand = repo.next_command == null ? null : worktreeCommand(repo.next_command.command, repo.path, repo.common_dir);
+  const nextTarget = repo.next_command == null ? null : commandTarget(repo.next_command.command, repo.path, repo.common_dir);
   const [allRefs, setAllRefs] = useState(false);
   const [graphLimit, setGraphLimit] = useState(GRAPH_LIMIT_STEP);
   const [graph, setGraph] = useState<GraphResponse | null>(null);
@@ -715,19 +718,20 @@ export default function RepoDetail({
       </div>
 
       <StatusBlock repo={repo} />
-      {repo.next_command && (
+      {repo.next_command && nextCommand !== null && (
         <div className="next">
           <div className="cmdrow">
-            <code>{repo.next_command.command}</code>
+            <code>{nextCommand}</code>
             <button
               className="copy"
               type="button"
-              onClick={() => onCopy(repo.next_command!.command)}
+              onClick={() => onCopy(nextCommand)}
             >
-              {copied === repo.next_command.command
+              {copied === nextCommand
                 ? "コピーしました"
                 : "コピー"}
             </button>
+            <small>実行先: {nextTarget === null ? "未取得" : nextTarget === repo.path ? `${repo.branch == null ? "ブランチ未取得" : repo.branch} · ${repo.path}` : `メインのチェックアウト · ${nextTarget}`}</small>
           </div>
           <div className="reason">{repo.next_command.reason}</div>
         </div>

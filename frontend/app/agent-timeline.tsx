@@ -200,6 +200,7 @@ function HistoryRow({ event, project }: { event: AgentEvent; project: TimelinePr
         <span className="agent-timeline-summary">{historicalSummary(event)}</span>
         <TimeValue value={event.occurred_at} />
       </ProjectBranch>
+      {event.decision != null && <details><summary>当時の判断依頼</summary><AgentDecisionDetails decision={event.decision} /></details>}
     </li>
   );
 }
@@ -417,7 +418,7 @@ export default function AgentTimelineSidebar({
         <details className="agent-timeline-filters" open={hasFilters}>
           <summary>絞り込み・表示 <span>{hasFilters ? "条件あり" : "条件なし"}</span></summary>
           <div className="agent-timeline-filter-grid">
-            <label className="agent-timeline-filter-search"><span>検索</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="プロジェクト・ブランチ・要約" aria-label="プロジェクト、ブランチ、要約、worktreeを検索" /></label>
+            <label className="agent-timeline-filter-search"><span>検索</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="プロジェクト・ブランチ・要約・判断依頼" aria-label="プロジェクト、ブランチ、要約、worktree、判断依頼の質問・選択肢を検索" /></label>
             <label><span>プロジェクト</span><select disabled={scoped} value={scoped ? (scopedProjectId === null ? "" : scopedProjectId) : projectFilter} onChange={(event) => setProjectFilter(event.target.value)} aria-label="プロジェクトを完全一致で絞り込み"><option value="">{scoped ? "現在のプロジェクト情報は未取得です" : "すべてのプロジェクト"}</option>{projectOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
             <label><span>明示状態</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="明示されたagent状態で絞り込み"><option value={TIMELINE_STATUS_ALL}>すべての状態</option>{TIMELINE_STATUS_VALUES.map((status) => <option key={status} value={status}>{statusLabels[status] || status}</option>)}<option value={TIMELINE_STATUS_UNKNOWN}>明示状態なし</option></select></label>
             <label><span>履歴種別</span><select value={kindFilter} onChange={(event) => setKindFilter(event.target.value as "all" | "status" | "lifecycle")} aria-label="履歴イベント種別で絞り込み"><option value={TIMELINE_KIND_ALL}>すべて</option><option value={TIMELINE_KIND_STATUS}>状態報告</option><option value={TIMELINE_KIND_LIFECYCLE}>ライフサイクル</option></select></label>

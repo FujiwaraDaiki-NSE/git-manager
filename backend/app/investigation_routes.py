@@ -2,6 +2,21 @@
 import asyncio
 from fastapi import APIRouter, HTTPException, Query
 from app import investigation, compare
+from pydantic import BaseModel, Field
+
+
+class CommitSearchPage(BaseModel):
+    path: str
+    scope: str
+    grep: str
+    author: str
+    since: str
+    until: str
+    file: str
+    offset: int = Field(ge=0)
+    tz_offset: int
+    fixed_shas: list[str]
+
 
 
 def create_router(known_repo, repo_lock, pool):
@@ -16,6 +31,8 @@ def create_router(known_repo, repo_lock, pool):
             return await asyncio.get_running_loop().run_in_executor(pool, locked)
         except compare.ComparisonError as error:
             raise HTTPException(422 if error.code.startswith("invalid_") else 502, str(error)) from error
+        except investigation.InvalidSearchSnapshot as error:
+            raise HTTPException(400, str(error)) from error
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
         except RuntimeError as error:
@@ -26,8 +43,13 @@ def create_router(known_repo, repo_lock, pool):
         return await execute(path, investigation.overlaps)
 
     @router.get("/commit-search")
-    async def search(path: str, scope: str, grep: str, author: str, since: str, until: str, file: str, offset: int = Query(..., ge=0), tz_offset: int = Query(...)):
-        return await execute(path, investigation.search, scope, grep, author, since, until, file, offset, tz_offset)
+    async def search(path: str, scope: str, grep: str, author: str, since: str, until: str, file: str, offset: int = Query(..., ge=0), tz_offset: int = Query(...), fixed_shas: str | None = None):
+        return await execute(path, investigation.search, scope, grep, author, since, until, file, offset, tz_offset, fixed_shas)
+
+    @router.post("/commit-search")
+    async def search_page(body: CommitSearchPage):
+        return await execute(body.path, investigation.search, body.scope, body.grep, body.author,
+                             body.since, body.until, body.file, body.offset, body.tz_offset, body.fixed_shas)
 
     @router.get("/recovery-candidates")
     async def recovery(path: str):

@@ -36,6 +36,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { upstreamLabel } from "./upstream-label.mjs";
 import { PaneSeparator, paneStyle, usePaneWidth } from "./ui-preferences";
 import CopyButton from "./copy-button";
+import { commandTarget, worktreeCommand } from "./next-command-tools.mjs";
 import "./activity-explorer.css";
 import "./lane-explorer.css";
 import ShortcutHelp from "./shortcut-help";
@@ -673,6 +674,8 @@ function InfoField({ label, value, code = false }: { label: string; value: strin
 }
 
 function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: ProjectLane; project: ProjectResponse; defaultBranch: string | null; onOpenGit: (lane: ProjectLane) => void }) {
+  const nextCommand = lane.next_command === null ? null : worktreeCommand(lane.next_command.command, lane.path, project.main_path);
+  const nextTarget = lane.next_command === null ? null : commandTarget(lane.next_command.command, lane.path, project.main_path);
   const searchParams = useSearchParams();
   const { incoming, outgoing } = laneRecordedMerges(project.branch_connections, lane);
   const relationText = (edges: typeof incoming) => !project.branch_connections ? "取り込み記録未取得" : edges.map((edge) => `${edgeDisplayLabel(edge, project.branch_connections?.refs ?? [])} (${shortHash(edge.commit_hash)})`).join(" / ") || "確定した取り込み記録なし";
@@ -704,7 +707,7 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
         <p><code>ahead</code> は比較先にない、このブランチのコミット数です。<code>behind</code> はこのブランチにない、比較先のコミット数です。</p>
         <p>「既定ブランチとの差」と「追跡先との差」は比較する相手が異なることがあります。追跡先がリモートブランチなら、ahead は未push、behind は未pullの目安です。リモートの情報は直近のfetch時点のものです。</p>
       </details>
-      {lane.next_command && <div className="selection-command"><span>Git 次コマンド</span><code>{lane.next_command.command}</code><CopyButton value={lane.next_command.command} label="コマンドをコピー" /><small>{lane.next_command.reason}</small></div>}
+      {lane.next_command && nextCommand !== null && <div className="selection-command"><span>Git 次コマンド</span><code>{nextCommand}</code><CopyButton value={nextCommand} label="コマンドをコピー" /><small>実行先: {nextTarget === null ? "未取得" : nextTarget === lane.path ? `${lane.branch === null ? "detached HEAD" : lane.branch} · ${lane.path}` : `メインのチェックアウト · ${nextTarget}`}</small><small>{lane.next_command.reason}</small></div>}
       <button className="primary-action" type="button" disabled={!lane.path} onClick={() => onOpenGit(lane)}>Git 詳細を開く</button>{!lane.path && <p className="no-checkout">このブランチには作業ディレクトリがないため、Git状態の詳細は表示できません。</p>}
     </div>
   );

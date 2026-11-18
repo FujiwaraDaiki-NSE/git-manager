@@ -8,9 +8,9 @@ import "./tag-explorer.css";
 import "./repository-investigations.css";
 
 type Commit = { hash: string; subject: string; date: string; author: string; mark?: string; sources?: { selector: string; message: string }[]; command?: string };
-type Result = { commits?: Commit[]; scope?: string; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string }[] }[] };
-async function read<T,>(url: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(url, { cache: "no-store", signal });
+type Result = { commits?: Commit[]; scope?: string; fixed_shas?: string[]; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string }[] }[] };
+async function read<T,>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { ...init, cache: "no-store", signal });
   if (!response.ok) {
     const body = await response.json();
     throw new Error(typeof body.detail === "string" ? body.detail : `取得失敗 HTTP ${response.status}`);
@@ -30,7 +30,7 @@ function Detail({ path, hash }: { path: string; hash: string }) {
 type Kind = "overlaps" | "search" | "recovery" | "cherry";
 const settings = {
   overlaps: ["worktree間の変更パス重なり", "worktree-overlaps", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"],
-  search: ["リポジトリ全体のコミット検索", "commit-search", "件名・本文と作成者はGitの正規表現、変更パスはGitのpathspecで検索します。参照SHAはページ間で固定しません。"],
+  search: ["リポジトリ全体のコミット検索", "commit-search", "件名・本文と作成者はGitの正規表現、変更パスはGitのpathspecで検索します。検索対象の参照SHAはページ間で固定します。"],
   recovery: ["到達不能コミットの復旧候補", "recovery-candidates", "現在のref・HEADから到達できない、reflogに残る履歴を表示します。reflog保存期間外は検出できません。復旧コマンドは対象リポジトリで実行してください。"],
   cherry: ["パッチ同等コミットの判定", "patch-equivalence", "パッチ同等＝安全な重複とは限りません。= はパッチ同等、< はAのみ、> はBのみです。共通コミットは表示しません。"],
 };
@@ -46,7 +46,7 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
   useEffect(() => () => controller.current?.abort(), []);
   const [title, endpoint, note] = settings[kind];
   const inputs = kind === "search" ? [["scope", "検索範囲（--all または ref）"], ["grep", "件名・本文"], ["author", "作成者"], ["since", "開始日"], ["until", "終了日"], ["file", "変更パス"]] : kind === "cherry" ? [["left", "A ブランチ / ref"], ["right", "B ブランチ / ref"]] : [];
-  async function run(values: Record<string, string>, offset: number) {
+  async function run(values: Record<string, string>, offset: number, fixedShas: string[] | null = null) {
     controller.current?.abort();
     const current = new AbortController(); controller.current = current;
     setLoading(true); setData(null); setError(null); setSelected(null);
@@ -54,7 +54,12 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
     const params: Record<string, string> = { path };
     for (const [key] of inputs) params[key] = values[key];
     if (kind === "search") { params.offset = String(offset); params.tz_offset = String(-new Date().getTimezoneOffset()); }
-    try { const result = await read<Result>(`/api/repo/${endpoint}?${new URLSearchParams(params)}`, current.signal); if (!current.signal.aborted) setData(result); }
+    const url = fixedShas === null ? `/api/repo/${endpoint}?${new URLSearchParams(params)}` : `/api/repo/${endpoint}`;
+    const init: RequestInit | undefined = fixedShas === null ? undefined : {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...params, offset, tz_offset: -new Date().getTimezoneOffset(), fixed_shas: fixedShas }),
+    };
+    try { const result = await read<Result>(url, current.signal, init); if (!current.signal.aborted) setData(result); }
     catch (e) { if (!current.signal.aborted) setError(String(e)); }
     finally { if (!current.signal.aborted) setLoading(false); }
   }
@@ -75,6 +80,7 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
         {error && <p className="tag-explorer-error" role="alert">取得できませんでした。{error}</p>}
         {data && <div aria-live="polite">
           {kind === "search" && request && <p className="tag-explorer-note">適用した条件: 件名・本文「{request.grep}」、作成者「{request.author}」、期間「{request.since} ～ {request.until}」、変更パス「{request.file}」（空欄は条件なし）</p>}
+          {kind === "search" && request && <p className="tag-explorer-note">検索開始時点の参照で固定中 <button className="tag-explorer-export" type="button" onClick={() => void run(request, 0)}>最新状態で検索し直す</button></p>}
           {data.scope && <p className="tag-explorer-note">検索範囲: <code>{data.scope}</code> ／ {data.offset! + 1}件目から（1ページ50件）</p>}
           {data.left && <p className="tag-explorer-note">A: {data.left} @ {data.left_sha?.slice(0, 12)} ／ B: {data.right} @ {data.right_sha?.slice(0, 12)}</p>}
           {data.command && <p className="tag-explorer-note"><code>{data.command}</code></p>}
@@ -112,8 +118,8 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
             </ul>
           ) : <p className="tag-explorer-empty">該当するコミットはありません。</p>)}
           {kind === "search" && request && <div className="tag-explorer-navigation">
-            <button className="tag-explorer-export" type="button" disabled={data.offset === 0} onClick={() => void run(request, data.offset! - 50)}>前の50件</button>
-            <button className="tag-explorer-export" type="button" disabled={!data.has_more} onClick={() => void run(request, data.offset! + 50)}>次の50件</button>
+            <button className="tag-explorer-export" type="button" disabled={data.offset === 0} onClick={() => void run(request, data.offset! - 50, data.fixed_shas!)}>前の50件</button>
+            <button className="tag-explorer-export" type="button" disabled={!data.has_more} onClick={() => void run(request, data.offset! + 50, data.fixed_shas!)}>次の50件</button>
           </div>}
         </div>}
         {selected && <>

@@ -153,6 +153,8 @@ function currentRowSearchValues(row) {
     row?.task?.branch,
     row?.task?.summary,
     row?.task?.worktree,
+    row?.task?.decision?.question,
+    row?.task?.decision?.options.join("\n"),
   ];
 }
 
@@ -164,6 +166,8 @@ function historySearchValues(event, projectById) {
     event?.branch,
     event?.summary,
     event?.worktree,
+    event?.decision?.question,
+    event?.decision?.options.join("\n"),
   ];
 }
 

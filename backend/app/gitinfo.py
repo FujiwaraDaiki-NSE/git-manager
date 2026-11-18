@@ -12,7 +12,7 @@ import shlex
 import shutil
 import subprocess
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from app import config, paths, scanner, project_facts
 
@@ -333,6 +333,7 @@ def next_command(
     remote: str | None,
     context: Mapping[str, Any] | None = None,
     *,
+    resolve_destinations: Callable[[], dict[str, Any] | None] | None = None,
     worktree_state: str | None = None,
     merged: bool | None = None,
     worktree: str | None = None,
@@ -400,7 +401,10 @@ def next_command(
     if info["behind"]:
         return {"command": "git pull --ff-only", "reason": "上流が進んでいます"}
     if info["ahead"]:
-        return {"command": "git push", "reason": "未 push のコミットがあります"}
+        destinations = resolve_destinations() if resolve_destinations is not None else None
+        if destinations is None:
+            return {"command": "git config --show-origin --get push.default", "reason": "実効push設定を取得できないため設定を確認します"}
+        return destinations["push_next_command"]
     return None
 
 
@@ -578,6 +582,7 @@ def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | 
         return None
     push_refs = []
     push_reason = None
+    push_command = "git push"
     source = f"refs/heads/{branch}"
     if refspecs:
         for spec in refspecs:
@@ -605,8 +610,10 @@ def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | 
             push_reason = "remote.push refspecにこのブランチの送信指定なし"
     elif push_remote is None:
         push_reason = "push remote未設定"
+        push_command = shlex.join(["git", "config", "--show-origin", "--get-regexp", "^(branch\\.|remote\\.)"])
     elif mode == "nothing":
         push_reason = "push.default=nothing: 引数なしのpushは拒否"
+        push_command = "git config --show-origin --get push.default"
     elif mode == "matching":
         push_reason = "matching: リモートに同名ブランチがある場合に送信"
     elif mode == "current" or (mode == "simple" and push_remote != fetch_remote):
@@ -617,14 +624,18 @@ def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | 
             push_refs = [source]
         elif merge is None or merges is None or len(merges) != 1:
             push_reason = "upstreamが一意に設定されていないためpushは拒否"
+            push_command = shlex.join(["git", "config", "--show-origin", "--get-all", f"branch.{branch}.merge"])
         elif push_remote != fetch_remote:
             push_reason = "push先とupstream remoteが異なるためpushは拒否"
+            push_command = shlex.join(["git", "config", "--show-origin", "--get-regexp", "^(branch\\.|remote\\.)"])
         elif mode == "simple" and merge != source:
             push_reason = "simple: upstreamとローカルの名前が異なるためpushは拒否"
+            push_command = shlex.join(["git", "push", push_remote, f"HEAD:{merge}"])
         else:
             push_refs = [merge]
     else:
         push_reason = "push.defaultの値を解決できません"
+        push_command = "git config --show-origin --get push.default"
     def urls(remote: str | None, push: bool) -> list[str] | None:
         if remote is None:
             return None
@@ -632,7 +643,7 @@ def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | 
             return ["."]
         value = _run(repo, ["remote", "get-url", *(["--push", "--all"] if push else []), "--", remote])
         return value.splitlines() if value is not None else None
-    return {"fetch_remote": fetch_remote, "fetch_urls": urls(fetch_remote, False), "upstream": fields[1] or None, "upstream_ref": merge, "upstream_state": "unset" if merge is None else "configured", "push_remote": push_remote, "push_urls": urls(push_remote, True), "push_ref": " / ".join(push_refs) if push_refs else None, "push_ref_reason": push_reason, "push_refspecs": refspecs, "push_default": mode}
+    return {"fetch_remote": fetch_remote, "fetch_urls": urls(fetch_remote, False), "upstream": fields[1] or None, "upstream_ref": merge, "upstream_state": "unset" if merge is None else "configured", "push_remote": push_remote, "push_urls": urls(push_remote, True), "push_ref": " / ".join(push_refs) if push_refs else None, "push_ref_reason": push_reason, "push_refspecs": refspecs, "push_default": mode, "push_next_command": {"command": push_command, "reason": push_reason if push_command != "git push" else "未 push のコミットがあります"}}
 
 
 def collect(
@@ -786,6 +797,7 @@ def collect(
         info,
         result["remote"],
         context,
+        resolve_destinations=lambda: branch_destinations(repo, info["branch"]),
         worktree_state=resolved_worktree_state,
         merged=resolved_merged,
         worktree=resolved_worktree,

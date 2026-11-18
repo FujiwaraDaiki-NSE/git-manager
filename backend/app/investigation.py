@@ -2,6 +2,10 @@
 from collections import defaultdict
 from datetime import date
 import shlex
+import json
+import re
+import os
+import subprocess
 
 from app import compare, gitinfo, paths
 
@@ -57,7 +61,11 @@ def overlaps(repo):
     return {"overlaps": [{"path": file, "worktrees": values} for file, values in sorted(groups.items()) if len(values) > 1], "unavailable": unavailable, "complete": not unavailable}
 
 
-def search(repo, scope, grep, author, since, until, file, offset, tz_offset):
+class InvalidSearchSnapshot(ValueError):
+    pass
+
+
+def search(repo, scope, grep, author, since, until, file, offset, tz_offset, fixed_shas=None):
     if offset < 0:
         raise ValueError("offset は0以上で指定してください")
     if not -14 * 60 <= tz_offset <= 14 * 60:
@@ -67,7 +75,35 @@ def search(repo, scope, grep, author, since, until, file, offset, tz_offset):
             date.fromisoformat(value)
     if since and until and since > until:
         raise ValueError("開始日は終了日以前にしてください")
-    revision = ["--all"] if scope == "--all" else [compare._resolve_commit(repo, scope, "検索範囲")]
+    if fixed_shas is None:
+        if scope == "--all":
+            revision = sorted(set(run(repo, ["log", "--all", "--no-walk", "--format=%H", "--"]).splitlines()))
+        else:
+            revision = [compare._resolve_commit(repo, scope, "検索範囲")]
+    else:
+        try:
+            revision = json.loads(fixed_shas) if isinstance(fixed_shas, str) else fixed_shas
+        except (ValueError, TypeError) as error:
+            raise InvalidSearchSnapshot("fixed_shas はコミットSHAのJSON配列で指定してください") from error
+        if not isinstance(revision, list):
+            raise InvalidSearchSnapshot("fixed_shas はコミットSHAのJSON配列で指定してください")
+        for sha in revision:
+            if not isinstance(sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", sha) is None:
+                raise InvalidSearchSnapshot("fixed_shas に不正なコミットSHAがあります")
+        if revision:
+            try:
+                checked = subprocess.run(
+                    [gitinfo.GIT, "-C", repo, "cat-file", "--batch-check=%(objecttype)"],
+                    input="\n".join(revision) + "\n", text=True, capture_output=True,
+                    timeout=gitinfo.config.GIT_TIMEOUT_SEC,
+                    env={**os.environ, **gitinfo.NON_INTERACTIVE_ENV},
+                )
+            except (subprocess.TimeoutExpired, OSError) as error:
+                raise RuntimeError("固定SHAを検証できませんでした") from error
+            if checked.returncode != 0:
+                raise RuntimeError("固定SHAを検証できませんでした")
+            if checked.stdout.splitlines() != ["commit"] * len(revision):
+                raise InvalidSearchSnapshot("fixed_shas に存在しない、またはcommitではないSHAがあります")
     args = ["log", *revision, f"--format={FORMAT}", f"--skip={offset}", f"--max-count={PAGE_SIZE + 1}"]
     # Date inputs are calendar days in the viewer's timezone (minutes east of UTC).
     zone = f"{'+' if tz_offset >= 0 else '-'}{abs(tz_offset) // 60:02d}{abs(tz_offset) % 60:02d}"
@@ -78,8 +114,8 @@ def search(repo, scope, grep, author, since, until, file, offset, tz_offset):
     args.append("--")
     if file:
         args.append(file)
-    values = records(run(repo, args))
-    return {"scope": scope, "offset": offset, "has_more": len(values) > PAGE_SIZE, "commits": values[:PAGE_SIZE]}
+    values = records(run(repo, args)) if revision else []
+    return {"scope": scope, "fixed_shas": revision, "offset": offset, "has_more": len(values) > PAGE_SIZE, "commits": values[:PAGE_SIZE]}
 
 
 def recovery(repo):

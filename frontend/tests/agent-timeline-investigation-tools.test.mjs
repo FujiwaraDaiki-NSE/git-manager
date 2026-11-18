@@ -127,3 +127,17 @@ test("filter parameters and project map are explicit, while invalid values never
   assert.deepEqual(filterTimelineHistoryEvents([row], filters({ status: "made-up" }), map), []);
   assert.deepEqual(filterTimelineSnapshot({ currentRows: [{ project: projectA, task: row }], history: [row] }, filters(), map).history.map((item) => item.event_id), ["row"]);
 });
+
+test("current and history search include decision question and options and accept null", () => {
+  const reports = [
+    { ...event("question", "2026-10-01T10:00:00+09:00"), decision: { question: "質問専用語", options: [], links: [] } },
+    { ...event("option", "2026-10-01T10:00:00+09:00"), decision: { question: "判断内容", options: ["選択肢専用語"], links: [] } },
+    { ...event("null", "2026-10-01T10:00:00+09:00"), decision: null },
+  ];
+  const rows = reports.map((task) => ({ project: projectA, task }));
+  const map = new Map([[projectA.id, projectA]]);
+  for (const [query, expected] of [["質問専用語", ["question"]], ["選択肢専用語", ["option"]], ["存在しない語", []], ["", ["question", "option", "null"]]]) {
+    assert.deepEqual(filterTimelineCurrentRows(rows, filters({ query })).map(({ task }) => task.event_id), expected);
+    assert.deepEqual(filterTimelineHistoryEvents(reports, filters({ query }), map).map((item) => item.event_id), expected);
+  }
+});

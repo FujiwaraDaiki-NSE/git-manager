@@ -210,7 +210,7 @@ function ProjectCard({
         if (params && homeQuery) params.set("home", homeQuery);
         const nextHref = task ? (params ? `/project?${params}` : null) : workHref("all", branch);
         const label = branch === "(detached)" ? "HEAD切り離し（ブランチなし）" : branch;
-        return <div className="project-card-footer"><span>次に確認 {nextHref ? <Link href={nextHref} prefetch={false}><strong>{label}</strong><span aria-hidden="true"> →</span></Link> : <strong>{label}</strong>}{task && <span> · {task.status === "waiting_for_user" ? "agentが入力待ち" : "agentが問題を報告"}</span>}</span><AgentDecisionDetails decision={task?.decision} compact /></div>;
+        return <div className="project-card-footer"><span>次に確認 {nextHref ? <Link href={nextHref} prefetch={false}><strong>{label}</strong><span aria-hidden="true"> →</span></Link> : <strong>{label}</strong>}{task && <span title={task.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined}> · {task.status === "waiting_for_user" ? "agentが入力待ち" : task.status === "blocked" ? "agentが問題を報告" : task.status === "review_required" ? "agentがレビュー待ち" : task.status === "merge_ready" ? "agentがマージ準備完了を報告" : null}</span>}</span><AgentDecisionDetails decision={task?.decision} compact /></div>;
       })()}
       {project.fetch_status?.result === "failure" && <span className="fact fact-danger" role="status">⚠ fetch失敗</span>}
       <details className="project-card-extra">
