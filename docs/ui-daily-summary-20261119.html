@@ -1,0 +1,29 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-19</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>再起動直後のプロジェクト表示の高速化、コマンドの実行先固定、判断依頼の到達性 — 2026-11-19</h1>
+<p>再起動直後にプロジェクトを開くと、数百件の自動fetchの後ろでPR取得が待たされ最大79秒かかっていた問題を解消しました。コピーする「次コマンド」は選択中のworktreeに固定され、push設定と矛盾するコマンドも出なくなりました。agentの判断依頼はタイムラインで検索・振り返りでき、ホームの「次に確認」はレビュー待ち・マージ準備完了も案内します。</p>
+<p>開始時30点 + 検証済み加点39点 = <b>69点</b>（100点未達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+<table><thead><tr><th>No.</th><th>改善内容</th><th>分類・点数</th><th>検証根拠</th></tr></thead><tbody>
+<tr><td>1</td><td>画面用のGitHub PR取得（<code>/api/project</code>）を、自動fetchと共有していた <code>fetch_pool</code> から専用の4ワーカーのプールへ分離</td><td>高速化 +5</td><td>backend再起動直後（fetch中）の初回 <code>/api/project</code>: git-manager / ThinkLab / edge-data-transfer / thinkplatform-apis = 19.5 / 79.2 / 25.8 / 5.0秒 → 16.2 / 4.0 / 0.8 / 2.9秒（再測定 15.7 / 5.1 / 1.3 / 3.8秒）</td></tr>
+<tr><td>2</td><td>変更ファイルの差分コマンドで名前変更・コピー（R/C）行も対象に。記録された側に旧・新パスを <code>:(literal)</code> で渡す（RM: ステージ済み=旧+新、未ステージ=新のみ）</td><td>機能 +5</td><td>fixtureの <code>git mv</code>＋追加編集（日本語・空白パス）で表示コマンドを実行し、rename と追加編集の差分が得られることを確認</td></tr>
+<tr><td>3</td><td>リポジトリ全体のコミット検索で、検索開始時点の参照SHA集合をページ間で固定。「最新状態で検索し直す」を追加。2ページ目以降はPOSTで送り、SHAは <code>git cat-file --batch-check</code> 1回で検証</td><td>機能 +5</td><td>fixtureで1ページ目取得後にコミット追加→2ページ目は重複・欠落なし（50+12件）。参照先端1,800個の thinkplatform で2ページ目を約0.5秒で取得</td></tr>
+<tr><td>4</td><td>agentタイムラインの検索対象に判断依頼の質問・選択肢を追加し、履歴行に「当時の判断依頼」を折りたたみ表示（未解決の依頼としては数えない）</td><td>機能 +5</td><td>選択肢にだけ含まれる語で検索し、該当の履歴1件に絞られることを確認。<code>javascript:</code> のURLはリンクにならないことを確認</td></tr>
+<tr><td>5</td><td>ホームの「次に確認」で、入力待ち・問題ありがなければ未確認のレビュー待ち、次にマージ準備完了を案内</td><td>機能 +5</td><td>git-manager・html-editor のカードに「agentがマージ準備完了を報告」と該当ブランチへのリンク、保証しない旨のtitleが出ることを確認</td></tr>
+<tr><td>6</td><td>「次コマンド」の表示とコピーを <code>git -C '&lt;worktreeのパス&gt;' …</code> にし、「実行先: ブランチ · パス」を併記（レーン詳細・Git詳細）</td><td>機能 +5</td><td>fixtureの本体とlinked worktreeで、それぞれのパス付きコマンドと実行先表示を確認</td></tr>
+<tr><td>7</td><td>自動fetchの進捗を「fetch中 12/60リポジトリ完了・失敗2リポジトリ」と件数で表示</td><td>UIリッチ化 +2</td><td>再起動直後のホームで「fetch中 3/84リポジトリ完了・失敗3リポジトリ」を確認</td></tr>
+<tr><td>8</td><td>ホームの「実行中」カードに「うち24時間以上更新なし N件」を併記（タイムラインと同じ24時間基準）</td><td>UIリッチ化 +2</td><td>実データで「15 実行中 / うち24時間以上更新なし 15件」。タイムライン側の「実行中として報告 0件」と整合</td></tr>
+<tr><td>9</td><td>パッチ同等判定の結果に、実際に比較した「A: ref @ SHA ／ B: ref @ SHA」を表示</td><td>UIリッチ化 +2</td><td>fixtureで main / side を比較し表示と完全SHAのコマンドを確認</td></tr>
+<tr><td>10</td><td>push設定で引数なし <code>git push</code> が拒否される状態（<code>push.default=nothing</code>、simpleで名前不一致など）でも「次コマンド: git push」と出ていた矛盾を修正。一意に決まる場合は <code>git push &lt;remote&gt; HEAD:&lt;ref&gt;</code>、決まらない場合は設定確認コマンドを提示。送信先の解決は ahead の時だけ行う</td><td>バグ修正 +1</td><td>fixture（simple・名前不一致・ahead 1）で <code>git push --dry-run</code> は拒否、提示コマンドは成功</td></tr>
+<tr><td>11</td><td>サブモジュール欄: 取得中・成功・失敗を区別し、失敗時に「再取得」、再取得中は「更新中（前回の結果を表示）」</td><td>バグ修正 +1</td><td>OCR_PaddleOCR で取得失敗を注入→「再取得」→「PaddleOCR 一致」に復帰</td></tr>
+<tr><td>12</td><td>プロジェクト見出しの「Git情報の取得：23時間前」を、照合済みなら「Git情報：最新（N前から変化なし）」、更新中なら「更新中（N前の状態を表示）」に</td><td>文言 +1</td><td>git-manager / fixture の見出しで確認</td></tr>
+</tbody></table>
+<h2>加点しなかったもの</h2>
+<ul>
+<li>再走査で fetch ラウンドが重なると進捗件数が混ざる問題（今回の実装で生じたもの。Codexレビュー指摘）→ ラウンドを直列化して修正。</li>
+<li>W7 の初版は全リポジトリの更新ごとに送信先解決（gitプロセス4本）を行っていたため、ahead時のみの遅延評価に修正。</li>
+<li>No.6 の初版は <code>git worktree prune/remove</code> まで選択中（削除済みの場合あり）のworktreeで実行させていた（Codexレビュー指摘）→ <code>git worktree …</code> はメインのチェックアウトを実行先にし「実行先: メインのチェックアウト」と表示。</li>
+<li>W5 の初版は固定SHA集合をURLに載せていた（thinkplatformで約72KB）ため、POST送信と一括検証に修正。</li>
+<li>ホームカードのopen PR / CI 集計（安価な情報源がないため見送り）、cold <code>/api/project</code> のPR段階取得（No.1の効果を見て保留）。</li>
+</ul>
+<h2>テスト・稼働</h2>
+<p>frontend 435/435、<code>tsc --noEmit</code> 成功、backend 423 passed（既存のStarlette警告1件）。<code>gitdash-compose up -d --build</code> で反映、http://localhost:4412 。</p>
+</html>
