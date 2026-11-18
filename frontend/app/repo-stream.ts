@@ -11,7 +11,7 @@ export type RepoStreamState = {
   subscribeAgentAttention: (listener: (event: AgentEvent) => void) => () => void;
   repos: Map<string, Repo>;
   scanning: boolean;
-  fetching: boolean;
+  fetching: import("./fetch-progress.mjs").FetchProgress | null;
   connected: boolean;
   agentEvents: AgentEvent[];
   latestAgentEvent: AgentEvent | null;
@@ -57,7 +57,7 @@ function parseAgentEvent(payload: unknown): AgentEvent | null {
 function useRepoStreamState(): RepoStreamState {
   const [repos, setRepos] = useState<Map<string, Repo>>(new Map());
   const [scanning, setScanning] = useState(false);
-  const [fetching, setFetching] = useState(false);
+  const [fetching, setFetching] = useState<import("./fetch-progress.mjs").FetchProgress | null>(null);
   const [connected, setConnected] = useState(false);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [latestAgentEvent, setLatestAgentEvent] = useState<AgentEvent | null>(null);
@@ -269,7 +269,7 @@ function useRepoStreamState(): RepoStreamState {
     });
     es.addEventListener("fetch", (event) => {
       setFetching(
-        Boolean((JSON.parse((event as MessageEvent).data) as { active: boolean }).active),
+        JSON.parse((event as MessageEvent).data) as import("./fetch-progress.mjs").FetchProgress,
       );
     });
     es.addEventListener("agent_event", (event) => {

@@ -30,9 +30,10 @@ STATE_LOCK = threading.Lock()
 
 pool = ThreadPoolExecutor(max_workers=config.WORKERS, thread_name_prefix="git")
 fetch_pool = ThreadPoolExecutor(max_workers=config.FETCH_WORKERS, thread_name_prefix="fetch")
+github_pr_pool = ThreadPoolExecutor(max_workers=config.GITHUB_PR_WORKERS, thread_name_prefix="github-pr")
 
 scanning = {"active": False, "found": 0}
-fetching = {"active": False, "total": 0}
+fetching = {"active": False, "total": 0, "done": 0, "failed": 0}
 watcher: Watcher | None = None
 
 # Git処理と重なるイベントは短時間まとめ、抑制期間の終了後に取得する。
@@ -261,8 +262,8 @@ def _get_project_sync(
     as_of: datetime | None = None,
 ) -> dict[str, Any] | None:
     """Build one project payload while sharing the repository Git lock."""
-    merged_future = fetch_pool.submit(github.load, repo)
-    open_future = fetch_pool.submit(github.load_open, repo)
+    merged_future = github_pr_pool.submit(github.load, repo)
+    open_future = github_pr_pool.submit(github.load_open, repo)
     return project_snapshots.get(repo, project_id, state_rows, _repo_lock(host_path), range_name, as_of,
                                  lambda: {**merged_future.result(), "open": open_future.result()})
 
@@ -853,7 +854,17 @@ async def _discover() -> None:
         asyncio.create_task(_fetch_round(ordered))
 
 
+# 再走査で fetch ラウンドが重なると進捗カウンターが混ざるため、ラウンドは直列に実行する。
+# 待たされたラウンドは開始時に対象を選び直すので、直前のラウンドで取得済みの共通リポジトリは再fetchしない。
+_fetch_round_lock = asyncio.Lock()
+
+
 async def _fetch_round(host_paths: list[str]) -> None:
+    async with _fetch_round_lock:
+        await _fetch_round_serialized(host_paths)
+
+
+async def _fetch_round_serialized(host_paths: list[str]) -> None:
     """ネットワーク処理。ローカルとは別プールで、画面が埋まった後に走る。"""
     now = time.time()
     projects: dict[str, list[str]] = {}
@@ -886,7 +897,7 @@ async def _fetch_round(host_paths: list[str]) -> None:
 
     if not targets:
         return
-    fetching.update(active=True, total=len(targets))
+    fetching.update(active=True, total=len(targets), done=0, failed=0)
     bus.publish("fetch", dict(fetching))
     loop = asyncio.get_running_loop()
 
@@ -926,10 +937,16 @@ async def _fetch_round(host_paths: list[str]) -> None:
     fetch_tasks = [fetch_project(*target) for target in targets]
     refresh_after_fetch: list[str] = []
     for future in asyncio.as_completed(fetch_tasks):
+        result = None
         try:
             _common, representative, members, result = await future
         except Exception:
             continue
+        finally:
+            fetching["done"] += 1
+            if result is None or result["fetch_status"] is None or result["fetch_status"]["result"] != "success":
+                fetching["failed"] += 1
+            bus.publish("fetch", dict(fetching))
         if result is None:
             continue
         if isinstance(result, _RefreshResult) and result.state_published:
@@ -1113,6 +1130,7 @@ async def lifespan(_app: FastAPI):
         watcher.stop()
     pool.shutdown(wait=False)
     fetch_pool.shutdown(wait=False)
+    github_pr_pool.shutdown(wait=False)
 
 
 app = FastAPI(title="gitdash", docs_url="/api/docs", lifespan=lifespan)

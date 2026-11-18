@@ -8,7 +8,7 @@ import "./tag-explorer.css";
 import "./repository-investigations.css";
 
 type Commit = { hash: string; subject: string; date: string; author: string; mark?: string; sources?: { selector: string; message: string }[]; command?: string };
-type Result = { commits?: Commit[]; scope?: string; offset?: number; has_more?: boolean; left?: string; right?: string; command?: string; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string }[] }[] };
+type Result = { commits?: Commit[]; scope?: string; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string }[] }[] };
 async function read<T,>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal });
   if (!response.ok) {
@@ -76,7 +76,7 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
         {data && <div aria-live="polite">
           {kind === "search" && request && <p className="tag-explorer-note">適用した条件: 件名・本文「{request.grep}」、作成者「{request.author}」、期間「{request.since} ～ {request.until}」、変更パス「{request.file}」（空欄は条件なし）</p>}
           {data.scope && <p className="tag-explorer-note">検索範囲: <code>{data.scope}</code> ／ {data.offset! + 1}件目から（1ページ50件）</p>}
-          {data.left && <p className="tag-explorer-note">A: {data.left} ／ B: {data.right}</p>}
+          {data.left && <p className="tag-explorer-note">A: {data.left} @ {data.left_sha?.slice(0, 12)} ／ B: {data.right} @ {data.right_sha?.slice(0, 12)}</p>}
           {data.command && <p className="tag-explorer-note"><code>{data.command}</code></p>}
           {data.unavailable && data.unavailable.length > 0 && <p className="tag-explorer-error" role="alert">一部worktreeを取得できませんでした。重なりの一覧は不完全です: {data.unavailable.join("、")}</p>}
           {data.overlaps && (data.overlaps.length ? (

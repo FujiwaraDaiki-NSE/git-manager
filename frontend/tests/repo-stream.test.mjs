@@ -190,3 +190,14 @@ test("cached projects render before requests complete, survive failure and are r
   assert.equal(JSON.parse(raw).response.projects[0].id, "fresh");
   cleanup();
 });
+
+test("fetch events preserve repository progress including reconnect snapshots", () => {
+  const { stream, updates, cleanup } = createStream();
+  const progress = { active: true, total: 60, done: 12, failed: 2 };
+  stream.emit("fetch", progress);
+  assert.equal(JSON.stringify(updates.at(-1)), JSON.stringify(progress));
+  stream.emit("fetch", { ...progress, active: false, done: 60 });
+  assert.equal(updates.at(-1).active, false);
+  assert.equal(updates.at(-1).done, 60);
+  cleanup();
+});

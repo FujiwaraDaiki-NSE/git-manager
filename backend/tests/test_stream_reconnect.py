@@ -28,7 +28,7 @@ def test_reconnect_receives_current_scan_and_fetch_states(monkeypatch):
     bus = Bus()
     monkeypatch.setattr(main, 'bus', bus)
     monkeypatch.setattr(main, 'scanning', {'active': True, 'found': 12})
-    monkeypatch.setattr(main, 'fetching', {'active': True, 'total': 3})
+    monkeypatch.setattr(main, 'fetching', {'active': True, 'total': 3, 'done': 2, 'failed': 1})
 
     async def scenario():
         response = await main.stream()
@@ -40,7 +40,7 @@ def test_reconnect_receives_current_scan_and_fetch_states(monkeypatch):
             assert scan.startswith('event: scan\n')
             assert event_data(scan) == {'active': True, 'found': 12}
             assert fetch.startswith('event: fetch\n')
-            assert event_data(fetch) == {'active': True, 'total': 3}
+            assert event_data(fetch) == {'active': True, 'total': 3, 'done': 2, 'failed': 1}
             main.scanning['active'] = False
             bus.publish('scan', dict(main.scanning))
             assert event_data(await anext(stream))['active'] is False

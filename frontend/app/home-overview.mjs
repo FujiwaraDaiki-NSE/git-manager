@@ -1,5 +1,5 @@
 import { isAcknowledged } from "./agent-acknowledgements.mjs";
-import { AGENT_DECISION_STATUSES } from "./agent-timeline-tools.mjs";
+import { AGENT_DECISION_STATUSES, agentReportFreshness } from "./agent-timeline-tools.mjs";
 import { agentTaskState, projectLatestTime, sortProjects } from "./agent-overview.mjs";
 
 export const AGENT_SUMMARY_KEYS = [
@@ -246,4 +246,17 @@ export function homeCardIndex(action, current, length) {
   if (!length) return null;
   if (current < 0) return action === "previous" ? length - 1 : 0;
   return Math.max(0, Math.min(length - 1, current + (action === "previous" ? -1 : 1)));
+}
+
+/** Count only current progress reports with a verifiable old timestamp. */
+export function countOldActiveReports(projects, now) {
+  const active = new Set(["investigating", "implementing", "testing", "reviewing"]);
+  let count = 0;
+  for (const project of projects) {
+    if (!Array.isArray(project.agent_tasks)) continue;
+    for (const task of project.agent_tasks) {
+      if (active.has(agentTaskState(task)) && agentReportFreshness(task.occurred_at, now) === "old") count += 1;
+    }
+  }
+  return count;
 }

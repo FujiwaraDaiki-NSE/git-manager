@@ -4515,3 +4515,5 @@ html[data-theme="dark"] {
 .home-summary-card[data-empty="true"]:not([aria-pressed="true"]) { color: var(--control-muted); background: var(--control-panel-soft); box-shadow: none; }
 .project-card:focus-visible { outline: 3px solid var(--control-blue); outline-offset: 3px; }
 .project-card { scroll-margin-block: 20px; }
+
+.fetch-progress { margin: 0 0 12px; font-size: 0.85rem; overflow-wrap: anywhere; }

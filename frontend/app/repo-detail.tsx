@@ -175,7 +175,7 @@ function StatusPane({ repo }: { repo: Repo }) {
     [entries, repo.path, visible],
   );
   const excluded = diffCommands?.excluded;
-  const hasRenamedEntry = visible.some((entry) => /[RC]/.test(entry.xy));
+  const hasMissingOriginalPath = visible.some((entry) => /[RC]/.test(entry.xy) && entry.original_path === null);
   const exclusionParts = excluded === undefined ? [] : [
     excluded.untracked.length > 0 ? `未追跡 ${excluded.untracked.length} 件` : null,
     excluded.conflicts.length > 0 ? `競合 ${excluded.conflicts.length} 件` : null,
@@ -262,7 +262,7 @@ function StatusPane({ repo }: { repo: Repo }) {
             <div className="status-file-diff-command"><code>{diffCommands?.staged ?? "ステージ済みの差分はありません。"}</code>{diffCommands?.staged && <CopyButton value={diffCommands.staged} label="ステージ済みの差分コマンドをコピー" />}</div>
             <div className="status-file-diff-command"><code>{diffCommands?.unstaged ?? "未ステージの差分はありません。"}</code>{diffCommands?.unstaged && <CopyButton value={diffCommands.unstaged} label="未ステージの差分コマンドをコピー" />}</div>
             {exclusionParts.length > 0 && <p className="status-file-diff-note" role="status">{exclusionParts.join("、")}は差分コマンドから除外しました。未追跡ファイルはGitの差分対象外で、競合と未対応の状態は安全に対象を確定できないためです。</p>}
-            {hasRenamedEntry && <p className="status-file-diff-note" role="status">名前変更・コピーは元のパスが未取得のため、差分コマンドから除外しています。名前変更前後の差分はターミナルで確認してください。</p>}
+            {hasMissingOriginalPath && <p className="status-file-diff-note" role="status">名前変更・コピーは元のパスが未取得のため、差分コマンドから除外しています。名前変更前後の差分はターミナルで確認してください。</p>}
           </div>
           <WorktreeDiff path={repo.path} file={selectedDiffFile} stage={diffStage} />
         </div>}

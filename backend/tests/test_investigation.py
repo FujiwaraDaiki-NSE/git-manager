@@ -67,6 +67,10 @@ def test_cherry_patch_equivalence(repo):
     git(repo, 'commit', '--allow-empty', '-m', 'right only')
     git(repo, 'cherry-pick', patch)
     result = investigation.cherry(str(repo), 'left', 'right')
+    right_sha = git(repo, 'rev-parse', 'HEAD')
+    assert (result['left'], result['right']) == ('left', 'right')
+    assert (result['left_sha'], result['right_sha']) == (patch, right_sha)
+    assert result['command'] == f'git log --cherry-mark --left-right {patch}...{right_sha}'
     assert [c['mark'] for c in result['commits']].count('=') == 2
     assert '>' in [c['mark'] for c in result['commits']]
     with pytest.raises(ValueError):

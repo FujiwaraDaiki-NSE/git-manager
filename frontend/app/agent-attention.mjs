@@ -29,3 +29,12 @@ export function snapshotAge(observedAt, now) {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}時間前`;
   return `${Math.floor(seconds / 86400)}日前`;
 }
+
+export function projectSnapshotFreshness(snapshot, now) {
+  const age = snapshotAge(snapshot.observed_at, now);
+  switch (snapshot.status) {
+    case "ready": return `Git情報：最新（${age}から変化なし）`;
+    case "refreshing": return `Git情報：更新中（${age}の状態を表示）`;
+    case "failed": return `Git情報の取得：${age} · 更新失敗：${snapshot.error}`;
+  }
+}

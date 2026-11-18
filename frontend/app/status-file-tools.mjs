@@ -134,8 +134,8 @@ function entryKind(entry) {
     return "unsupported";
   }
   if (entry.xy === "??") return "untracked";
-  // Rename/copy diff commands remain excluded from this path-only command builder.
-  if (/[RC]/.test(entry.xy)) return "unsupported";
+  // Rename/copy requires the source supplied by the status snapshot.
+  if (/[RC]/.test(entry.xy) && (typeof entry.original_path !== "string" || entry.original_path.length === 0)) return "unsupported";
   if (conflictCodes.has(entry.xy)) return "conflict";
   if (
     (entry.xy[0] === "." || changeCodes.has(entry.xy[0]))
@@ -166,7 +166,7 @@ function diffCommand(repoPath, mode, paths) {
 
 /**
  * Build independent, read-only diff commands for the visible tracked rows.
- * Rename/copy rows remain excluded; source paths are used only for display and search.
+ * Include both paths only on the side reporting a rename/copy.
  */
 export function buildStatusDiffCommands(repoPath, entries) {
   if (typeof repoPath !== "string" || repoPath.length === 0) {
@@ -196,13 +196,18 @@ export function buildStatusDiffCommands(repoPath, entries) {
     }
 
     const groups = fileStatusGroups(entry.xy);
-    if (groups.staged && !stagedSeen.has(entry.path)) {
-      stagedSeen.add(entry.path);
-      stagedPaths.push(entry.path);
-    }
-    if (groups.unstaged && !unstagedSeen.has(entry.path)) {
-      unstagedSeen.add(entry.path);
-      unstagedPaths.push(entry.path);
+    for (const [changed, code, paths, seen] of [
+      [groups.staged, entry.xy[0], stagedPaths, stagedSeen],
+      [groups.unstaged, entry.xy[1], unstagedPaths, unstagedSeen],
+    ]) {
+      if (!changed) continue;
+      const sidePaths = /[RC]/.test(code) ? [entry.original_path, entry.path] : [entry.path];
+      for (const path of sidePaths) {
+        if (!seen.has(path)) {
+          seen.add(path);
+          paths.push(path);
+        }
+      }
     }
   }
 

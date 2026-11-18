@@ -3,7 +3,7 @@
 import { AgentDecisionDetails } from "./agent-decision";
 import { resolveBranchCommits } from "./branch-commits.mjs";
 import { WorktreeOverlaps, CommitSearch, RecoveryCandidates, PatchEquivalence } from "./repository-investigations";
-import { snapshotAge } from "./agent-attention.mjs";
+import { projectSnapshotFreshness } from "./agent-attention.mjs";
 import { FetchFacts, OperationFacts, DestinationFacts } from "./git-state-facts";
 import PatchView from "./patch-view";
 import StashExplorer from "./stash-explorer";
@@ -918,7 +918,7 @@ function ProjectSnapshotFreshness({ snapshot }: { snapshot: ProjectResponse["sna
     return () => window.clearInterval(timer);
   }, []);
   if (!snapshot) return null;
-  return <>{` · Git情報の取得：${snapshotAge(snapshot.observed_at, now)}`}{snapshot.status === "failed" && ` · 更新失敗：${snapshot.error}`}</>;
+  return <> · {projectSnapshotFreshness(snapshot, now)}</>;
 }
 
 export default function ProjectControl() {

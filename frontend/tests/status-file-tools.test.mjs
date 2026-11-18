@@ -108,8 +108,8 @@ test("a directory named all does not collide with the all-directories option", (
   assert.deepEqual(filterStatusFilesByDirectory(rows, "/"), rows);
 });
 
-test("renames remain excluded from path-only diff commands", () => {
-  const rows = [{xy: "R.", path: "renamed.ts"}, {xy: ".R", path: "other.ts"}, {xy: "C.", path: "copied.ts"}];
+test("rename/copy without original paths remain excluded", () => {
+  const rows = [{xy: "R.", path: "renamed.ts", original_path: null}, {xy: ".R", path: "other.ts", original_path: null}, {xy: "C.", path: "copied.ts", original_path: null}];
   const result = buildStatusDiffCommands("/repo", rows);
   assert.equal(result.staged, null);
   assert.equal(result.unstaged, null);
@@ -123,6 +123,17 @@ test("rename and copy search matches original and destination without changing e
     assert.deepEqual(searchStatusFiles([entry], "DESTINATION"), [entry]);
     assert.deepEqual(searchStatusFiles([entry], "missing"), []);
     assert.equal(statusFilesCsv([entry]), statusFilesCsv([{ ...entry, original_path: null }]));
-    assert.equal(buildStatusDiffCommands("/repo", [entry]).staged, null);
+  }
+});
+
+test("rename/copy commands use literal source and destination on the reported side", () => {
+  for (const code of ["R", "C"]) {
+    for (const xy of [`${code}.`, `${code}M`, `.${code}`]) {
+      const result = buildStatusDiffCommands("/repo", [{ xy, original_path: "旧 名前[1].txt", path: "新 名前*.txt" }]);
+      const paths = "':(literal)旧 名前[1].txt' ':(literal)新 名前*.txt'";
+      assert.equal(result.staged, xy[0] === code ? `git -C '/repo' diff --cached -- ${paths}` : null);
+      assert.equal(result.unstaged, xy[1] === code ? `git -C '/repo' diff -- ${paths}` : xy[1] === "M" ? "git -C '/repo' diff -- ':(literal)新 名前*.txt'" : null);
+      assert.deepEqual(result.excluded.unsupported, []);
+    }
   }
 });
