@@ -29,6 +29,7 @@ STATE: dict[str, dict[str, Any]] = {}
 STATE_LOCK = threading.Lock()
 
 pool = ThreadPoolExecutor(max_workers=config.WORKERS, thread_name_prefix="git")
+refresh_pool = ThreadPoolExecutor(max_workers=config.WORKERS, thread_name_prefix="refresh")
 fetch_pool = ThreadPoolExecutor(max_workers=config.FETCH_WORKERS, thread_name_prefix="fetch")
 github_pr_pool = ThreadPoolExecutor(max_workers=config.GITHUB_PR_WORKERS, thread_name_prefix="github-pr")
 
@@ -364,6 +365,8 @@ def _refresh_sync(
                 **context,
                 "common_dir": paths.to_host(layout.common_root),
             }
+    # Network I/O must not hold the lock shared with interactive reads.
+    fetch_status = gitinfo.do_fetch(container) if fetch and config.FETCH_ENABLED else None
     project_result: dict[str, Any] | None = None
     target_confirmed_absent = False
     state_published = False
@@ -420,7 +423,7 @@ def _refresh_sync(
         elif target_confirmed_absent:
             result = None
         else:
-            result = gitinfo.collect(container, fetch=fetch, context=context)
+            result = gitinfo.collect(container, context=context, fetch_status=fetch_status)
             if result.get("fetched_at") is None:
                 result["fetched_at"] = existing_fetched_at
             if result.get("fetch_status") is None:
@@ -449,7 +452,7 @@ async def _refresh_many(
     refresh_project_metadata: bool = False,
 ) -> None:
     loop = asyncio.get_running_loop()
-    executor = fetch_pool if fetch else pool
+    executor = fetch_pool if fetch else refresh_pool
     tasks = [
         loop.run_in_executor(
             executor,
@@ -761,7 +764,7 @@ async def _discover() -> None:
         group: dict[str, Any],
     ) -> tuple[dict[str, Any], tuple[list[dict[str, Any]] | None, set[str] | None, str | None]]:
         result = await loop.run_in_executor(
-            pool,
+            refresh_pool,
             _list_worktrees_sync,
             group["main_host"],
         )
@@ -1129,6 +1132,7 @@ async def lifespan(_app: FastAPI):
     if watcher is not None:
         watcher.stop()
     pool.shutdown(wait=False)
+    refresh_pool.shutdown(wait=False)
     fetch_pool.shutdown(wait=False)
     github_pr_pool.shutdown(wait=False)
 

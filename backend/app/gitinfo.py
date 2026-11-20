@@ -651,6 +651,7 @@ def collect(
     fetch: bool = False,
     context: Mapping[str, Any] | None = None,
     *,
+    fetch_status: dict[str, Any] | None = None,
     common_dir: str | None = None,
     is_worktree: bool | None = None,
     worktree_state: str | None = None,
@@ -663,6 +664,8 @@ def collect(
     ``git worktree list --porcelain``.  Keeping that metadata out of the
     status parser makes a refresh cheap and also lets prunable worktrees be
     represented even when their directory no longer exists.
+    ``fetch_status`` accepts an already completed fetch so callers can keep
+    network I/O outside their repository lock.
     """
     context = dict(context or {})
     if common_dir is not None:
@@ -722,7 +725,8 @@ def collect(
                 resolved_is_worktree = os.path.realpath(repo) != common_root
 
     fetched_at: float | None = None
-    fetch_status = do_fetch(repo) if fetch and config.FETCH_ENABLED else None
+    if fetch and config.FETCH_ENABLED:
+        fetch_status = do_fetch(repo)
     if fetch_status is not None and fetch_status["result"] == "success":
         fetched_at = fetch_status["attempted_at"]
 

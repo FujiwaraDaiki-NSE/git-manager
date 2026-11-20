@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from types import SimpleNamespace
 import pytest
 from app import github
@@ -57,18 +58,49 @@ def test_failures_never_report_no_prs_as_success(monkeypatch, failure):
     assert "secret" not in json.dumps(result)
 
 
-def test_cache_expiry_does_not_retain_stale_success(monkeypatch):
-    github._cache.clear()
+@pytest.mark.parametrize("kind, loader, reader_name", [
+    ("merged", github.load, "_read"), ("open", github.load_open, "_read_open"),
+])
+@pytest.mark.parametrize("refresh_status", ["available", "unavailable"])
+def test_expired_cache_refreshes_once_without_waiting(monkeypatch, kind, loader, reader_name, refresh_status):
+    monkeypatch.setattr(github, "_cache", {})
+    monkeypatch.setattr(github, "_repository_locks", {})
     monkeypatch.setattr(github, "repository", lambda _: "o/r")
     clock = [0]
     monkeypatch.setattr(github.time, "monotonic", lambda: clock[0])
-    replies = iter([{**github.unavailable(""), "status": "available"}, github.unavailable("offline")])
-    monkeypatch.setattr(github, "_read", lambda _: next(replies))
-    assert github.load("repo")["status"] == "available"
-    assert github.load("repo")["status"] == "available"
+    initial = {**github.unavailable(""), "status": "available", "checked_at": 100}
+    refreshed = {**github.unavailable("offline"), "status": refresh_status, "checked_at": 200}
+    started, release = threading.Event(), threading.Event()
+    calls = []
+
+    def read(name):
+        calls.append(name)
+        if len(calls) == 1:
+            return initial
+        started.set()
+        assert release.wait(timeout=5)
+        return refreshed
+
+    monkeypatch.setattr(github, reader_name, read)
+    assert loader("repo") is initial
+    assert loader("repo") is initial
+    assert calls == ["o/r"]
     clock[0] = 61
-    assert github.load("repo")["status"] == "unavailable"
-    github._cache.clear()
+    try:
+        assert loader("repo") is initial
+        assert started.wait(timeout=2)
+        # Return the original checked_at while the refresh remains blocked.
+        for _ in range(10):
+            assert loader("repo") is initial
+        assert calls == ["o/r", "o/r"]
+    finally:
+        release.set()
+        lock = github._repository_locks[f"{kind}:o/r"]
+        assert lock.acquire(timeout=5)
+        lock.release()
+    assert loader("repo") is refreshed
+    assert github._cache[f"{kind}:o/r"] == (121, refreshed)
+    assert calls == ["o/r", "o/r"]
 
 
 def test_open_pr_graphql_pages_and_nulls(monkeypatch):
@@ -101,18 +133,3 @@ def test_open_pr_graphql_pages_and_nulls(monkeypatch):
         assert failed["status"] == "unavailable"
         assert failed["pulls"] == []
         assert "secret" not in json.dumps(failed)
-
-
-def test_open_cache_expires_and_discards_success(monkeypatch):
-    github._cache.clear()
-    monkeypatch.setattr(github, "repository", lambda _: "o/r")
-    monkeypatch.setattr(github, "_read", lambda _: github.unavailable("履歴未取得"))
-    clock = [0]
-    monkeypatch.setattr(github.time, "monotonic", lambda: clock[0])
-    replies = iter([{**github.unavailable(""), "status": "available"}, github.unavailable("offline")])
-    monkeypatch.setattr(github, "_read_open", lambda _: next(replies))
-    assert github.load_open("repo")["status"] == "available"
-    assert github.load_open("repo")["status"] == "available"
-    clock[0] = 61
-    assert github.load_open("repo")["status"] == "unavailable"
-    github._cache.clear()

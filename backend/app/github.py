@@ -44,13 +44,34 @@ def _load(repo: str, kind: str, reader) -> dict[str, Any]:
     key = f"{kind}:{name}"
     with _lock:
         repository_lock = _repository_locks.setdefault(key, threading.Lock())
-    with repository_lock:
         cached = _cache.get(key)
-        if cached is not None and time.monotonic() < cached[0]:
+        if cached is not None:
+            if time.monotonic() >= cached[0] and repository_lock.acquire(blocking=False):
+                try:
+                    threading.Thread(target=_refresh, args=(key, name, reader, repository_lock), daemon=True).start()
+                except Exception:
+                    repository_lock.release()
+                    raise
             return cached[1]
+    with repository_lock:
+        with _lock:
+            cached = _cache.get(key)
+            if cached is not None:
+                return cached[1]
         result = reader(name)
-        _cache[key] = (time.monotonic() + 60, result)
+        with _lock:
+            _cache[key] = (time.monotonic() + 60, result)
         return result
+
+
+def _refresh(key: str, name: str, reader, repository_lock: threading.Lock) -> None:
+    try:
+        result = reader(name)
+        with _lock:
+            # Replace stale success even when the refresh reports a failure.
+            _cache[key] = (time.monotonic() + 60, result)
+    finally:
+        repository_lock.release()
 
 
 def _read(name: str) -> dict[str, Any]:
