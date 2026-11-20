@@ -1,0 +1,43 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-20</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>再起動直後の応答改善（部分）、PR取得の待ち解消、判断依頼・絞り込み・移動の強化 — 2026-11-20</h1>
+<p>最優先課題「再起動直後のfetch殺到」を実測で切り分けました。自動fetchのネットワーク処理がリポジトリのロックを握ったままだったこと、背景の状態更新が画面用のスレッドプールを占有していたことを解消し、fetch一巡は約28%短くなりました。ただし起動直後約26秒の全件状態更新中は、他の画面操作が4〜9秒に劣化するため、<b>課題は未解消</b>です。あわせて、PRが大量のリポジトリで60秒ごとに15秒待たされていた問題を解消しました。</p>
+<p>開始時30点 + 検証済み加点44点 = <b>74点</b>（100点未達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+
+<h2>fetch殺到の計測（同条件A/B、fetch対象84件、backend再作成直後）</h2>
+<table><thead><tr><th>指標</th><th>改善前 (before2)</th><th>改善後 (after2)</th></tr></thead><tbody>
+<tr><td>fetch一巡の完了（再作成からの秒）</td><td>200.0s</td><td>143.9s</td></tr>
+<tr><td>design_db 初回 <code>/api/project</code>（t≈9s）</td><td>17.1s（初回計測 18.9s）</td><td>8.6s（別回 7.1s）</td></tr>
+<tr><td>起動直後4件の合計（git-manager / design_db / device-transcribe / ThinkLab）</td><td>22.8s</td><td>23.8s</td></tr>
+<tr><td>CPU 平均 / 最大</td><td>116% / 336%</td><td>83% / 260%</td></tr>
+</tbody></table>
+<ul>
+<li>起動〜26秒: 640件の状態更新（16並列）。画面要求は待ち行列からは外れたが、CPU/GILの競合で device-transcribe 0.5→3.7〜8.6s 等に劣化（未解消）。</li>
+<li>fetch中の15秒前後の遅延は fetch ではなく GitHub PR 取得（PRが大量のリポジトリで15秒タイムアウト、60秒キャッシュ）が原因 → No.2 で解消。</li>
+<li>fetch後のCPU 200%前後の継続は、ref数の多いリポジトリ（langchain 2,208 refs）のスナップショット再構築（2並列上限）。他リポジトリの応答は阻害しない。</li>
+</ul>
+
+<table><thead><tr><th>No.</th><th>改善内容</th><th>分類・点数</th><th>検証根拠</th></tr></thead><tbody>
+<tr><td>1</td><td>自動fetchのネットワーク処理（<code>do_fetch</code>）をリポジトリロックの外で実行。背景の状態更新（起動時・watcher・fetch後）を画面用 <code>pool</code> と別の <code>refresh_pool</code>（<code>config.WORKERS</code>）へ分離</td><td>高速化 +5</td><td>上表。fetch一巡 200.0→143.9s、design_db 初回 17.1→8.6s。backendテスト追加（fetch中に同じrepoのロックが取れる、背景更新が画面用poolを塞がない）</td></tr>
+<tr><td>2</td><td>GitHub PR情報を stale-while-revalidate 化。期限切れキャッシュは即返し、再取得は同じキーで1本だけ裏で実行。失敗でも結果で置き換える（古い成功を保持しない方針は維持）</td><td>高速化 +5</td><td>定常状態でキャッシュ期限切れ後の <code>/api/project</code>: thinkplatform 15.2→4.1/1.6/1.4s、PaddleOCR 15.1→0.19/0.17/0.17s</td></tr>
+<tr><td>3</td><td>判断依頼の詳細表示に「判断依頼をコピー」（質問・選択肢・参照リンクを改行で連結）。ホームカードの簡易表示には出さない</td><td>機能 +5</td><td>design_db プロジェクト情報でAPI応答に判断依頼を注入（画面内のfetch差し替え、確認後に復元）し、コピー内容が一致</td></tr>
+<tr><td>4</td><td>ホームの表示条件を名前付きで保存・適用・削除（ブラウザ内保存と明示、同名警告）</td><td>機能 +5</td><td>「変更あり」を保存→解除→適用で <code>?git=dirty</code> を復元、削除後 <code>savedViews=[]</code></td></tr>
+<tr><td>5</td><td>ホームカード「上位ブランチの作業状況」のブランチ名を詳細リンク化（<code>home</code> 条件を引き継ぐ）</td><td>機能 +5</td><td>design_db の development → <code>lane=branch:development&amp;home=git=dirty</code> で詳細表示</td></tr>
+<tr><td>6</td><td>作業一覧にagent明示状態の絞り込み（完全一致、agent報告なしも選択可、CSV・概要コピーにも反映）</td><td>機能 +5</td><td>design_db で「入力待ち」6/130件、「入力待ち」+「ahead」0/130件</td></tr>
+<tr><td>7</td><td>Git詳細のブランチ一覧から「このworktreeのGit詳細」に切り替え（表示中は「表示中」）</td><td>機能 +5</td><td>design_db で111件のボタン、切り替え後に見出し・パス・状態タブが対象worktreeに一致</td></tr>
+<tr><td>8</td><td>コミット検索で開始日＞終了日を入力欄近くに表示し送信しない（aria-invalid / aria-describedby）</td><td>バグ修正 +1</td><td>逆転日付で通信0件・エラー表示</td></tr>
+<tr><td>9</td><td>コミット検索の表示範囲を「51〜100件目を表示」、0件は「検索結果0件」</td><td>バグ修正 +1</td><td>git-manager --all で 1〜50 → 51〜100、該当なし検索で「検索結果0件」</td></tr>
+<tr><td>10</td><td>作業一覧の作成者・upstream条件がURLに載らず再読込・共有で消える問題（<code>laneAuthorFilter</code> / <code>laneUpstreamFilter</code> / <code>laneAgentFilter</code>）</td><td>バグ修正 +1</td><td>URL直接指定で選択状態と件数が復元</td></tr>
+<tr><td>11</td><td>ブランチ削除コマンドに実行先を含める（<code>git -C '&lt;path&gt;' branch -d '&lt;branch&gt;'</code>、行内に実行先表示）</td><td>バグ修正 +1</td><td>git-manager 統合済み14件、コピー内容を照合（実行はしていない）</td></tr>
+<tr><td>12</td><td>コミット検索のページ送り中も結果とボタンを維持し「次の50件を取得中…」、aria-busy、二重操作防止</td><td>UIリッチ化 +2</td><td>遅延注入で取得中も50行保持・ボタン無効・状態表示</td></tr>
+<tr><td>13</td><td>worktree間の変更パス重なりでXYコードに日本語の意味を併記</td><td>UIリッチ化 +2</td><td>design_db で「␣M 作業: 変更」を確認</td></tr>
+<tr><td>14</td><td>鮮度表示「最新（1分未満前から変化なし）」→「最新（変化なし・1分未満）」「最新（変化なし・42分前から）」</td><td>文言 +1</td><td>design_db 見出しで確認</td></tr>
+</tbody></table>
+<h2>加点しなかったもの・未解決</h2>
+<ul>
+<li>起動直後の全件状態更新中の画面劣化（CPU/GIL競合）。refresh並列数を下げると起動更新とfetch開始が遅れるため、今回は見送り。次回の最優先課題として継続。</li>
+<li>Codex実装担当のsandboxは <code>.git</code> が読み取り専用のため、1件目はパッチファイルで受け渡し（supervisorが適用、冗長な分岐を簡素化）。</li>
+<li>リポジトリに 2026-11-15 から残る cherry-pick の sequencer 状態（<code>wip b3</code>）は既存状態として触っていない。</li>
+</ul>
+<h2>テスト・稼働</h2>
+<p>backend 428 passed（既存のStarlette警告1件）、frontend 448/448、<code>tsc --noEmit</code> 成功、Codexレビュー（第1陣）指摘なし。<code>gitdash-compose up -d --build</code> で反映、http://localhost:4412 。</p>
+</html>
