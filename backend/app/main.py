@@ -27,6 +27,7 @@ from app.watcher import Watcher
 # ホストパスをキーにした現在の状態
 STATE: dict[str, dict[str, Any]] = {}
 STATE_LOCK = threading.Lock()
+_pending_snapshot_checks: set[str] = set()
 
 pool = ThreadPoolExecutor(max_workers=config.WORKERS, thread_name_prefix="git")
 refresh_pool = ThreadPoolExecutor(max_workers=config.WORKERS, thread_name_prefix="refresh")
@@ -284,13 +285,24 @@ def _get_project_sync(
                                  lambda: {**merged_future.result(), "open": open_future.result()})
 
 
-def _refresh_project_snapshot(row: dict[str, Any]) -> None:
+def _queue_project_snapshot_check(row: dict[str, Any]) -> None:
     project_id = row.get("common_dir")
     if not isinstance(project_id, str):
         return
     with STATE_LOCK:
+        if project_id in _pending_snapshot_checks:
+            return
+        # The worker takes STATE_LOCK before starting, so it cannot remove
+        # the entry before a successful submission is recorded.
+        refresh_pool.submit(_refresh_project_snapshot, project_id, row["path"])
+        _pending_snapshot_checks.add(project_id)
+
+
+def _refresh_project_snapshot(project_id: str, host_path: str) -> None:
+    with STATE_LOCK:
+        _pending_snapshot_checks.discard(project_id)
         siblings = {path: dict(item) for path, item in STATE.items() if item.get("common_dir") == project_id or path == project_id}
-    representative = next((path for path, item in siblings.items() if item.get("is_worktree") is False), row["path"])
+    representative = next((path for path, item in siblings.items() if item.get("is_worktree") is False), host_path)
     project_snapshots.refresh_existing(paths.to_container(representative), project_id, siblings, _repo_lock(representative))
 
 
@@ -319,7 +331,7 @@ def _upsert(repo: dict[str, Any]) -> None:
     merged, siblings = _store_repo(repo)
     for row in [merged, *siblings]:
         bus.publish("repo", row)
-    _refresh_project_snapshot(merged)
+    _queue_project_snapshot_check(merged)
 
 
 def _upsert_threadsafe(repo: dict[str, Any]) -> None:
@@ -327,7 +339,7 @@ def _upsert_threadsafe(repo: dict[str, Any]) -> None:
     merged, siblings = _store_repo(repo)
     for row in [merged, *siblings]:
         bus.publish_threadsafe("repo", row)
-    _refresh_project_snapshot(merged)
+    _queue_project_snapshot_check(merged)
 
 
 def _remove_threadsafe(host_path: str) -> None:

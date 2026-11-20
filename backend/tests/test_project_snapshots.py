@@ -177,9 +177,59 @@ def test_linked_refresh_uses_the_same_representative_as_project_api(snapshot_rep
     monkeypatch.setattr(main, "STATE", state)
     calls = []
     monkeypatch.setattr(project_snapshots, "refresh_existing", lambda *args: calls.append(args))
-    main._refresh_project_snapshot(state[str(linked)])
+    main._refresh_project_snapshot(str(repo), str(linked))
     assert calls[0][0] == str(repo)
     assert calls[0][1] == str(repo)
+
+
+@pytest.fixture
+def queued_snapshot_checks(monkeypatch):
+    from app import main
+
+    queued = []
+    monkeypatch.setattr(main, "STATE", {})
+    monkeypatch.setattr(main, "_pending_snapshot_checks", set())
+    monkeypatch.setattr(main.refresh_pool, "submit", lambda *args: queued.append(args))
+    monkeypatch.setattr(main.bus, "publish_threadsafe", lambda *args: None)
+    return queued
+
+
+def test_pending_snapshot_checks_are_coalesced(queued_snapshot_checks, monkeypatch):
+    from app import main
+
+    calls = []
+    monkeypatch.setattr(project_snapshots, "refresh_existing", lambda *args: calls.append(args))
+    main._upsert({"path": "/repo", "common_dir": "/repo", "is_worktree": False})
+    main._upsert_threadsafe({"path": "/linked", "common_dir": "/repo", "is_worktree": True})
+
+    assert calls == []
+    assert len(queued_snapshot_checks) == 1
+    function, *args = queued_snapshot_checks.pop()
+    function(*args)
+    assert len(calls) == 1
+    assert set(calls[0][2]) == {"/repo", "/linked"}
+
+
+def test_snapshot_check_can_be_queued_again_after_it_starts(queued_snapshot_checks, monkeypatch):
+    from app import main
+
+    row = {"path": "/repo", "common_dir": "/repo", "is_worktree": False, "branch": "main"}
+    checked_branches = []
+
+    def refresh_existing(repo, project_id, state_rows, repo_lock):
+        checked_branches.append(state_rows["/repo"]["branch"])
+        if len(checked_branches) == 1:
+            main._upsert_threadsafe({**row, "branch": "updated"})
+
+    monkeypatch.setattr(project_snapshots, "refresh_existing", refresh_existing)
+    main._upsert(row)
+    function, *args = queued_snapshot_checks.pop()
+    function(*args)
+
+    assert len(queued_snapshot_checks) == 1
+    function, *args = queued_snapshot_checks.pop()
+    function(*args)
+    assert checked_branches == ["main", "updated"]
 
 
 def test_all_is_computed_lazily_and_missing_stats_are_saved(snapshot_repo, monkeypatch):
