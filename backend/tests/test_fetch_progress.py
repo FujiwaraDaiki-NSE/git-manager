@@ -1,6 +1,9 @@
 import asyncio
 
+import pytest
+
 from app import main
+from test_project import git, init_repo
 
 
 def test_fetch_progress_counts_repositories_and_failures(monkeypatch):
@@ -54,3 +57,57 @@ def test_overlapping_fetch_rounds_do_not_mix_progress(monkeypatch):
     assert [event['active'] for event in events].count(False) == 1
     # 2回目のラウンドは1回目の取得済みを対象から外すため、同じリポジトリを再fetchしない。
     assert sorted(calls) == ['/a', '/b']
+
+
+@pytest.mark.parametrize('refs_changed', [False, True], ids=['unchanged', 'changed'])
+def test_fetch_round_refreshes_project_metadata_only_if_refs_changed(tmp_path, monkeypatch, refs_changed):
+    repo = tmp_path / 'repo'
+    init_repo(repo)
+    representative = str(repo)
+    linked = str(tmp_path / 'linked')
+    states = {
+        path: {'path': path, 'common_dir': representative, 'remote': 'origin', 'fetched_at': None}
+        for path in [representative, linked]
+    }
+    fetch_status = {'attempted_at': main.time.time(), 'result': 'success', 'category': None, 'reason': None}
+    events = []
+    metadata_refreshes = []
+    member_refreshes = []
+    refresh_sync = main._refresh_sync
+
+    def fetch(path):
+        assert path == representative
+        if refs_changed:
+            git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        return fetch_status
+
+    def refresh(path, fetch, context=None, refresh_project_metadata=False):
+        if refresh_project_metadata:
+            metadata_refreshes.append(path)
+        return refresh_sync(path, fetch, context, refresh_project_metadata)
+
+    async def refresh_members(paths):
+        member_refreshes.extend(paths)
+
+    monkeypatch.setattr(main, 'STATE', states)
+    monkeypatch.setattr(main, 'fetching', {})
+    monkeypatch.setattr(main, '_fetch_round_lock', asyncio.Lock())
+    monkeypatch.setattr(main, '_queue_project_snapshot_check', lambda row: None)
+    monkeypatch.setattr(main.config, 'FETCH_ENABLED', True)
+    monkeypatch.setattr(main.gitinfo, 'do_fetch', fetch)
+    # When worktree metadata cannot be listed, the round refreshes members separately.
+    monkeypatch.setattr(main.gitinfo, 'list_worktrees', lambda path: None)
+    monkeypatch.setattr(main, '_refresh_sync', refresh)
+    monkeypatch.setattr(main, '_refresh_many', refresh_members)
+    monkeypatch.setattr(main.bus, 'publish', lambda kind, data: events.append((kind, dict(data))))
+    monkeypatch.setattr(main.store, 'save', lambda state: None)
+
+    asyncio.run(main._fetch_round(list(states)))
+
+    assert metadata_refreshes == ([representative] if refs_changed else [])
+    assert member_refreshes == ([linked] if refs_changed else [])
+    for path in states:
+        assert states[path]['fetch_status'] == fetch_status
+        assert states[path]['fetched_at'] == fetch_status['attempted_at']
+    assert {data['path'] for kind, data in events if kind == 'repo' and data.get('fetch_status') == fetch_status} == set(states)
+    assert events[-1] == ('fetch', {'active': False, 'total': 1, 'done': 1, 'failed': 0})

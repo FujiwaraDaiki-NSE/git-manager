@@ -60,11 +60,12 @@ MAX_GRAPH_LIMIT = 2_000
 
 
 class _RefreshResult(dict[str, Any]):
-    """A refresh result carrying whether its worker already published state."""
+    """A refresh result with worker-side publication and fetch information."""
 
-    def __init__(self, values: dict[str, Any], *, state_published: bool = False) -> None:
+    def __init__(self, values: dict[str, Any], *, state_published: bool = False, fetch_unchanged: bool = False) -> None:
         super().__init__(values)
         self.state_published = state_published
+        self.fetch_unchanged = fetch_unchanged
 
 
 def _repo_lock_key(host_path: str) -> str:
@@ -374,6 +375,14 @@ def _suppress_key(host_path: str) -> str:
     return _repo_lock_key(host_path)
 
 
+def _fetch_fingerprint(container: str) -> str | None:
+    try:
+        return project_snapshots.fingerprint(container)
+    except (OSError, RuntimeError):
+        # An unreadable fingerprint cannot establish that the fetch was a no-op.
+        return None
+
+
 def _refresh_sync(
     host_path: str,
     fetch: bool = False,
@@ -394,9 +403,13 @@ def _refresh_sync(
             }
     # Network I/O must not hold the lock shared with interactive reads.
     fetch_status = None
+    fetch_unchanged = False
     if fetch and config.FETCH_ENABLED:
         with _fetch_lock(host_path):
+            before = _fetch_fingerprint(container)
             fetch_status = gitinfo.do_fetch(container)
+            if fetch_status is not None and fetch_status["result"] == "success" and before is not None:
+                fetch_unchanged = before == _fetch_fingerprint(container)
     project_result: dict[str, Any] | None = None
     target_confirmed_absent = False
     state_published = False
@@ -472,7 +485,7 @@ def _refresh_sync(
         suppress_until = time.time() + SUPPRESS_SEC
         _suppress[host_path] = suppress_until
         _suppress[_suppress_key(host_path)] = suppress_until
-    return _RefreshResult(result, state_published=state_published)
+    return _RefreshResult(result, state_published=state_published, fetch_unchanged=fetch_unchanged)
 
 
 async def _refresh_many(
@@ -951,6 +964,8 @@ async def _fetch_round_serialized(host_paths: list[str]) -> None:
         fetched_at = fetched.get("fetched_at")
         if fetched["fetch_status"] is None or fetched["fetch_status"]["result"] != "success":
             return common, representative, members, fetched
+        if isinstance(fetched, _RefreshResult) and fetched.fetch_unchanged:
+            return common, representative, members, fetched
         with STATE_LOCK:
             for path in members:
                 if path in STATE:
@@ -981,6 +996,9 @@ async def _fetch_round_serialized(host_paths: list[str]) -> None:
                 fetching["failed"] += 1
             bus.publish("fetch", dict(fetching))
         if result is None:
+            continue
+        if isinstance(result, _RefreshResult) and result.fetch_unchanged:
+            # The first upsert already propagated the fetch result to siblings.
             continue
         if isinstance(result, _RefreshResult) and result.state_published:
             # Project metadata reconciliation already updated and published
