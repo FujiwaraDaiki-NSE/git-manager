@@ -46,6 +46,10 @@ _suppress: dict[str, float] = {}
 _repo_locks: dict[str, threading.Lock] = {}
 _repo_locks_guard = threading.Lock()
 
+# Fetches share refs across worktrees, but must not block interactive reads.
+_fetch_locks: dict[str, threading.Lock] = {}
+_fetch_locks_guard = threading.Lock()
+
 # inotify は 1 操作で複数イベントを出すのでまとめてから叩く
 DEBOUNCE_SEC = 1.0
 _pending: set[str] = set()
@@ -85,6 +89,17 @@ def _repo_lock(host_path: str) -> threading.Lock:
         if lock is None:
             lock = threading.Lock()
             _repo_locks[key] = lock
+        return lock
+
+
+def _fetch_lock(host_path: str) -> threading.Lock:
+    """Return the fetch lock shared by all worktrees of a repository."""
+    key = _repo_lock_key(host_path)
+    with _fetch_locks_guard:
+        lock = _fetch_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _fetch_locks[key] = lock
         return lock
 
 
@@ -366,7 +381,10 @@ def _refresh_sync(
                 "common_dir": paths.to_host(layout.common_root),
             }
     # Network I/O must not hold the lock shared with interactive reads.
-    fetch_status = gitinfo.do_fetch(container) if fetch and config.FETCH_ENABLED else None
+    fetch_status = None
+    if fetch and config.FETCH_ENABLED:
+        with _fetch_lock(host_path):
+            fetch_status = gitinfo.do_fetch(container)
     project_result: dict[str, Any] | None = None
     target_confirmed_absent = False
     state_published = False

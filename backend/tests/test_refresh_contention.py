@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from app import main
-from test_project import init_repo
+from test_project import git, init_repo
 
 
 def test_background_refresh_does_not_queue_ui_work(monkeypatch):
@@ -79,3 +79,50 @@ def test_fetch_releases_repository_lock_and_preserves_result(tmp_path, monkeypat
     assert row['fetch_status'] == status
     assert row['fetched_at'] == expected_time
     assert calls == [path]
+
+
+def test_fetches_for_linked_worktrees_are_serialized(tmp_path, monkeypatch):
+    repo = tmp_path / 'repo'
+    init_repo(repo)
+    worktree = tmp_path / 'worktree'
+    git(repo, 'worktree', 'add', '-b', 'linked', str(worktree))
+    monkeypatch.setattr(main.paths, 'to_container', lambda value: value)
+    monkeypatch.setattr(main.paths, 'to_host', lambda value: value)
+    monkeypatch.setattr(main.config, 'FETCH_ENABLED', True)
+    monkeypatch.setattr(main, 'STATE', {})
+    monkeypatch.setattr(main, '_suppress', {})
+    monkeypatch.setattr(main, '_fetch_locks', {})
+    started = threading.Event()
+    release = threading.Event()
+    second_requested = threading.Event()
+    second_started = threading.Event()
+    fetch_lock = main._fetch_lock
+
+    def observed_fetch_lock(path):
+        lock = fetch_lock(path)
+        if path == str(worktree):
+            second_requested.set()
+        return lock
+
+    def fetch(path):
+        if path == str(repo):
+            started.set()
+            assert release.wait(2)
+        else:
+            second_started.set()
+        return None
+
+    monkeypatch.setattr(main, '_fetch_lock', observed_fetch_lock)
+    monkeypatch.setattr(main.gitinfo, 'do_fetch', fetch)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(main._refresh_sync, str(repo), True)
+        try:
+            assert started.wait(1)
+            second = executor.submit(main._refresh_sync, str(worktree), True)
+            assert second_requested.wait(1)
+            assert not second_started.wait(.1)
+        finally:
+            release.set()
+        first.result(timeout=2)
+        second.result(timeout=2)
+    assert second_started.is_set()
