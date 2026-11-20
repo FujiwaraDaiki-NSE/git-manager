@@ -33,7 +33,7 @@ export function snapshotAge(observedAt, now) {
 export function projectSnapshotFreshness(snapshot, now) {
   const age = snapshotAge(snapshot.observed_at, now);
   switch (snapshot.status) {
-    case "ready": return `Git情報：最新（${age}から変化なし）`;
+    case "ready": return `Git情報：最新（変化なし・${age === "1分未満前" ? "1分未満" : `${age}から`}）`;
     case "refreshing": return `Git情報：更新中（${age}の状態を表示）`;
     case "failed": return `Git情報の取得：${age} · 更新失敗：${snapshot.error}`;
   }

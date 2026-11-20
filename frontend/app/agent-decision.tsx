@@ -1,4 +1,5 @@
 import "./agent-decision.css";
+import CopyButton from "./copy-button";
 import type { AgentDecision } from "./types";
 
 export function AgentDecisionDetails({ decision, compact }: { decision: AgentDecision | null | undefined; compact?: boolean }) {
@@ -19,5 +20,6 @@ export function AgentDecisionDetails({ decision, compact }: { decision: AgentDec
       } catch { /* Invalid URLs are displayed as text. */ }
       return <li key={index}>{link}</li>;
     })}</ul>}
+    <CopyButton label="判断依頼をコピー" value={[decision.question, ...decision.options, ...decision.links].join("\n")} />
   </div>;
 }

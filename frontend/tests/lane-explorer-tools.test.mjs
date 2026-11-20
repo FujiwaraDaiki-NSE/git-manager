@@ -9,6 +9,7 @@ import {
   laneAuthors,
   laneCsv,
   laneMatchesAuthor,
+  laneMatchesAgent,
   laneMatchesUpstream,
   laneSummaryMarkdown,
   laneUpstreamState,
@@ -119,4 +120,20 @@ test("Markdown handoff has complete table rows, upstream target, and escaped con
   assert.equal(markdown.includes("<unsafe>"), false);
   assert.equal(markdown.includes("<repo>"), false);
   assert.match(markdown, /unknown \|\n$/);
+});
+
+test("agent filters match explicit status and never infer status from hooks", () => {
+ for (const run_state of ["running", "finished"]) {
+  const item = lane({ agent: { kind: "lifecycle", status: "completed", run_state } });
+  assert.equal(laneMatchesAgent(item, "unknown"), true);
+  assert.equal(laneMatchesAgent(item, "implementing"), false);
+  assert.equal(laneMatchesAgent(item, "completed"), false);
+ }
+ const items = [lane(), lane({ agent: null }), lane({ agent: { kind: "status", status: "implementing" } })];
+ const matches = items.filter((item) => laneMatchesAuthor(item, encodeLaneAuthor("Alice")) && laneMatchesUpstream(item, "synced") && laneMatchesAgent(item, "testing"));
+ assert.deepEqual(matches, [items[0]]);
+ assert.equal(laneMatchesAgent(items[1], "unknown"), true);
+ assert.equal(laneMatchesAgent(items[1], "all"), true);
+ assert.match(laneCsv(matches), /testing/);
+ assert.match(laneSummaryMarkdown({ name: "repo", main_path: "/repo", default_branch: "main" }, matches), /testing/);
 });

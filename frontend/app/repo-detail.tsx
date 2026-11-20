@@ -19,6 +19,7 @@ import {
   STATUS_FILE_DIRECTORY_ROOT,
   STATUS_FILE_EXTENSION_ALL,
   STATUS_FILE_EXTENSION_NONE,
+  shellQuote,
   buildStatusDiffCommands,
   filterStatusFilesByDirectory,
   filterStatusFilesByExtension,
@@ -44,6 +45,8 @@ import { codeColor, stateBadges, truncationLabel } from "./status";
 export type DetailTab = "status" | "graph" | "branches";
 
 type RepoDetailProps = {
+  repos: ReadonlyMap<string, Repo>;
+  onOpenWorktree: (path: string) => void;
   repo: Repo;
   copied: string | null;
   onCopy: (command: string) => void;
@@ -61,10 +64,6 @@ const GRAPH_LIMIT_STEP = 200;
 // Keep in sync with backend/app/main.py MAX_GRAPH_LIMIT.
 const MAX_GRAPH_LIMIT = 2_000;
 const COMMIT_FETCH_DEBOUNCE_MS = 150;
-
-function shellQuote(value: string) {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
 
 async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
   let response: Response;
@@ -343,9 +342,15 @@ function CommitPane({
 }
 
 function BranchRow({
+  repo,
+  repos,
+  onOpenWorktree,
   branch,
   onCopy,
 }: {
+  repo: Repo;
+  repos: ReadonlyMap<string, Repo>;
+  onOpenWorktree: (path: string) => void;
   branch: BranchesResponse["local"][number];
   onCopy: (command: string) => void;
 }) {
@@ -375,15 +380,25 @@ function BranchRow({
         {branch.worktree && (
           <span className="branch-worktree" title={branch.worktree}>
             作業場所 · {branch.worktree}
+            {branch.worktree === repo.path ? (
+              <span>表示中</span>
+            ) : repos.has(branch.worktree) ? (
+              <button className="copy" type="button" onClick={() => onOpenWorktree(branch.worktree!)}>
+                このworktreeのGit詳細
+              </button>
+            ) : (
+              <span>リポジトリ情報が未取得のためGit詳細を開けません</span>
+            )}
           </span>
         )}
         {abandonedCandidate && (
           <span className="branch-action">
             <span className="branch-abandoned">統合済み · 削除候補</span>
+            <span className="branch-command-target">実行先 · <code>{repo.path}</code></span>
             <button
               className="branch-delete"
               type="button"
-              onClick={() => onCopy(`git branch -d ${shellQuote(branch.name)}`)}
+              onClick={() => onCopy(worktreeCommand(`git branch -d ${shellQuote(branch.name)}`, repo.path, repo.common_dir))}
             >
               削除コマンドをコピー
             </button>
@@ -398,6 +413,9 @@ function BranchRow({
 }
 
 function BranchesPane({
+  repo,
+  repos,
+  onOpenWorktree,
   data,
   state,
   error,
@@ -406,6 +424,9 @@ function BranchesPane({
   onRetry,
   onCopy,
 }: {
+  repo: Repo;
+  repos: ReadonlyMap<string, Repo>;
+  onOpenWorktree: (path: string) => void;
   data: BranchesResponse | null;
   state: LoadState;
   error: string | null;
@@ -491,7 +512,7 @@ function BranchesPane({
           <div className="branch-group">
             <h4>ローカル</h4>
             {visibleLocal.map((branch) => (
-              <BranchRow key={branch.name} branch={branch} onCopy={onCopy} />
+              <BranchRow key={branch.name} branch={branch} repo={repo} repos={repos} onOpenWorktree={onOpenWorktree} onCopy={onCopy} />
             ))}
             {mergedCount > 0 && (
               <button
@@ -509,7 +530,7 @@ function BranchesPane({
           <div className="branch-group">
             <h4>リモート</h4>
             {visibleRemote.map((branch) => (
-              <BranchRow key={branch.name} branch={branch} onCopy={onCopy} />
+              <BranchRow key={branch.name} branch={branch} repo={repo} repos={repos} onOpenWorktree={onOpenWorktree} onCopy={onCopy} />
             ))}
             {visibleRemote.length === 0 && (
               <div className="muted-line">{remote.length === 0 ? "リモートブランチはありません" : "条件に一致するリモートブランチはありません"}</div>
@@ -523,6 +544,8 @@ function BranchesPane({
 }
 
 export default function RepoDetail({
+  repos,
+  onOpenWorktree,
   repo,
   copied,
   onCopy,
@@ -865,6 +888,9 @@ export default function RepoDetail({
 
       {activeTab === "branches" && (
         <BranchesPane
+          repo={repo}
+          repos={repos}
+          onOpenWorktree={onOpenWorktree}
           data={branches}
           state={branchesState}
           error={branchesError}

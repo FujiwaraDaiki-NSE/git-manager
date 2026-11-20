@@ -19,6 +19,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AGENT_SUMMARY_LABELS,
   FAVORITES_STORAGE_KEY,
+  SAVED_VIEWS_STORAGE_KEY,
+  parseSavedViews,
+  homeBranchHref,
   aggregateAgentCounts,
   countOldActiveReports,
   agentCount,
@@ -185,7 +188,7 @@ function ProjectCard({
         {completedCount !== null && <span><strong>{formatAgentCount(completedCount)}</strong> 完了</span>}
       </div>}
       {tasks.length > 0 && <div className="project-card-agent-list" aria-label="上位ブランチの作業状況">
-        {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); return <div className="agent-task-row" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><span title={taskState === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{task.branch || "ブランチ未取得"}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent報告なし</strong><span>明示的な報告はありません</span></div>}
+        {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); const branchHref = homeBranchHref(target, task.branch, homeQuery); return <div className="agent-task-row" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><span title={taskState === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{branchHref ? <Link href={branchHref} prefetch={false}>{task.branch}</Link> : task.branch || "ブランチ未取得"}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent報告なし</strong><span>明示的な報告はありません</span></div>}
         {maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
       </div>}
       <div className="project-card-event"><span className="eyebrow">{latestAgent ? "最新のブランチ報告" : "最新コミット"}</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><span>{latestAgent.branch || "ブランチ未取得"} · {agentStateLabel(agentTaskState(latestAgent))}</span><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>{relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>
@@ -206,9 +209,7 @@ function ProjectCard({
         const task = nextAgentCheck(project, acknowledgements);
         const branch = task ? task.branch : project.next_lane;
         if (!branch) return null;
-        const params = target === null ? null : new URLSearchParams({ path: target, tab: "flow", range: "7d", lane: `branch:${branch}` });
-        if (params && homeQuery) params.set("home", homeQuery);
-        const nextHref = task ? (params ? `/project?${params}` : null) : workHref("all", branch);
+        const nextHref = task ? homeBranchHref(target, branch, homeQuery) : workHref("all", branch);
         const label = branch === "(detached)" ? "HEAD切り離し（ブランチなし）" : branch;
         return <div className="project-card-footer"><span>次に確認 {nextHref ? <Link href={nextHref} prefetch={false}><strong>{label}</strong><span aria-hidden="true"> →</span></Link> : <strong>{label}</strong>}{task && <span title={task.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined}> · {task.status === "waiting_for_user" ? "agentが入力待ち" : task.status === "blocked" ? "agentが問題を報告" : task.status === "review_required" ? "agentがレビュー待ち" : task.status === "merge_ready" ? "agentがマージ準備完了を報告" : null}</span>}</span><AgentDecisionDetails decision={task?.decision} compact /></div>;
       })()}
@@ -246,6 +247,33 @@ export default function Page() {
   const [invalidUrlParams, setInvalidUrlParams] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favoritesReady, setFavoritesReady] = useState(false);
+  const [savedViews, setSavedViews] = useState<Array<{ name: string; view: HomeView }>>([]);
+  const [savedViewsReady, setSavedViewsReady] = useState(false);
+  const [savedViewsIssue, setSavedViewsIssue] = useState<string | null>(null);
+  const [viewName, setViewName] = useState("");
+  useEffect(() => {
+    try {
+      const parsed = parseSavedViews(window.localStorage.getItem(SAVED_VIEWS_STORAGE_KEY));
+      if (parsed === null) {
+        setSavedViewsIssue("保存した表示条件の形式が正しくありません。");
+        return;
+      }
+      setSavedViews(parsed as Array<{ name: string; view: HomeView }>);
+      setSavedViewsReady(true);
+    } catch {
+      setSavedViewsIssue("保存した表示条件を読み込めません。");
+    }
+  }, []);
+  const persistViews = (next: Array<{ name: string; view: HomeView }>) => {
+    try {
+      window.localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(next));
+      setSavedViews(next);
+      setSavedViewsIssue(null);
+      setViewName("");
+    } catch {
+      setSavedViewsIssue("表示条件の変更を保存できませんでした。保存済みの条件は変更していません。");
+    }
+  };
   const [favoritesStorageIssue, setFavoritesStorageIssue] = useState<"read" | "format" | "write" | "reset" | null>(null);
   const gridRef = useRef<HTMLElement>(null);
   const [acknowledgements, setAcknowledgements] = useState<Acknowledgements | null>(null);
@@ -438,6 +466,30 @@ export default function Page() {
         <div role="group" aria-label="カード密度"><button type="button" aria-pressed={view.density === "comfortable"} onClick={() => applyView({ density: "comfortable" })}>ゆったり</button><button type="button" aria-pressed={view.density === "compact"} onClick={() => applyView({ density: "compact" })}>コンパクト</button></div>
         <span className="toolbar-note">{loading && !projects.length ? "Git件数を取得中…" : <>{gitTotals.lanes === null ? "ブランチ数は一部未取得" : `${gitTotals.lanes} ブランチ`} · {gitTotals.failed === 0 ? `${gitTotals.dirty} 作業ディレクトリに変更` : `${gitTotals.available ? `取得できた範囲で ${gitTotals.dirty} 作業ディレクトリに変更` : "変更件数は未取得"} · Git状態の取得失敗 ${gitTotals.failed}件`}</>}</span>
       </section>}
+      <section className="home-saved-views" aria-label="表示条件の保存">
+        <p>名前を付けた表示条件は、このブラウザ内（localStorage）に保存します。件数・検索結果は保存しません。</p>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          const name = viewName.trim();
+          if (!savedViewsReady || invalidUrlParams.length > 0 || !name || savedViews.some((entry) => entry.name === name)) return;
+          persistViews([...savedViews, { name, view: { ...view } }]);
+        }}>
+          <label>表示条件の名前<input value={viewName} onChange={(event) => setViewName(event.target.value)} /></label>
+          <button type="submit" disabled={!savedViewsReady || invalidUrlParams.length > 0 || !viewName.trim() || savedViews.some((entry) => entry.name === viewName.trim())}>現在の条件を保存</button>
+          {savedViews.some((entry) => entry.name === viewName.trim()) && <span>同じ名前が保存されています。別の名前を入力してください。</span>}
+        </form>
+        {savedViews.length > 0 && <ul>{savedViews.map((entry) => <li key={entry.name}><span>{entry.name}</span><button type="button" aria-label={entry.name + "の表示条件を適用"} onClick={() => applyView(entry.view)}>適用</button><button type="button" aria-label={entry.name + "の表示条件を削除"} onClick={() => persistViews(savedViews.filter((item) => item.name !== entry.name))}>削除</button></li>)}</ul>}
+        {savedViewsIssue && <div role="alert"><span>{savedViewsIssue}</span>{!savedViewsReady && <button type="button" onClick={() => {
+          try {
+            window.localStorage.removeItem(SAVED_VIEWS_STORAGE_KEY);
+            setSavedViews([]);
+            setSavedViewsReady(true);
+            setSavedViewsIssue(null);
+          } catch {
+            setSavedViewsIssue("表示条件の保存データを削除できませんでした。");
+          }
+        }}>保存データを削除して表示条件を初期化</button>}</div>}
+      </section>
       {hasActiveFilters && invalidUrlParams.length === 0 && <div className="active-filters" aria-label="選択中の検索条件">
         <span>絞り込み</span>
         {view.hideDormant && <button type="button" onClick={() => applyView({ hideDormant: false })}>休眠を非表示<span aria-hidden="true">×</span></button>}

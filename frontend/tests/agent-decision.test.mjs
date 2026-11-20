@@ -10,8 +10,9 @@ const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../app/agent-decision.tsx', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
 const module = { exports: {} };
+const CopyButton = ({ value, label }) => React.createElement('button', { 'data-value': value }, label);
 new Function('require', 'module', 'exports', compiled.outputText)(
-  (name) => name.endsWith('.css') ? {} : require(name), module, module.exports,
+  (name) => name.endsWith('.css') ? {} : name === './copy-button' ? { default: CopyButton } : require(name), module, module.exports,
 );
 const render = (decision, compact = false) => renderToStaticMarkup(React.createElement(module.exports.AgentDecisionDetails, { decision, compact }));
 
@@ -31,8 +32,15 @@ test('compact decision shows the full question as title and option count without
   assert.match(html, /class="agent-decision agent-decision-compact"/);
   assert.ok(html.includes(`title="${question.replace('<確認>', '&lt;確認&gt;')}"`));
   assert.match(html, /選択肢 2件/);
-  assert.doesNotMatch(html, /<ul>|<a /);
+  assert.doesNotMatch(html, /<ul>|<a |判断依頼をコピー|<button/);
   assert.match(render({ question: '自由回答', options: [], links: [] }, true), /選択肢 0件/);
   assert.equal(render(null, true), '');
   assert.equal(render(undefined, true), '');
+});
+
+test('decision copy includes question, optional choices and links on separate lines', () => {
+  const html = render({ question: 'どう進める？', options: ['進める', '見送る'], links: ['https://example.com/pr', 'https://example.com/docs'] });
+  assert.ok(html.includes('data-value="どう進める？\n進める\n見送る\nhttps://example.com/pr\nhttps://example.com/docs"'));
+  assert.match(html, />判断依頼をコピー<\/button>/);
+  assert.ok(render({ question: '自由回答', options: [], links: [] }).includes('data-value="自由回答"'));
 });

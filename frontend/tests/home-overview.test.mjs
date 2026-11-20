@@ -239,3 +239,34 @@ test("Git取得失敗とfetch失敗は休眠扱いしない", async () => {
   assert.equal(isDormantProject({ ...old, git_status_failed: 1 }, {}, now), false);
   assert.equal(isDormantProject({ ...old, fetch_status: { result: "failure" } }, {}, now), false);
 });
+
+test("saved views validate every condition without defaults and retain only display settings", async () => {
+  const { HOME_DEFAULT_VIEW, parseSavedViews } = await import("../app/home-overview.mjs");
+  const view = { query: "検索 & path", agentFilter: "blocked", gitFilter: "ahead", sort: "latest", favoritesOnly: true, hideDormant: true, density: "compact" };
+  const entries = [{ name: "確認待ち", view }];
+  assert.deepEqual(parseSavedViews(JSON.stringify(entries)), entries);
+  assert.deepEqual(parseHomeUrl(homeSearch(parseSavedViews(JSON.stringify(entries))[0].view)).view, view);
+  assert.deepEqual(parseSavedViews(null), []);
+  for (const data of ["{", "null", "{}", JSON.stringify([{ name: "", view }]), JSON.stringify([...entries, ...entries])]) assert.equal(parseSavedViews(data), null);
+  for (const key of Object.keys(HOME_DEFAULT_VIEW)) {
+    const incomplete = { ...view };
+    delete incomplete[key];
+    assert.equal(parseSavedViews(JSON.stringify([{ name: "条件", view: incomplete }])), null);
+    assert.equal(parseSavedViews(JSON.stringify([{ name: "条件", view: { ...view, [key]: null } }])), null);
+  }
+  assert.equal(parseSavedViews(JSON.stringify([{ name: "条件", view: { ...view, sort: "invalid" } }])), null);
+  assert.deepEqual(parseSavedViews(JSON.stringify([{ name: "条件", view: { ...view, count: 10 }, results: ["repo"] }])), [{ name: "条件", view }]);
+});
+
+test("branch selection URL preserves home conditions and requires a known path and branch", async () => {
+  const { homeBranchHref } = await import("../app/home-overview.mjs");
+  const home = "q=hello&agent=blocked&density=compact";
+  const url = new URL(homeBranchHref("/repo/a b", "feature/a&b", home), "http://localhost");
+  assert.equal(url.pathname, "/project");
+  assert.deepEqual(Object.fromEntries(url.searchParams), { path: "/repo/a b", tab: "flow", range: "7d", lane: "branch:feature/a&b", home });
+  assert.equal(new URL(homeBranchHref("/repo", "main", ""), "http://localhost").searchParams.has("home"), false);
+  for (const missing of [null, undefined, ""]) {
+    assert.equal(homeBranchHref(missing, "main", home), null);
+    assert.equal(homeBranchHref("/repo", missing, home), null);
+  }
+});

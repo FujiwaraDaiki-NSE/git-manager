@@ -6,9 +6,15 @@ import { countOldActiveReports } from "../app/home-overview.mjs";
 test("Git情報は照合済み・更新中・失敗を区別する", () => {
   const now = 24 * 3600 * 1000;
   const snapshot = { observed_at: 3600, error: "失敗理由" };
-  assert.equal(projectSnapshotFreshness({ ...snapshot, status: "ready" }, now), "Git情報：最新（23時間前から変化なし）");
+  assert.equal(projectSnapshotFreshness({ ...snapshot, status: "ready" }, now), "Git情報：最新（変化なし・23時間前から）");
   assert.equal(projectSnapshotFreshness({ ...snapshot, status: "refreshing" }, now), "Git情報：更新中（23時間前の状態を表示）");
   assert.equal(projectSnapshotFreshness({ ...snapshot, status: "failed" }, now), "Git情報の取得：23時間前 · 更新失敗：失敗理由");
+});
+
+test("最新の鮮度表示は1分未満と分単位の経過時間を自然に表示する", () => {
+  const now = 600_000;
+  assert.equal(projectSnapshotFreshness({ observed_at: 570, status: "ready" }, now), "Git情報：最新（変化なし・1分未満）");
+  assert.equal(projectSnapshotFreshness({ observed_at: 300, status: "ready" }, now), "Git情報：最新（変化なし・5分前から）");
 });
 
 test("実行中の古い報告だけを24時間境界を含め数え、時刻不明は推測しない", () => {

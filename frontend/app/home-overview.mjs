@@ -34,6 +34,37 @@ export const HOME_DEFAULT_VIEW = {
 };
 
 export const FAVORITES_STORAGE_KEY = "gitdash.home.favorites";
+export const SAVED_VIEWS_STORAGE_KEY = "gitdash.home.savedViews";
+
+export function parseSavedViews(serialized) {
+  if (serialized === null) return [];
+  try {
+    const entries = JSON.parse(serialized);
+    if (!Array.isArray(entries)) return null;
+    const names = new Set();
+    for (const entry of entries) {
+      if (!entry || typeof entry.name !== "string" || !entry.name.trim()
+        || entry.name !== entry.name.trim() || names.has(entry.name)) return null;
+      names.add(entry.name);
+      const view = entry.view;
+      if (!view || typeof view.query !== "string" || !isAgentFilter(view.agentFilter)
+        || !isGitFilter(view.gitFilter) || !isSort(view.sort) || !isDensity(view.density)
+        || typeof view.favoritesOnly !== "boolean" || typeof view.hideDormant !== "boolean") return null;
+    }
+    return entries.map(({ name, view }) => ({ name, view: Object.fromEntries(
+      Object.keys(HOME_DEFAULT_VIEW).map((key) => [key, view[key]]),
+    ) }));
+  } catch {
+    return null;
+  }
+}
+
+export function homeBranchHref(path, branch, homeQuery) {
+  if (typeof path !== "string" || !path || typeof branch !== "string" || !branch) return null;
+  const params = new URLSearchParams({ path, tab: "flow", range: "7d", lane: `branch:${branch}` });
+  if (homeQuery) params.set("home", homeQuery);
+  return `/project?${params}`;
+}
 
 const agentSummaryKeySet = new Set(AGENT_SUMMARY_KEYS);
 const gitFilterKeySet = new Set(GIT_FILTER_KEYS);

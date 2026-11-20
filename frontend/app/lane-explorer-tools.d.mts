@@ -19,3 +19,8 @@ export declare const escapeLaneCsvCell: (value: unknown) => string;
 export declare const LANE_CSV_HEADERS: readonly string[];
 export declare function laneCsv(lanes: readonly ProjectLane[]): string;
 export declare function laneSummaryMarkdown(project: Pick<ProjectResponse, "name" | "main_path" | "default_branch">, lanes: readonly ProjectLane[]): string;
+
+export type LaneAgentFilter = "all" | AgentStatus | "unknown";
+export declare const LANE_AGENT_FILTERS: readonly LaneAgentFilter[];
+export declare function laneMatchesAgent(lane: ProjectLane, filter: LaneAgentFilter): boolean;
+export declare function decodeAuthorFilter(value: string): { valid: boolean; value: string | null };

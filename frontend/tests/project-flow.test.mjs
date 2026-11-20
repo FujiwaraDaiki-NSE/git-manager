@@ -29,6 +29,7 @@ test("URL state is restored and updated without dropping the project path", () =
     relationRef: null,
     at: 35,
     laneQuery: "", laneFilter: "all", laneOrder: "name",
+    laneAuthorFilter: "", laneUpstreamFilter: "all", laneAgentFilter: "all",
     activityQuery: "", activityFilter: "all", activityOrder: "newest",
     invalidParams: [],
   });
@@ -105,4 +106,14 @@ test("flow sections use URL defaults, preserve context, and reject unknown value
     assert.equal(state.flowSection, value);
     assert.deepEqual(state.invalidParams, ["flowSection"]);
   }
+});
+
+test("lane filters restore URL values without replacing absent authors", () => {
+ const values = { laneAuthorFilter: "__gitdash_lane_author__:Alice%20Smith", laneUpstreamFilter: "diverged", laneAgentFilter: "unknown" };
+ const href = updateProjectUrl("/project?path=%2Frepo&laneQuery=topic&laneFilter=dirty", values);
+ const state = parseProjectUrl(new URL(href, "http://localhost").search);
+ for (const [key, value] of Object.entries(values)) assert.equal(state[key], value);
+ assert.equal(state.laneQuery, "topic");
+ assert.deepEqual(state.invalidParams, []);
+ assert.deepEqual(parseProjectUrl("?laneAuthorFilter=__gitdash_lane_author__:%ZZ&laneUpstreamFilter=bad&laneAgentFilter=active").invalidParams.sort(), ["laneAgentFilter", "laneAuthorFilter", "laneUpstreamFilter"]);
 });

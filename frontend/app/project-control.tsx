@@ -61,7 +61,7 @@ import {
   UNKNOWN_AUTHOR_FILTER,
   UNKNOWN_BRANCH_FILTER,
 } from "./activity-explorer-tools.mjs";
-import { encodeLaneAuthor, hasUnknownLaneAuthor, laneCsv, laneAuthors, laneMatchesAuthor, laneMatchesUpstream, laneSummaryMarkdown, laneUpstreamState, LANE_UPSTREAM_FILTERS, LANE_UPSTREAM_LABELS, UNKNOWN_LANE_AUTHOR_FILTER } from "./lane-explorer-tools.mjs";
+import { type LaneUpstreamFilter, type LaneAgentFilter, decodeAuthorFilter, laneMatchesAgent, LANE_AGENT_FILTERS, encodeLaneAuthor, hasUnknownLaneAuthor, laneCsv, laneAuthors, laneMatchesAuthor, laneMatchesUpstream, laneSummaryMarkdown, laneUpstreamState, LANE_UPSTREAM_FILTERS, LANE_UPSTREAM_LABELS, UNKNOWN_LANE_AUTHOR_FILTER } from "./lane-explorer-tools.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -243,6 +243,9 @@ function projectFromSearch(search: string) {
     laneQuery: parsed.laneQuery,
     laneFilter: parsed.laneFilter as LaneFilter,
     laneOrder: parsed.laneOrder as LaneOrder,
+    laneAuthorFilter: parsed.laneAuthorFilter,
+    laneUpstreamFilter: parsed.laneUpstreamFilter as LaneUpstreamFilter,
+    laneAgentFilter: parsed.laneAgentFilter as LaneAgentFilter,
     activityQuery: parsed.activityQuery,
     activityFilter: parsed.activityFilter as ActivityFilter,
     activityOrder: parsed.activityOrder as ActivityOrder,
@@ -316,6 +319,7 @@ function LaneSummary({ lane, defaultBranch }: { lane: ProjectLane; defaultBranch
 
 function WorkLanes({
   searchQuery, onSearch, filter, onFilter, order, onOrder,
+  authorFilter, onAuthorFilter, upstreamFilter, onUpstreamFilter, agentFilter, onAgentFilter, onResetFilters,
   project,
   selectedLane,
   onSelectLane,
@@ -324,6 +328,10 @@ function WorkLanes({
   onShowMergedChange,
 }: {
   searchQuery: string; onSearch: (query: string) => void; filter: LaneFilter; onFilter: (filter: LaneFilter) => void; order: LaneOrder; onOrder: (order: LaneOrder) => void;
+  authorFilter: string; onAuthorFilter: (value: string) => void;
+  upstreamFilter: LaneUpstreamFilter; onUpstreamFilter: (value: LaneUpstreamFilter) => void;
+  agentFilter: LaneAgentFilter; onAgentFilter: (value: LaneAgentFilter) => void;
+  onResetFilters: () => void;
   project: ProjectResponse;
   selectedLane: string | null;
   onSelectLane: (lane: ProjectLane) => void;
@@ -331,9 +339,6 @@ function WorkLanes({
   showMerged: boolean;
   onShowMergedChange: (value: boolean) => void;
 }) {
-  type LaneUpstreamFilter = "all" | "synced" | "ahead" | "behind" | "diverged" | "untracked" | "unknown";
-  const [authorFilter, setAuthorFilter] = useState("");
-  const [upstreamFilter, setUpstreamFilter] = useState<LaneUpstreamFilter>("all");
   const [exportStatus, setExportStatus] = useState("");
   const normalizedQuery = normalizedSearchQuery(searchQuery);
   const upstreamFilters = useMemo(() => LANE_UPSTREAM_FILTERS.map((id) => ({ id: id as LaneUpstreamFilter, label: LANE_UPSTREAM_LABELS[id] })), []);
@@ -350,21 +355,20 @@ function WorkLanes({
       && laneMatchesFilter(lane, filter)
       && laneMatchesAuthor(lane, authorFilter)
       && laneMatchesUpstream(lane, upstreamFilter)
+      && laneMatchesAgent(lane, agentFilter)
     )), order),
-    [authorFilter, filter, order, normalizedQuery, upstreamFilter, visibleLanes],
+    [agentFilter, authorFilter, filter, order, normalizedQuery, upstreamFilter, visibleLanes],
   );
   const authors = useMemo(() => laneAuthors(visibleLanes), [visibleLanes]);
   const includesUnknownAuthor = useMemo(() => hasUnknownLaneAuthor(visibleLanes), [visibleLanes]);
   const handoffSummary = useMemo(() => laneSummaryMarkdown(project, lanes), [lanes, project]);
-  const activeFilters = normalizedQuery.length > 0 || filter !== "all" || authorFilter !== "" || upstreamFilter !== "all";
+  const activeFilters = normalizedQuery.length > 0 || filter !== "all" || authorFilter !== "" || upstreamFilter !== "all" || agentFilter !== "all";
   useEffect(() => {
-    setAuthorFilter("");
-    setUpstreamFilter("all");
     setExportStatus("");
   }, [project.id, project.main_path]);
   useEffect(() => {
     setExportStatus("");
-  }, [authorFilter, filter, normalizedQuery, upstreamFilter]);
+  }, [agentFilter, authorFilter, filter, normalizedQuery, upstreamFilter]);
   const exportCsv = useCallback(() => {
     if (lanes.length === 0) return;
     const url = URL.createObjectURL(new Blob([laneCsv(lanes)], { type: "text/csv;charset=utf-8" }));
@@ -375,12 +379,6 @@ function WorkLanes({
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setExportStatus(`${lanes.length}件のCSV保存を開始しました`);
   }, [lanes, project.name]);
-  const resetFilters = useCallback(() => {
-    onSearch("");
-    onFilter("all");
-    setAuthorFilter("");
-    setUpstreamFilter("all");
-  }, [onFilter, onSearch]);
   const mergedCount = project.lanes.filter((lane) => lane.branch !== project.default_branch && !relationLaneIds.has(lane.id) && isFoldedMerged(lane)).length;
   return (
     <section className="lanes-section" aria-labelledby="lanes-title">
@@ -399,17 +397,18 @@ function WorkLanes({
         </label>
         <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>検索をクリア</button>
         <label><span>並び順</span><select aria-label="作業一覧の並び順" value={order} onChange={(event) => onOrder(event.target.value as LaneOrder)}><option value="name">名前</option><option value="attention">要確認順</option><option value="latest">最新コミット順</option></select></label>
-        <label className="lane-explorer-author-filter"><span>最終コミット作成者（完全一致）</span><select aria-label="最終コミット作成者で絞り込み" value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)}><option value="">すべて</option>{authors.map((author) => <option key={author} value={encodeLaneAuthor(author)}>{author}</option>)}{includesUnknownAuthor && <option value={UNKNOWN_LANE_AUTHOR_FILTER}>作成者未取得</option>}</select></label>
+        <label className="lane-explorer-author-filter"><span>最終コミット作成者（完全一致）</span><select aria-label="最終コミット作成者で絞り込み" value={authorFilter} onChange={(event) => onAuthorFilter(event.target.value)}><option value="">すべて</option>{authors.map((author) => <option key={author} value={encodeLaneAuthor(author)}>{author}</option>)}{authorFilter !== "" && authorFilter !== UNKNOWN_LANE_AUTHOR_FILTER && !authors.some((author) => encodeLaneAuthor(author) === authorFilter) && <option value={authorFilter}>{decodeAuthorFilter(authorFilter).value}（候補なし）</option>}{(includesUnknownAuthor || authorFilter === UNKNOWN_LANE_AUTHOR_FILTER) && <option value={UNKNOWN_LANE_AUTHOR_FILTER}>作成者未取得</option>}</select></label>
+        <label><span>agent状態（完全一致）</span><select aria-label="agent状態で絞り込み" value={agentFilter} onChange={(event) => onAgentFilter(event.target.value as LaneAgentFilter)}>{LANE_AGENT_FILTERS.map((value) => <option key={value} value={value}>{value === "all" ? "すべて" : agentStateLabel(value === "unknown" ? null : value)}</option>)}</select></label>
         <div className="lane-explorer-actions">
           <span className="lane-explorer-status" role="status">{lanes.length} / {visibleLanes.length} 件</span>
-          {activeFilters && <button className="subtle-button" type="button" onClick={resetFilters}>絞り込みをすべて解除</button>}
+          {activeFilters && <button className="subtle-button" type="button" onClick={onResetFilters}>絞り込みをすべて解除</button>}
           <button className="subtle-button" type="button" disabled={lanes.length === 0} onClick={exportCsv}>一致するレーンをCSV保存</button>
           {lanes.length > 0 && <CopyButton value={handoffSummary} label="一致する作業レーンの概要をコピー" />}
           {exportStatus && <span className="lane-explorer-status" role="status">{exportStatus}</span>}
         </div>
       </div>
       <div className="lane-filters" role="group" aria-label="作業の状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{visibleLanes.filter((lane) => laneMatchesFilter(lane, item.id)).length}</span></button>)}</div>
-      <div className="lane-explorer-upstream-filters" role="group" aria-label="upstream の同期状態で絞り込み"><span>upstream</span>{upstreamFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={upstreamFilter === item.id} onClick={() => setUpstreamFilter(item.id)}>{item.label}<span>{item.id === "all" ? visibleLanes.length : visibleLanes.filter((lane) => laneMatchesUpstream(lane, item.id)).length}</span></button>)}</div>
+      <div className="lane-explorer-upstream-filters" role="group" aria-label="upstream の同期状態で絞り込み"><span>upstream</span>{upstreamFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={upstreamFilter === item.id} onClick={() => onUpstreamFilter(item.id)}>{item.label}<span>{item.id === "all" ? visibleLanes.length : visibleLanes.filter((lane) => laneMatchesUpstream(lane, item.id)).length}</span></button>)}</div>
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
@@ -441,7 +440,7 @@ function WorkLanes({
           </tbody>
         </table>
       </div>
-      {lanes.length === 0 && <div className="empty-flow">{normalizedQuery ? "検索に一致する作業レーンはありません。" : "この条件に一致する作業レーンはありません。"}{activeFilters && <button className="subtle-button" type="button" onClick={resetFilters}>絞り込みを解除</button>}</div>}
+      {lanes.length === 0 && <div className="empty-flow">{normalizedQuery ? "検索に一致する作業レーンはありません。" : "この条件に一致する作業レーンはありません。"}{activeFilters && <button className="subtle-button" type="button" onClick={onResetFilters}>絞り込みを解除</button>}</div>}
     </section>
   );
 }
@@ -867,6 +866,8 @@ function SelectionPane({
 }
 
 function LegacyGitModal({
+  repos,
+  onOpenWorktree,
   repo,
   tab,
   copied,
@@ -875,6 +876,8 @@ function LegacyGitModal({
   onCopy,
   onTabChange,
 }: {
+  repos: ReadonlyMap<string, Repo>;
+  onOpenWorktree: (path: string) => void;
   repo: Repo;
   tab: DetailTab;
   copied: string | null;
@@ -893,7 +896,7 @@ function LegacyGitModal({
           <div><span className="eyebrow">GIT DETAIL</span><strong>{repo.branch ?? repo.name}</strong></div>
           <button ref={closeRef} className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={onClose}>×</button>
         </div>
-        <RepoDetail activeTab={tab} copied={copied} onCopy={onCopy} onTabChange={onTabChange} repo={repo} />
+        <RepoDetail repos={repos} onOpenWorktree={onOpenWorktree} activeTab={tab} copied={copied} onCopy={onCopy} onTabChange={onTabChange} repo={repo} />
         {copyError && <div className="inline-error" role="alert">{copyError}</div>}
       </div>
     </div>
@@ -946,7 +949,7 @@ export default function ProjectControl() {
   const resourceKey = `${urlState.path}|${projectFetchRange}`;
   const invalidUrlKey = urlState.invalidParams.join(",");
   const retryProject = () => setReloadToken((value) => value + 1);
-  const { laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder } = urlState;
+  const { laneQuery, laneFilter, laneOrder, laneAuthorFilter, laneUpstreamFilter, laneAgentFilter, activityQuery, activityFilter, activityOrder } = urlState;
   const setLaneQuery = (value: string) => updateUrl({ laneQuery: value }, "replace");
   const setLaneFilter = (value: LaneFilter) => updateUrl({ laneFilter: value === "all" ? null : value });
   const setLaneOrder = (value: LaneOrder) => updateUrl({ laneOrder: value === "name" ? null : value });
@@ -962,7 +965,7 @@ export default function ProjectControl() {
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setShowMerged = useCallback((value: boolean) => updateUrl({ merged: value ? true : null }), [updateUrl]);
   const clearBranchFilters = useCallback((showHistory: boolean) => {
-    updateUrl({ laneQuery: null, laneFilter: null, ...(showHistory ? { merged: true } : {}) }, "replace");
+    updateUrl({ laneQuery: null, laneFilter: null, laneAuthorFilter: null, laneUpstreamFilter: null, laneAgentFilter: null, ...(showHistory ? { merged: true } : {}) }, "replace");
     if (window.location.hash) {
       const url = new URL(window.location.href);
       url.hash = "";
@@ -976,7 +979,7 @@ export default function ProjectControl() {
 
   useEffect(() => {
     setProjectUrlCopyState("idle");
-  }, [urlState.at, urlState.branchRow, urlState.relationRef, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, activityQuery, activityFilter, activityOrder]);
+  }, [urlState.at, urlState.branchRow, urlState.relationRef, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, laneAuthorFilter, laneUpstreamFilter, laneAgentFilter, activityQuery, activityFilter, activityOrder]);
 
 
   const projectUpdateToken = project ? projectUpdates.get(project.id) : undefined;
@@ -1154,6 +1157,11 @@ export default function ProjectControl() {
     if (lane.path) setGitPath(lane.path);
 
   }, []);
+  const openWorktreeGit = useCallback((path: string) => {
+    setCopyError(null);
+    setGitPath(path);
+    setGitTab("status");
+  }, []);
   const closeGit = useCallback(() => {
     setCopyError(null);
     setGitPath(null);
@@ -1200,7 +1208,7 @@ export default function ProjectControl() {
       <div style={paneStyle("--detail-width", detailWidth)} className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
           {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} renderSections={(notes) => <BranchFlowSections key={project.main_path} project={project} section={urlState.flowSection} onSectionChange={(flowSection) => updateUrl({ flowSection })} relationRef={urlState.relationRef} selectedLane={selectedLane} selectedRowId={urlState.branchRow} onSelect={selectEvent}>{notes}</BranchFlowSections>} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /></>}
-          {urlState.tab === "lanes" && <><WorktreeOverlaps path={project.main_path} /><WorkLanes searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} /></>}
+          {urlState.tab === "lanes" && <><WorktreeOverlaps path={project.main_path} /><WorkLanes authorFilter={laneAuthorFilter} onAuthorFilter={(value) => updateUrl({ laneAuthorFilter: value })} upstreamFilter={laneUpstreamFilter} onUpstreamFilter={(value) => updateUrl({ laneUpstreamFilter: value === "all" ? null : value })} agentFilter={laneAgentFilter} onAgentFilter={(value) => updateUrl({ laneAgentFilter: value === "all" ? null : value })} onResetFilters={() => updateUrl({ laneQuery: null, laneFilter: null, laneAuthorFilter: null, laneUpstreamFilter: null, laneAgentFilter: null })} searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} /></>}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルを調べる</h3><p className="section-copy">指定した版の内容や変更元を確認し、無視ルール・改行・Git属性の扱いを調べられます。</p></div></div><ConflictInspector key={`conflicts:${project.main_path}`} path={project.main_path} /><TreeSizes key={`sizes:${project.main_path}`} path={project.main_path} /><ContentSearch key={`content:${project.main_path}`} path={project.main_path} /><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /><IgnoreInspector key={`ignore:${project.main_path}`} path={project.main_path} /><FileAttributes key={`attributes:${project.main_path}`} path={project.main_path} /></section>}
           {urlState.tab === "info" && <ProjectInfo project={project} onOpenGit={openGit} onSelectLane={selectLane} />}
@@ -1209,7 +1217,7 @@ export default function ProjectControl() {
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}
       </div>
       <GitGuide key={project.main_path} path={project.main_path} />
-      {gitPath && legacyRepo && <LegacyGitModal copied={copied} copyError={copyError} onClose={closeGit} onCopy={copy} onTabChange={setGitTab} repo={legacyRepo} tab={gitTab} />}
+      {gitPath && legacyRepo && <LegacyGitModal repos={repos} onOpenWorktree={openWorktreeGit} copied={copied} copyError={copyError} onClose={closeGit} onCopy={copy} onTabChange={setGitTab} repo={legacyRepo} tab={gitTab} />}
       {gitPath && !legacyRepo && <LegacyUnavailableModal onClose={closeGit} />}
     </main>
   );

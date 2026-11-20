@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { fileStatusDescription } from "./file-status.mjs";
 import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
 import PatchView from "./patch-view";
@@ -42,14 +43,21 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState<string | null>(null);
+  const invalidDates = kind === "search" && fields.since !== "" && fields.until !== "" && fields.since > fields.until;
+  const dateErrorId = `${inputId}-date-error`;
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   const [title, endpoint, note] = settings[kind];
   const inputs = kind === "search" ? [["scope", "検索範囲（--all または ref）"], ["grep", "件名・本文"], ["author", "作成者"], ["since", "開始日"], ["until", "終了日"], ["file", "変更パス"]] : kind === "cherry" ? [["left", "A ブランチ / ref"], ["right", "B ブランチ / ref"]] : [];
   async function run(values: Record<string, string>, offset: number, fixedShas: string[] | null = null) {
+    if (kind === "search" && values.since !== "" && values.until !== "" && values.since > values.until) return;
     controller.current?.abort();
     const current = new AbortController(); controller.current = current;
-    setLoading(true); setData(null); setError(null); setSelected(null);
+    setLoading(true);
+    setPageLoading(fixedShas === null ? null : offset > data!.offset! ? "次の50件を取得中…" : "前の50件を取得中…");
+    if (fixedShas === null) setData(null);
+    setError(null); setSelected(null);
     setRequest(values);
     const params: Record<string, string> = { path };
     for (const [key] of inputs) params[key] = values[key];
@@ -61,7 +69,7 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
     };
     try { const result = await read<Result>(url, current.signal, init); if (!current.signal.aborted) setData(result); }
     catch (e) { if (!current.signal.aborted) setError(String(e)); }
-    finally { if (!current.signal.aborted) setLoading(false); }
+    finally { if (!current.signal.aborted) { setLoading(false); setPageLoading(null); } }
   }
   return (
     <details className="tag-explorer repository-investigation">
@@ -72,16 +80,19 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
           {inputs.map(([key, label]) => (
             <label key={key} htmlFor={`${inputId}-${key}`}>
               <span>{label}</span>
-              <input id={`${inputId}-${key}`} type={key === "since" || key === "until" ? "date" : "text"} required={key === "scope" || key === "left" || key === "right"} value={fields[key]} onChange={e => setFields({ ...fields, [key]: e.target.value })} />
+              <input id={`${inputId}-${key}`} type={key === "since" || key === "until" ? "date" : "text"} required={key === "scope" || key === "left" || key === "right"} value={fields[key]} aria-invalid={(key === "since" || key === "until") && invalidDates ? true : undefined} aria-describedby={(key === "since" || key === "until") && invalidDates ? dateErrorId : undefined} onChange={e => setFields({ ...fields, [key]: e.target.value })} />
             </label>
           ))}
+          {invalidDates && <p id={dateErrorId} className="tag-explorer-error repository-investigation-date-error" role="alert">開始日は終了日以前の日付にしてください</p>}
           <button className="tag-explorer-export" disabled={loading} type="submit">{loading ? "取得中…" : "調査する"}</button>
         </form>
         {error && <p className="tag-explorer-error" role="alert">取得できませんでした。{error}</p>}
-        {data && <div aria-live="polite">
+        {data && <div aria-live="polite" aria-busy={loading}>
+          {pageLoading && <p className="tag-explorer-state" role="status">{pageLoading}</p>}
           {kind === "search" && request && <p className="tag-explorer-note">適用した条件: 件名・本文「{request.grep}」、作成者「{request.author}」、期間「{request.since} ～ {request.until}」、変更パス「{request.file}」（空欄は条件なし）</p>}
-          {kind === "search" && request && <p className="tag-explorer-note">検索開始時点の参照で固定中 <button className="tag-explorer-export" type="button" onClick={() => void run(request, 0)}>最新状態で検索し直す</button></p>}
-          {data.scope && <p className="tag-explorer-note">検索範囲: <code>{data.scope}</code> ／ {data.offset! + 1}件目から（1ページ50件）</p>}
+          {kind === "search" && request && <p className="tag-explorer-note">検索開始時点の参照で固定中 <button className="tag-explorer-export" type="button" disabled={loading} onClick={() => void run(request, 0)}>最新状態で検索し直す</button></p>}
+          {data.scope && <p className="tag-explorer-note">検索範囲: <code>{data.scope}</code></p>}
+          {kind === "search" && data.commits && data.commits.length > 0 && <p className="tag-explorer-note">{data.offset! + 1}〜{data.offset! + data.commits.length}件目を表示</p>}
           {data.left && <p className="tag-explorer-note">A: {data.left} @ {data.left_sha?.slice(0, 12)} ／ B: {data.right} @ {data.right_sha?.slice(0, 12)}</p>}
           {data.command && <p className="tag-explorer-note"><code>{data.command}</code></p>}
           {data.unavailable && data.unavailable.length > 0 && <p className="tag-explorer-error" role="alert">一部worktreeを取得できませんでした。重なりの一覧は不完全です: {data.unavailable.join("、")}</p>}
@@ -92,6 +103,7 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
                 <ul className="repository-investigation-list">
                   {item.worktrees.map(w => <li className="tag-explorer-commit-meta" key={w.worktree}>
                     <code className="repository-investigation-xy">{w.xy}</code>
+                    <span>{fileStatusDescription(w.xy)}</span>
                     <span>{w.worktree}</span>
                     <span>{w.branch === null ? "detached HEAD（ブランチなし）" : w.branch.replace(/^refs\/heads\//, "")}</span>
                   </li>)}
@@ -116,10 +128,10 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
                 {c.command && <div className="tag-explorer-commit-meta"><code>{c.command}</code><CopyButton value={c.command} label="復旧コマンドをコピー" /></div>}
               </li>)}
             </ul>
-          ) : <p className="tag-explorer-empty">該当するコミットはありません。</p>)}
+          ) : <p className="tag-explorer-empty">{kind === "search" ? data.offset === 0 ? "検索結果0件" : "このページに該当するコミットはありません" : "該当するコミットはありません。"}</p>)}
           {kind === "search" && request && <div className="tag-explorer-navigation">
-            <button className="tag-explorer-export" type="button" disabled={data.offset === 0} onClick={() => void run(request, data.offset! - 50, data.fixed_shas!)}>前の50件</button>
-            <button className="tag-explorer-export" type="button" disabled={!data.has_more} onClick={() => void run(request, data.offset! + 50, data.fixed_shas!)}>次の50件</button>
+            <button className="tag-explorer-export" type="button" disabled={loading || data.offset === 0} onClick={() => void run(request, data.offset! - 50, data.fixed_shas!)}>前の50件</button>
+            <button className="tag-explorer-export" type="button" disabled={loading || !data.has_more} onClick={() => void run(request, data.offset! + 50, data.fixed_shas!)}>次の50件</button>
           </div>}
         </div>}
         {selected && <>

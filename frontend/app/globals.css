@@ -1019,6 +1019,10 @@ body {
   font-size: var(--fs-aux);
 }
 .branch-worktree {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   color: var(--c-index);
   overflow-wrap: anywhere;
 }
@@ -1166,8 +1170,12 @@ body {
 .show-merged {
   margin-top: 8px;
 }
+.branch-command-target {
+  overflow-wrap: anywhere;
+}
 .branch-action {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -4517,3 +4525,13 @@ html[data-theme="dark"] {
 .project-card { scroll-margin-block: 20px; }
 
 .fetch-progress { margin: 0 0 12px; font-size: 0.85rem; overflow-wrap: anywhere; }
+
+.home-saved-views { margin-block: 14px; padding: 14px; border: 1px solid var(--control-border); border-radius: 12px; background: var(--control-panel); }
+.home-saved-views p { color: var(--control-muted); font-size: 12px; }
+.home-saved-views form, .home-saved-views label, .home-saved-views li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.home-saved-views input { min-width: 0; max-width: 100%; }
+.home-saved-views ul { list-style: none; padding: 0; display: grid; gap: 8px; }
+.home-saved-views button, .home-saved-views input { padding: 7px 10px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--control-panel); color: inherit; }
+.home-saved-views button:disabled { opacity: .5; }
+.home-saved-views :focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
+.agent-task-row strong a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }

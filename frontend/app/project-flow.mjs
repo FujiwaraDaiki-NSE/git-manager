@@ -1,3 +1,4 @@
+import { decodeAuthorFilter, LANE_UPSTREAM_FILTERS, LANE_AGENT_FILTERS } from "./lane-explorer-tools.mjs";
 const CONTROL_TABS = new Set(["flow", "lanes", "activity", "files", "info"]);
 const TIME_RANGES = new Set(["current", "24h", "7d", "all"]);
 
@@ -9,9 +10,10 @@ export function parseProjectUrl(search) {
   const params = new URLSearchParams(search || "");
   const defaults = {
     flowSection: "relations", tab: "flow", range: "7d", laneFilter: "all", laneOrder: "name",
-    activityFilter: "all", activityOrder: "newest",
+    activityFilter: "all", activityOrder: "newest", laneUpstreamFilter: "all", laneAgentFilter: "all",
   };
   const choices = {
+    laneUpstreamFilter: new Set(LANE_UPSTREAM_FILTERS), laneAgentFilter: new Set(LANE_AGENT_FILTERS),
     flowSection: new Set(["relations", "history", "notes"]), tab: CONTROL_TABS, range: TIME_RANGES,
     laneFilter: new Set(["all", "dirty", "conflict", "ahead", "behind", "worktree"]),
     laneOrder: new Set(["name", "latest", "attention"]),
@@ -24,6 +26,8 @@ export function parseProjectUrl(search) {
     if (provided !== null && !choices[key].has(provided)) invalidParams.push(key);
     return [key, provided === null ? value : provided];
   }));
+  const laneAuthorFilter = params.get("laneAuthorFilter") ?? "";
+  if (!decodeAuthorFilter(laneAuthorFilter).valid) invalidParams.push("laneAuthorFilter");
   const atParam = params.get("at");
   const at = atParam === null ? 100 : Number(atParam);
   if (atParam !== null && (atParam.trim() === "" || !Number.isFinite(at) || at < 0 || at > 100)) invalidParams.push("at");
@@ -36,6 +40,7 @@ export function parseProjectUrl(search) {
     range: values.range,
     laneFilter: values.laneFilter,
     laneOrder: values.laneOrder,
+    laneAuthorFilter, laneUpstreamFilter: values.laneUpstreamFilter, laneAgentFilter: values.laneAgentFilter,
     activityFilter: values.activityFilter,
     activityOrder: values.activityOrder,
     merged: mergedParam === "true",

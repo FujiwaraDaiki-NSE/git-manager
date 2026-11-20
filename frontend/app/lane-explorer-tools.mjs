@@ -1,4 +1,4 @@
-import { agentTaskState } from "./agent-overview.mjs";
+import { AGENT_STATUS_PRIORITY, agentTaskState } from "./agent-overview.mjs";
 
 /** A value that cannot collide with a real commit author. */
 export const UNKNOWN_LANE_AUTHOR_FILTER = "__gitdash_unknown_lane_author__";
@@ -58,7 +58,7 @@ export function encodeLaneAuthor(author) {
   return `${LANE_AUTHOR_FILTER_PREFIX}${encodeURIComponent(author)}`;
 }
 
-function decodeAuthorFilter(authorFilter) {
+export function decodeAuthorFilter(authorFilter) {
   if (typeof authorFilter !== "string" || !authorFilter.startsWith(LANE_AUTHOR_FILTER_PREFIX)) {
     return { valid: true, value: authorFilter };
   }
@@ -224,4 +224,10 @@ export function laneSummaryMarkdown(project, lanes) {
     lines[lines.length - 1] = `| ${lines[lines.length - 1]} |`;
   }
   return `${lines.join("\n")}\n`;
+}
+
+export const LANE_AGENT_FILTERS = Object.freeze(["all", ...AGENT_STATUS_PRIORITY, "unknown"]);
+export function laneMatchesAgent(lane, filter) {
+  if (filter === undefined) throw new TypeError("agent filter is required");
+  return filter === "all" || (LANE_AGENT_FILTERS.includes(filter) && laneAgentStatusValue(lane) === filter);
 }

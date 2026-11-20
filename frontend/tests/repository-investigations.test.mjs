@@ -70,3 +70,86 @@ test("commit search pages send large SHA arrays in POST bodies and refresh with 
   assert.equal(new URLSearchParams(calls[1].url.split("?")[1]).get("offset"), "0");
   assert.equal(calls[1].init.method, undefined);
 });
+
+async function investigationHarness(kind, initial, fetchResult) {
+  const { fileStatusDescription } = await import("../app/file-status.mjs");
+  const source = readFileSync(new URL("../app/repository-investigations.tsx", import.meta.url), "utf8").replace(/^import .*\.css";$/gm, "");
+  const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
+  const module = { exports: {} };
+  const baseRequire = createRequire(import.meta.url);
+  const states = [...initial];
+  const calls = [];
+  let cursor = 0;
+  runInNewContext(compiled.outputText, {
+    exports: module.exports, URLSearchParams, AbortController,
+    fetch: async (...args) => { calls.push(args); return fetchResult(); },
+    require: id => id === "react" ? { ...React, useId: () => "test", useEffect: () => {}, useRef: () => ({ current: null }),
+      useState: value => { const index = cursor++; if (!(index in states)) states[index] = value; return [states[index], next => { states[index] = next; }]; } }
+      : id === "./file-status.mjs" ? { fileStatusDescription }
+      : id.startsWith("./") ? { __esModule: true, default: () => null } : baseRequire(id),
+  });
+  function render() {
+    cursor = 0;
+    const outer = module.exports[kind]({ path: "/repo" });
+    return outer.type(outer.props);
+  }
+  function nodes(tree, type) {
+    const found = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (node.type === type) found.push(node);
+      React.Children.forEach(node.props?.children, visit);
+    }
+    visit(tree);
+    return found;
+  }
+  return { render, nodes, calls, states, html: () => renderToStaticMarkup(render()) };
+}
+const searchFields = { scope: "--all", grep: "", author: "", since: "", until: "", file: "" };
+
+test("date validation describes both date inputs and blocks only reversed ranges", async () => {
+  for (const [since, until, invalid] of [["2026-02-02", "2026-02-01", true], ["2026-02-01", "2026-02-01", false], ["2026-02-01", "", false], ["", "2026-02-01", false], ["", "", false]]) {
+    const h = await investigationHarness("CommitSearch", [{ ...searchFields, since, until }, null, null, null, false, null], async () => ({ ok: true, json: async () => ({ commits: [], offset: 0 }) }));
+    const tree = h.render();
+    assert.equal(h.html().includes("開始日は終了日以前の日付にしてください"), invalid);
+    for (const input of h.nodes(tree, "input").filter(n => n.props.type === "date")) {
+      assert.equal(input.props["aria-invalid"], invalid ? true : undefined);
+      assert.equal(input.props["aria-describedby"], invalid ? "test-date-error" : undefined);
+    }
+    h.nodes(tree, "form")[0].props.onSubmit({ preventDefault() {} });
+    assert.equal(h.calls.length, invalid ? 0 : 1);
+  }
+});
+
+test("paging preserves results and controls while busy and after failure; new search clears them", async () => {
+  let reject;
+  const h = await investigationHarness("CommitSearch", [searchFields, { commits: [{ hash: "abc", subject: "表示中", date: "2026-01-01", author: "author" }], offset: 50, has_more: true, fixed_shas: [] }, searchFields, null, false, null], () => new Promise((_, fail) => { reject = fail; }));
+  for (const label of ["次の50件", "前の50件"]) {
+    h.nodes(h.render(), "button").find(n => n.props.children === label).props.onClick();
+    assert.match(h.html(), /表示中/);
+    assert.match(h.html(), /aria-busy="true"/);
+    assert.ok(h.html().includes(`${label}を取得中…`));
+    assert.ok(h.nodes(h.render(), "button").filter(n => ["次の50件", "前の50件"].includes(n.props.children)).every(n => n.props.disabled));
+    reject(new Error("ページ取得失敗"));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(h.html(), /表示中/);
+    assert.match(h.html(), /取得できませんでした。Error: ページ取得失敗/);
+    assert.match(h.html(), /aria-busy="false"/);
+  }
+  h.nodes(h.render(), "form")[0].props.onSubmit({ preventDefault() {} });
+  assert.ok(!h.html().includes("表示中"));
+});
+
+test("search ranges use returned length and distinguish empty first and later pages", async () => {
+  for (const [offset, commits, expected] of [[50, Array.from({ length: 13 }, (_, i) => ({ hash: String(i), subject: "commit", date: "2026-01-01", author: "author" })), "51〜63件目を表示"], [0, [], "検索結果0件"], [50, [], "このページに該当するコミットはありません"]]) {
+    const h = await investigationHarness("CommitSearch", [searchFields, { scope: "--all", commits, offset }, searchFields, null, false, null]);
+    assert.ok(h.html().includes(expected));
+    assert.ok(!h.html().includes("件目から"));
+  }
+});
+
+test("overlaps retain XY codes and caution alongside shared Japanese status descriptions", async () => {
+  const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees: ["M ", " M", "??", "UU"].map((xy, i) => ({ worktree: `/repo${i}`, branch: null, xy })) }] }, null, null, false, null]);
+  const html = h.html();
+  for (const text of ["M ", " M", "??", "UU", "ステージ: 変更", "作業: 変更", "未追跡", "競合を解消してください", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"]) assert.ok(html.includes(text));
+});
