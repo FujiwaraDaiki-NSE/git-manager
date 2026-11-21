@@ -34,7 +34,7 @@ export default function DesktopNotifications() {
     const path = project.main_path;
     try {
       const notification = new Notification(`${agentStateLabel(event.status)} · ${project.name}`, {
-        body: `${event.branch}\n${event.summary === null ? "" : event.summary}`,
+        body: [event.decision?.question, event.branch, event.summary].filter((value) => value != null).join("\n"),
         tag: event.event_id,
       });
       notification.onclick = () => {

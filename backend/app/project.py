@@ -335,6 +335,7 @@ def _worktree_rows(
             "branch": item.get("branch"),
             "head": item.get("head"),
             "state": item.get("state"),
+            "lock_reason": item["lock_reason"],
             "detached": bool(item.get("detached", False)),
             "is_main": _key(host_path) == _key(project_id),
         }
@@ -1304,12 +1305,21 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
     }
 
 
-def shared_branch_commits(rows: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """Normalize response history bodies; internal analysis and pages stay unchanged."""
+def shared_branch_commits(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Replace each response row's history with ordered indexes into one commit list."""
     if rows is None:
         return None
-    commits = {}
+    commits = []
+    indexes_by_hash: dict[str, int] = {}
     for row in rows:
+        indexes = []
         for commit in row.pop("commits"):
-            commits[commit["hash"]] = commit
+            index = indexes_by_hash.setdefault(commit["hash"], len(commits))
+            if index == len(commits):
+                commits.append(commit)
+            else:
+                commits[index] = commit
+            indexes.append(index)
+        del row["commit_hashes"]
+        row["commit_indices"] = indexes
     return commits

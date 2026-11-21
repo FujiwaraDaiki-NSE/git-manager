@@ -6,6 +6,7 @@ import CopyButton from "./copy-button";
 import {
   buildPullRequestExplorerData,
   localCalendarDate,
+  openPullRequestLabels,
   openPullRequestsNeedingAttention,
   pullRequestsToCsv,
   targetBranchName,
@@ -70,7 +71,7 @@ function githubStatusMessage(status: string) {
 
 function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["open"] }) {
   const result = open?.status === "available" ? {
-    total: new Set(open.pulls.map((pr) => pr.number)).size,
+    pulls: Array.from(new Map(open.pulls.map((pr) => [pr.number, pr])).values()),
     matches: openPullRequestsNeedingAttention(open.pulls),
     checkedAt: open.checked_at === null ? null : new Date(open.checked_at * 1000).toISOString(),
   } : null;
@@ -87,7 +88,7 @@ function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["o
       ) : (
         <>
           <p className="pr-explorer-inline-note" role="status">
-            オープンPR {result.total}件中、CI失敗・変更要求 {result.matches.length}件
+            オープンPR {result.pulls.length}件中、CI失敗・変更要求 {result.matches.length}件
             {" · 照会時刻 "}{result.checkedAt === null ? "未取得" : <time dateTime={result.checkedAt}>{exactDate(result.checkedAt)}</time>}
           </p>
           {result.matches.length > 0 && (
@@ -103,6 +104,26 @@ function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["o
               })}
             </ul>
           )}
+          <details>
+            <summary>すべてのオープンPR（{result.pulls.length}件）</summary>
+            {result.pulls.length === 0 ? (
+              <p className="pr-explorer-inline-note">オープンPRはありません</p>
+            ) : (
+              <ul className="pr-explorer-open-list">
+                {result.pulls.map((pr) => {
+                  const href = validHttpUrl(pr.url);
+                  return (
+                    <li key={pr.number}>
+                      {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(pr.number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(pr.number)}</strong>}
+                      <strong>{pr.title}</strong>
+                      <span><code>{pr.headRefName}</code> → <code>{pr.baseRefName}</code></span>
+                      <span>{openPullRequestLabels(pr).join(" · ")}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </details>
         </>
       )}
     </section>

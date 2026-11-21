@@ -40,12 +40,16 @@ export function conflictStageQuery(path, file, stage, expectedHash) {
   return new URLSearchParams({ path, file, stage: String(stage), expectedHash: expectedHash.toLowerCase() }).toString();
 }
 
-export function conflictComparisonQuery(path, file, oursHash, theirsHash) {
+export function conflictComparisonQuery(path, file, fromStage, toStage, fromHash, toHash) {
   requiredString(path, "path");
   requiredString(file, "file");
-  requiredHash(oursHash, "oursHash");
-  requiredHash(theirsHash, "theirsHash");
-  return new URLSearchParams({ path, file, oursHash: oursHash.toLowerCase(), theirsHash: theirsHash.toLowerCase() }).toString();
+  requiredStage(fromStage);
+  requiredStage(toStage);
+  if (fromStage >= toStage) throw new RangeError("comparison stages must be in ascending order");
+  return new URLSearchParams({
+    path, file, fromStage: String(fromStage), toStage: String(toStage),
+    fromHash: requiredHash(fromHash, "fromHash"), toHash: requiredHash(toHash, "toHash"),
+  }).toString();
 }
 
 export const buildConflictInventoryQuery = conflictInventoryQuery;
@@ -96,21 +100,9 @@ export function conflictStageAvailability(file, stage) {
   return { available: true, reason: null };
 }
 
-export function conflictComparisonAvailability(file) {
-  const ours = conflictStageRecord(file, CONFLICT_STAGE_OURS);
-  const theirs = conflictStageRecord(file, CONFLICT_STAGE_THEIRS);
-  if (ours === null || theirs === null) return { available: false, reason: "OURSとTHEIRSの両方がINDEXにあるファイルだけ比較できます。" };
-  if (ours.kind === "symlink" || theirs.kind === "symlink" || ours.mode === "120000" || theirs.mode === "120000") {
-    return { available: false, reason: "シンボリックリンクは比較しません。" };
-  }
-  if (ours.kind === "gitlink" || theirs.kind === "gitlink" || ours.mode === "160000" || theirs.mode === "160000") {
-    return { available: false, reason: "gitlinkは比較しません。" };
-  }
-  if (ours.type !== "blob" || theirs.type !== "blob" || !modeIsRegular(ours.mode) || !modeIsRegular(theirs.mode)) {
-    return { available: false, reason: "通常のblobファイル同士だけ比較できます。" };
-  }
-  if (typeof ours.hash !== "string" || typeof theirs.hash !== "string") return { available: false, reason: "OURS/THEIRSのblob hashを取得できません。" };
-  return { available: true, reason: null };
+export function conflictComparisonAvailability(file, fromStage, toStage) {
+  const source = conflictStageAvailability(file, fromStage);
+  return source.available ? conflictStageAvailability(file, toStage) : source;
 }
 
 function csvCell(value) {

@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from app import branch_rows, detail
 
 
@@ -38,6 +40,26 @@ def lane(repo: Path, branch: dict) -> dict:
         "upstream_behind": None,
         "path": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("tracking", "expected"),
+    [
+        ([("remote", None, None), ("local", 1, 0)], "mixed"),
+        ([("remote", None, None), ("local", 0, 1)], "mixed"),
+        ([("first", 1, 0), ("second", 2, 0)], "local_ahead"),
+        ([("local", 1, 2)], "diverged"),
+        ([("remote", None, None), ("local", 1, 2)], "mixed"),
+        ([("remote", None, None), ("local", None, 0)], "tracking_unavailable"),
+        ([("local", 0, 0)], "tracking_inconsistent"),
+    ],
+)
+def test_status_aggregates_each_local_tracking_state(tracking, expected):
+    locals_ = [
+        {"head": head, "upstream_ahead": ahead, "upstream_behind": behind}
+        for head, ahead, behind in tracking
+    ]
+    assert branch_rows._status("origin/main", "remote", locals_, remote_present=True) == expected
 
 
 def test_rows_group_by_exact_upstream_and_keep_remote_local_states(tmp_path: Path) -> None:

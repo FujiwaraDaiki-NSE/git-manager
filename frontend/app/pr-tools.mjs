@@ -317,7 +317,7 @@ const ciFailureLabel = "CI 失敗";
 /** GitHubの明示値を表示し、nullを待機状態と混同しない。 */
 export function openPullRequestLabels(pr) {
   const review = { APPROVED: "レビュー承認", CHANGES_REQUESTED: changesRequestedLabel, REVIEW_REQUIRED: "レビュー待ち" };
-  const ci = { SUCCESS: "CI 成功", FAILURE: ciFailureLabel, ERROR: ciFailureLabel, PENDING: "CI 実行中", EXPECTED: "CI 実行中" };
+  const ci = { SUCCESS: "CI 成功", FAILURE: ciFailureLabel, ERROR: ciFailureLabel, PENDING: "CI 結果待ち", EXPECTED: "CI 報告待ち" };
   return [
     ...(pr.isDraft ? ["Draft"] : []),
     pr.reviewDecision === null ? "レビュー情報なし" : review[pr.reviewDecision],

@@ -211,12 +211,17 @@ def parse_submodule_status(raw: str, index_raw: str) -> list[dict[str, Any]] | N
         match = re.fullmatch(r"([-+ U])([0-9a-f]{40}|[0-9a-f]{64}) (.*)", line)
         if match is None:
             return None
-        marker, _checkout, tail = match.groups()
+        marker, checkout, tail = match.groups()
         candidates = [path for path in recorded if tail == path or tail.startswith(path + " (")]
         if not candidates:
             return None
         path = max(candidates, key=len)
-        result.append({"path": path, "recorded_commit": recorded[path], "status": states[marker]})
+        result.append({
+            "path": path,
+            "recorded_commit": recorded[path],
+            "checkout_commit": checkout if marker in (" ", "+") else None,
+            "status": states[marker],
+        })
     return result
 
 

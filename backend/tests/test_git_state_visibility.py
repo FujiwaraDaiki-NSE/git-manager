@@ -68,6 +68,28 @@ def test_unavailable_git_facts(tmp_path):
     assert gitinfo.branch_destinations(str(tmp_path), 'main') is None
 
 
+@pytest.mark.parametrize("action,kind,marker", [
+    ("pick", "cherry-pick", "CHERRY_PICK_HEAD"),
+    ("revert", "revert", "REVERT_HEAD"),
+])
+def test_sequencer_operation_belongs_to_linked_worktree(tmp_path, action, kind, marker):
+    repo, linked = tmp_path / "repo", tmp_path / "linked"
+    init_repo(repo)
+    git(repo, "worktree", "add", "-qb", "topic", str(linked))
+    directory = Path(git(linked, "rev-parse", "--absolute-git-dir").strip())
+    todo = directory / "sequencer" / "todo"
+    todo.parent.mkdir()
+    todo.write_text(f"{action} {git(linked, 'rev-parse', '--short', 'HEAD').strip()} base\n")
+
+    assert gitinfo.operations(str(repo)) == []
+    assert [(op["kind"], op["marker"]) for op in gitinfo.operations(str(linked))] == [(kind, "sequencer/todo")]
+    (directory / marker).touch()
+    assert [(op["kind"], op["marker"]) for op in gitinfo.operations(str(linked))] == [(kind, marker)]
+    (directory / marker).unlink()
+    todo.unlink()
+    assert gitinfo.operations(str(linked)) == []
+
+
 def test_destinations_observe_tracking_head_and_distinguish_missing_ref_from_unset(tmp_path):
     repo = tmp_path / 'repo'
     init_repo(repo)

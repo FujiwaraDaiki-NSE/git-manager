@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import detail, gitinfo, main, scanner
+from app import detail, gitinfo, main, project, project_facts, scanner
 from app.watcher import Watcher
 
 
@@ -607,6 +607,7 @@ detached
 """
     )
     assert [record["state"] for record in records] == ["ok", "prunable", "locked", "ok"]
+    assert [record["lock_reason"] for record in records] == [None, None, "in use", None]
     assert records[-1]["detached"] is True
 
     clean = {
@@ -627,6 +628,26 @@ detached
     )["command"] == "git worktree remove '/repo/My Project'"
     dirty = {**clean, "entries": [{"xy": ".M", "path": "file"}], "detached": True}
     assert gitinfo.next_command(dirty, None, {"worktree_state": "prunable"})["command"] == "git add -p"
+
+
+def test_project_worktree_rows_preserve_lock_reason_from_cached_git_output(repo_with_worktree, tmp_path):
+    repo, linked = repo_with_worktree
+    locked_without_reason = tmp_path / "locked-without-reason"
+    git(repo, "worktree", "add", "-qb", "hold", str(locked_without_reason))
+    reason = "メンテナンス中  確認待ち"
+    git(repo, "worktree", "lock", "--reason", reason, str(linked))
+    git(repo, "worktree", "lock", str(locked_without_reason))
+    with project_facts.using({}):
+        legacy_rows = gitinfo.list_worktrees(str(repo))
+        for row in legacy_rows:
+            del row["lock_reason"]
+        project_facts.observe("app.gitinfo.list_worktrees", [[str(repo)], {}], lambda: legacy_rows)
+        rows, _, _ = project._worktree_rows(str(repo), str(repo), {})
+    assert {row["path"]: (row["state"], row["lock_reason"]) for row in rows} == {
+        str(repo): ("ok", None),
+        str(linked): ("locked", reason),
+        str(locked_without_reason): ("locked", None),
+    }
 
 
 def test_shared_gitdir_events_are_owned_by_main_even_if_linked_is_watched_first(

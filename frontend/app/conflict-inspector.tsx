@@ -87,10 +87,7 @@ type ConflictStageResponse = {
 };
 
 type ConflictComparisonResponse = {
-  input: { file: string; ours_hash: string; theirs_hash: string };
-  path: string;
-  ours_hash: string;
-  theirs_hash: string;
+  input: { file: string; from_stage: number; to_stage: number; from_hash: string; to_hash: string };
   snapshot: { path: string; stages: Record<string, unknown> };
   patch: string;
   patch_bytes: number;
@@ -101,6 +98,12 @@ type ConflictComparisonResponse = {
   unavailable_reason: string | null;
   command: string | null;
 };
+
+const comparisonPairs = [
+  [CONFLICT_STAGE_OURS, CONFLICT_STAGE_THEIRS],
+  [CONFLICT_STAGE_BASE, CONFLICT_STAGE_OURS],
+  [CONFLICT_STAGE_BASE, CONFLICT_STAGE_THEIRS],
+] as const;
 
 type ConflictInspectorProps = { path: string };
 
@@ -237,6 +240,7 @@ export default function ConflictInspector({ path }: ConflictInspectorProps) {
   const [stageData, setStageData] = useState<ConflictStageResponse | null>(null);
   const [stageState, setStageState] = useState<LoadState>("idle");
   const [stageError, setStageError] = useState<string | null>(null);
+  const [comparisonPair, setComparisonPair] = useState(0);
   const [comparison, setComparison] = useState<ConflictComparisonResponse | null>(null);
   const [comparisonState, setComparisonState] = useState<LoadState>("idle");
   const [comparisonError, setComparisonError] = useState<string | null>(null);
@@ -391,21 +395,23 @@ export default function ConflictInspector({ path }: ConflictInspectorProps) {
       });
   };
 
+  const [fromStage, toStage] = comparisonPairs[comparisonPair];
+
   const loadComparison = () => {
     if (file === null) return;
-    const availability = conflictComparisonAvailability(file);
-    const oursHash = conflictStageHash(file, CONFLICT_STAGE_OURS);
-    const theirsHash = conflictStageHash(file, CONFLICT_STAGE_THEIRS);
-    if (!availability.available || oursHash === null || theirsHash === null) return;
+    const availability = conflictComparisonAvailability(file, fromStage, toStage);
+    const fromHash = conflictStageHash(file, fromStage);
+    const toHash = conflictStageHash(file, toStage);
+    if (!availability.available || fromHash === null || toHash === null) return;
     comparisonController.current?.abort();
     const controller = new AbortController();
-    const key = `${path}|${file.path}|${oursHash}|${theirsHash}|${inventorySnapshotKey ?? ""}|${++requestSequence.current}`;
+    const key = `${path}|${file.path}|${fromStage}|${toStage}|${fromHash}|${toHash}|${inventorySnapshotKey ?? ""}|${++requestSequence.current}`;
     comparisonController.current = controller;
     comparisonRequestKey.current = key;
     setComparisonState("loading");
     setComparisonError(null);
     setComparison(null);
-    void fetch(`/api/repo/conflict-comparison?${buildConflictComparisonQuery(path, file.path, oursHash, theirsHash)}`, {
+    void fetch(`/api/repo/conflict-comparison?${buildConflictComparisonQuery(path, file.path, fromStage, toStage, fromHash, toHash)}`, {
       cache: "no-store",
       signal: controller.signal,
     })
@@ -415,13 +421,17 @@ export default function ConflictInspector({ path }: ConflictInspectorProps) {
       })
       .then((value) => {
         if (controller.signal.aborted || comparisonRequestKey.current !== key) return;
-        if (value.input?.file !== file.path || value.input?.ours_hash?.toLowerCase() !== oursHash.toLowerCase() || value.input?.theirs_hash?.toLowerCase() !== theirsHash.toLowerCase()) throw new Error("OURS/THEIRS比較の応答が要求と一致しません");
+        if (value.input?.file !== file.path || value.input.from_stage !== fromStage || value.input.to_stage !== toStage
+          || value.input.from_hash?.toLowerCase() !== fromHash.toLowerCase()
+          || value.input.to_hash?.toLowerCase() !== toHash.toLowerCase()) {
+          throw new Error("競合比較の応答が要求と一致しません");
+        }
         setComparison(value);
         setComparisonState("ready");
       })
       .catch((reason: unknown) => {
         if (controller.signal.aborted || comparisonRequestKey.current !== key) return;
-        setComparisonError(reason instanceof Error ? reason.message : "OURS/THEIRS比較を取得できませんでした。");
+        setComparisonError(reason instanceof Error ? reason.message : "競合比較を取得できませんでした。");
         setComparisonState("error");
       })
       .finally(() => {
@@ -473,8 +483,11 @@ export default function ConflictInspector({ path }: ConflictInspectorProps) {
   };
 
   const selectedStageIsCurrent = stageData !== null && file !== null && stageData.input.file === file.path && stageData.input.stage === selectedStage && stageData.input.expected_hash.toLowerCase() === (conflictStageHash(file, selectedStage) ?? "").toLowerCase();
-  const comparisonIsCurrent = comparison !== null && file !== null && comparison.input.file === file.path && comparison.input.ours_hash.toLowerCase() === (conflictStageHash(file, CONFLICT_STAGE_OURS) ?? "").toLowerCase() && comparison.input.theirs_hash.toLowerCase() === (conflictStageHash(file, CONFLICT_STAGE_THEIRS) ?? "").toLowerCase();
-  const comparisonAvailability = file === null ? { available: false, reason: "競合ファイルを選択してください。" } : conflictComparisonAvailability(file);
+  const comparisonIsCurrent = comparison !== null && file !== null && comparison.input.file === file.path
+    && comparison.input.from_stage === fromStage && comparison.input.to_stage === toStage
+    && comparison.input.from_hash.toLowerCase() === conflictStageHash(file, fromStage)?.toLowerCase()
+    && comparison.input.to_hash.toLowerCase() === conflictStageHash(file, toStage)?.toLowerCase();
+  const comparisonAvailability = file === null ? { available: false, reason: "競合ファイルを選択してください。" } : conflictComparisonAvailability(file, fromStage, toStage);
 
   return (
     <details className="conflict-inspector" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -577,13 +590,29 @@ export default function ConflictInspector({ path }: ConflictInspectorProps) {
           </section>
 
           <section className="conflict-inspector-section" aria-labelledby="conflict-comparison-title" aria-busy={comparisonState === "loading"}>
-            <div className="conflict-inspector-section-heading"><div><h4 id="conflict-comparison-title">OURS / THEIRS 比較</h4><p>現在のINDEXで検証したOURSとTHEIRSをGitの読み取り専用diffで比較します。</p></div><button type="button" className="primary-action" disabled={!comparisonAvailability.available || comparisonState === "loading"} title={comparisonAvailability.reason ?? undefined} onClick={loadComparison}>{comparisonState === "loading" ? "比較を取得中…" : comparisonState === "idle" ? "OURS / THEIRSを比較" : "比較を再取得"}</button></div>
+            <div className="conflict-inspector-section-heading">
+              <div>
+                <h4 id="conflict-comparison-title">競合の比較</h4>
+                <label className="conflict-inspector-file-select"><span>比較するstage</span>
+                  <select value={comparisonPair} onChange={(event) => {
+                    comparisonController.current?.abort();
+                    setComparisonPair(Number(event.target.value));
+                    setComparison(null);
+                    setComparisonState("idle");
+                    setComparisonError(null);
+                  }}>
+                    {comparisonPairs.map(([from, to], index) => <option key={index} value={index}>{conflictStageLabel(from)} → {conflictStageLabel(to)}</option>)}
+                  </select>
+                </label>
+              </div>
+              <button type="button" className="primary-action" disabled={!comparisonAvailability.available || comparisonState === "loading"} title={comparisonAvailability.reason ?? undefined} onClick={loadComparison}>{comparisonState === "loading" ? "比較を取得中…" : comparisonState === "idle" ? "比較する" : "比較を再取得"}</button>
+            </div>
             {!comparisonAvailability.available && <p className="conflict-inspector-unavailable" role="status">{comparisonAvailability.reason}</p>}
             {comparisonState === "error" && <p className="conflict-inspector-error" role="alert">比較を取得できませんでした。{comparisonError && <span>（{comparisonError}）</span>}</p>}
             {comparison && comparisonIsCurrent && <div className="conflict-inspector-comparison">
               {comparison.unavailable_reason && <p className="conflict-inspector-unavailable" role="status">{comparison.unavailable_reason}</p>}
               {comparison.binary && <p className="conflict-inspector-binary" role="status">Gitがバイナリ差分として判定しました。テキスト行はありません。</p>}
-              {comparison.patch_complete && comparison.patch === "" && !comparison.binary && <p className="conflict-inspector-empty">OURSとTHEIRSにテキスト差分はありません。</p>}
+              {comparison.patch_complete && comparison.patch === "" && !comparison.binary && <p className="conflict-inspector-empty">{conflictStageLabel(fromStage)}と{conflictStageLabel(toStage)}にテキスト差分はありません。</p>}
               <PatchView patch={comparison.patch} />
               {comparison.patch_truncated && <p className="conflict-inspector-warning" role="status">パッチ本文は{comparison.patch_limit_bytes.toLocaleString()} bytesで切り詰められています。比較結果は部分表示です。</p>}
             </div>}

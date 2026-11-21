@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
 
 import {
   TIMELINE_KIND_ALL,
@@ -50,6 +56,46 @@ const filters = (overrides = {}) => ({
   endDate: "",
   sort: TIMELINE_SORT_NEWEST,
   ...overrides,
+});
+
+test("displayed history groups local days across pages and preserves the exported order", () => {
+  const source = new URL("../app/agent-timeline.tsx", import.meta.url);
+  const require = createRequire(source);
+  const code = ts.transpileModule(readFileSync(source, "utf8") + "\nexport { HistoryList };", {
+    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  const exports = {};
+  runInNewContext(code, {
+    exports,
+    require: (name) => name.endsWith(".mjs") || !name.startsWith(".") ? require(name) : {},
+  });
+  const projectById = new Map();
+  const input = [
+    event("morning", new Date(2026, 9, 2, 0, 5).toISOString(), { summary: "morning report" }),
+    event("evening", new Date(2026, 9, 1, 23, 55).toISOString(), { summary: "evening report" }),
+    event("ignored", new Date(2026, 9, 3, 12).toISOString()),
+  ];
+  const olderPage = event("afternoon", new Date(2026, 9, 1, 17).toISOString(), { summary: "afternoon report" });
+  const render = (events, sort) => {
+    const { filtered } = timelineHistoryDetails(events, filters({ sort, query: "report" }), projectById);
+    const html = renderToStaticMarkup(createElement(exports.HistoryList, { events: filtered, projectById }));
+    return {
+      dates: Array.from(html.matchAll(/<h4[^>]*><time dateTime="([^"]+)"/g), ([, date]) => date),
+      rows: Array.from(html.matchAll(/>(morning|evening|afternoon) report</g), ([, id]) => id),
+      csv: timelineHistoryCsv(filtered).split("\r\n").slice(1, -1).map((row) => row.split('"')[1]),
+    };
+  };
+  const before = render(input, TIMELINE_SORT_NEWEST);
+  assert.deepEqual(before.dates, ["2026-10-02", "2026-10-01"]);
+  assert.deepEqual(before.rows, ["morning", "evening"]);
+  const newest = render([...input, olderPage], TIMELINE_SORT_NEWEST);
+  assert.deepEqual(newest.dates, before.dates);
+  assert.deepEqual(newest.rows, ["morning", "evening", "afternoon"]);
+  assert.deepEqual(newest.csv, newest.rows);
+  const oldest = render([...input, olderPage], TIMELINE_SORT_OLDEST);
+  assert.deepEqual(oldest.dates, newest.dates.toReversed());
+  assert.deepEqual(oldest.rows, newest.rows.toReversed());
+  assert.deepEqual(oldest.csv, oldest.rows);
 });
 
 test("search covers project, branch, summary, and worktree while project selection stays exact", () => {

@@ -402,6 +402,9 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
                 <div className="worktree-explorer-card-topline">
                   <div className="worktree-explorer-state-badges" aria-label="worktree の状態">
                     {tokens.map((token: string) => <span className={`worktree-explorer-state state-${token}`} key={token}>{stateLabel(token)}</span>)}
+                    {state === "locked" && row.worktree.lock_reason && (
+                      <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.worktree.lock_reason}</span>
+                    )}
                     {healthTokens.map((token: string) => <span className={`worktree-explorer-health health-${token}`} key={token}>{healthLabel(token)}</span>)}
                     <span className={`worktree-explorer-sync sync-${sync}`}>{worktreeSyncLabel(row)}</span>
                   </div>

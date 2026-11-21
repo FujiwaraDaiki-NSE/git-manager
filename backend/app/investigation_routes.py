@@ -10,11 +10,10 @@ class CommitSearchPage(BaseModel):
     scope: str
     grep: str
     author: str
-    since: str
-    until: str
+    since_at: str
+    until_at: str
     file: str
     offset: int = Field(ge=0)
-    tz_offset: int
     fixed_shas: list[str]
 
 
@@ -43,13 +42,16 @@ def create_router(known_repo, repo_lock, pool):
         return await execute(path, investigation.overlaps)
 
     @router.get("/commit-search")
-    async def search(path: str, scope: str, grep: str, author: str, since: str, until: str, file: str, offset: int = Query(..., ge=0), tz_offset: int = Query(...), fixed_shas: str | None = None):
-        return await execute(path, investigation.search, scope, grep, author, since, until, file, offset, tz_offset, fixed_shas)
+    async def search(
+        path: str, scope: str, grep: str, author: str, since_at: str, until_at: str, file: str,
+        offset: int = Query(..., ge=0), fixed_shas: str | None = None,
+    ):
+        return await execute(path, investigation.search, scope, grep, author, since_at, until_at, file, offset, fixed_shas)
 
     @router.post("/commit-search")
     async def search_page(body: CommitSearchPage):
         return await execute(body.path, investigation.search, body.scope, body.grep, body.author,
-                             body.since, body.until, body.file, body.offset, body.tz_offset, body.fixed_shas)
+                             body.since_at, body.until_at, body.file, body.offset, body.fixed_shas)
 
     @router.get("/recovery-candidates")
     async def recovery(path: str):

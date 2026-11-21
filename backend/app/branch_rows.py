@@ -296,26 +296,24 @@ def _status(
         return "upstream_deleted" if locals_ else "remote_only"
     if not locals_:
         return "remote_only"
-    local_hashes = {lane.get("head") for lane in locals_ if isinstance(lane.get("head"), str)}
-    if local_hashes and local_hashes == {remote_hash}:
-        return "synchronized"
-    tracks = [
-        (lane.get("upstream_ahead"), lane.get("upstream_behind"))
-        for lane in locals_
-    ]
-    if any(ahead is None or behind is None for ahead, behind in tracks):
-        return "tracking_unavailable"
-    if all(ahead == 0 and behind == 0 for ahead, behind in tracks):
-        return "tracking_inconsistent"
-    if all(ahead == 0 and behind > 0 for ahead, behind in tracks):
-        return "remote_ahead"
-    if tracks and all(ahead > 0 and behind == 0 for ahead, behind in tracks):
-        return "local_ahead"
-    if any(ahead == 0 and behind > 0 for ahead, behind in tracks) and any(
-        ahead > 0 and behind == 0 for ahead, behind in tracks
-    ):
-        return "mixed"
-    return "diverged"
+    states = set()
+    for lane in locals_:
+        if lane.get("head") == remote_hash:
+            states.add("synchronized")
+            continue
+        ahead = lane.get("upstream_ahead")
+        behind = lane.get("upstream_behind")
+        if ahead is None or behind is None:
+            return "tracking_unavailable"
+        if ahead > 0 and behind > 0:
+            states.add("diverged")
+        elif ahead > 0:
+            states.add("local_ahead")
+        elif behind > 0:
+            states.add("remote_ahead")
+        else:
+            states.add("tracking_inconsistent")
+    return states.pop() if len(states) == 1 else "mixed"
 
 
 def build(

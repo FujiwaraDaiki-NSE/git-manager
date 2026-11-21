@@ -198,7 +198,7 @@ def test_object_investigations_verify_snapshots_and_preserve_conflicts(investiga
     assert result.returncode == 1
     before = (git('status', '--porcelain=v2'), git('show-ref'), git('diff'), git('diff', '--cached'))
     ours, theirs = git('rev-parse', ':2:file.txt'), git('rev-parse', ':3:file.txt')
-    requests = [('conflicts', {'path': path}), ('conflict-stage', {'path': path, 'file': 'file.txt', 'stage': 2, 'expectedHash': ours}), ('conflict-comparison', {'path': path, 'file': 'file.txt', 'oursHash': ours, 'theirsHash': theirs}), ('containment', {'path': path, 'revision': base}), ('tree-sizes', {'path': path, 'revision': target})]
+    requests = [('conflicts', {'path': path}), ('conflict-stage', {'path': path, 'file': 'file.txt', 'stage': 2, 'expectedHash': ours}), ('conflict-comparison', {'path': path, 'file': 'file.txt', 'fromStage': 2, 'toStage': 3, 'fromHash': ours, 'toHash': theirs}), ('containment', {'path': path, 'revision': base}), ('tree-sizes', {'path': path, 'revision': target})]
     for endpoint, params in requests:
         response = client.get('/api/repo/' + endpoint, params=params)
         assert response.status_code == 200, (endpoint, response.text)
@@ -206,6 +206,17 @@ def test_object_investigations_verify_snapshots_and_preserve_conflicts(investiga
         assert client.get('/api/repo/' + endpoint, params={**params, 'path': '/unregistered'}).status_code == 404
         for field in params:
             assert client.get('/api/repo/' + endpoint, params={k: v for k, v in params.items() if k != field}).status_code == 422
+    base_blob = git('rev-parse', ':1:file.txt')
+    for stage, blob in [(2, ours), (3, theirs)]:
+        params = dict(path=path, file='file.txt', fromStage=1, toStage=stage, fromHash=base_blob, toHash=blob)
+        response = client.get('/api/repo/conflict-comparison', params=params)
+        assert response.status_code == 200, response.text
+        assert response.json()['input'] == {
+            'file': 'file.txt', 'from_stage': 1, 'to_stage': stage, 'from_hash': base_blob, 'to_hash': blob,
+        }
+        assert response.json()['patch'].strip() == git('diff', '--no-ext-diff', '--no-textconv', base_blob, blob, '--')
+        assert client.get('/api/repo/conflict-comparison', params={**params, 'fromHash': blob}).status_code == 409
+        assert client.get('/api/repo/conflict-comparison', params={**params, 'fromStage': stage}).status_code == 422
     assert client.get('/api/repo/conflict-stage', params={'path': path, 'file': 'file.txt', 'stage': 2, 'expectedHash': '0' * 40}).status_code == 409
     assert client.get('/api/repo/conflict-stage', params={'path': path, 'file': '../outside', 'stage': 2, 'expectedHash': ours}).status_code == 422
     assert (git('status', '--porcelain=v2'), git('show-ref'), git('diff'), git('diff', '--cached')) == before
@@ -215,5 +226,5 @@ def test_object_investigation_git_faults_remain_errors(investigation, monkeypatc
     client, path, base, _, _, _ = investigation
     for module, method in [(main.conflict_inspector, 'get_conflicts'), (main.conflict_inspector, 'get_conflict_stage'), (main.conflict_inspector, 'get_conflict_comparison'), (main.commit_containment, 'get_containment'), (main.tree_sizes, 'get_tree_sizes')]:
         monkeypatch.setattr(module, method, lambda *args: None)
-    for endpoint, params in [('conflicts', {'path': path}), ('conflict-stage', {'path': path, 'file': 'file.txt', 'stage': 2, 'expectedHash': base}), ('conflict-comparison', {'path': path, 'file': 'file.txt', 'oursHash': base, 'theirsHash': base}), ('containment', {'path': path, 'revision': base}), ('tree-sizes', {'path': path, 'revision': base})]:
+    for endpoint, params in [('conflicts', {'path': path}), ('conflict-stage', {'path': path, 'file': 'file.txt', 'stage': 2, 'expectedHash': base}), ('conflict-comparison', {'path': path, 'file': 'file.txt', 'fromStage': 2, 'toStage': 3, 'fromHash': base, 'toHash': base}), ('containment', {'path': path, 'revision': base}), ('tree-sizes', {'path': path, 'revision': base})]:
         assert client.get('/api/repo/' + endpoint, params=params).status_code == 502

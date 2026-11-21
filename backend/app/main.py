@@ -256,9 +256,11 @@ def _conflict_stage_sync(host_path: str, repo: str, file: str, stage: int, expec
         return conflict_inspector.get_conflict_stage(repo, file, stage, expected_hash)
 
 
-def _conflict_comparison_sync(host_path: str, repo: str, file: str, ours_hash: str, theirs_hash: str) -> dict[str, Any] | None:
+def _conflict_comparison_sync(
+    host_path: str, repo: str, file: str, from_stage: int, to_stage: int, from_hash: str, to_hash: str,
+) -> dict[str, Any] | None:
     with _repo_lock(host_path):
-        return conflict_inspector.get_conflict_comparison(repo, file, ours_hash, theirs_hash)
+        return conflict_inspector.get_conflict_comparison(repo, file, from_stage, to_stage, from_hash, to_hash)
 
 
 def _containment_sync(host_path: str, repo: str, revision: str) -> dict[str, Any] | None:
@@ -1183,6 +1185,7 @@ async def lifespan(_app: FastAPI):
     refresh_pool.shutdown(wait=False)
     fetch_pool.shutdown(wait=False)
     github_pr_pool.shutdown(wait=False)
+    github.shutdown()
 
 
 app = FastAPI(title="gitdash", docs_url="/api/docs", lifespan=lifespan)
@@ -1642,10 +1645,19 @@ async def read_repo_conflict_stage(path: str, file: str, stage: int, expected_ha
 
 
 @app.get("/api/repo/conflict-comparison")
-async def compare_repo_conflict(path: str, file: str, ours_hash: str = Query(..., alias="oursHash"), theirs_hash: str = Query(..., alias="theirsHash")) -> dict[str, Any]:
+async def compare_repo_conflict(
+    path: str,
+    file: str,
+    from_stage: int = Query(..., alias="fromStage"),
+    to_stage: int = Query(..., alias="toStage"),
+    from_hash: str = Query(..., alias="fromHash"),
+    to_hash: str = Query(..., alias="toHash"),
+) -> dict[str, Any]:
     repo = _known_repo(path)
     try:
-        result = await asyncio.get_running_loop().run_in_executor(pool, _conflict_comparison_sync, path, repo, file, ours_hash, theirs_hash)
+        result = await asyncio.get_running_loop().run_in_executor(
+            pool, _conflict_comparison_sync, path, repo, file, from_stage, to_stage, from_hash, to_hash,
+        )
     except conflict_inspector.ConflictChangedError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:

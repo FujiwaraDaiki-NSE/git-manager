@@ -34,6 +34,7 @@ import {
   TIMELINE_STATUS_UNKNOWN,
   TIMELINE_STATUS_VALUES,
   filterTimelineCurrentRows,
+  localTimelineCalendarDate,
   timelineHistoryCsv,
   timelineHistoryDetails,
 } from "./agent-timeline-investigation-tools.mjs";
@@ -208,6 +209,24 @@ function HistoryRow({ event, project }: { event: AgentEvent; project: TimelinePr
       {event.decision != null && <details><summary>当時の判断依頼</summary><AgentDecisionDetails decision={event.decision} /></details>}
     </li>
   );
+}
+
+function HistoryList({ events, projectById }: { events: AgentEvent[]; projectById: Map<string, ProjectSummary> }) {
+  const groups: { date: string | null; events: AgentEvent[] }[] = [];
+  for (const event of events) {
+    const date = localTimelineCalendarDate(event.occurred_at);
+    const group = groups.at(-1);
+    if (group?.date === date) group.events.push(event);
+    else groups.push({ date, events: [event] });
+  }
+  return groups.map(({ date, events }) => (
+    <div key={date === null ? events[0].event_id : date}>
+      <h4 className="agent-timeline-history-date">{date === null ? "日付未取得" : <time dateTime={date}>{date}</time>}</h4>
+      <ol className="agent-timeline-list agent-timeline-history-list">
+        {events.map((event) => <HistoryRow key={event.event_id} event={event} project={event.project_id ? projectById.get(event.project_id) || null : null} />)}
+      </ol>
+    </div>
+  ));
 }
 
 function sortCurrentRows(rows: CurrentRow[]) {
@@ -475,7 +494,7 @@ export default function AgentTimelineSidebar({
           {history.length === 0 && !displaySnapshot.loading && displaySnapshot.error && <p className="agent-timeline-empty agent-timeline-error" role="alert">履歴を取得できませんでした。</p>}
           {history.length === 0 && !displaySnapshot.loading && !displaySnapshot.error && !historyDetails.dateWindow.error && events.length === 0 && <p className="agent-timeline-empty" role="status">保存されたagentイベントはありません。</p>}
           {history.length === 0 && !displaySnapshot.loading && !displaySnapshot.error && !historyDetails.dateWindow.error && events.length > 0 && <p className="agent-timeline-empty" role="status">条件に一致する取得済み履歴はありません。</p>}
-          {history.length > 0 && <ol className="agent-timeline-list agent-timeline-history-list">{history.map((event) => <HistoryRow key={event.event_id} event={event} project={event.project_id ? projectById.get(event.project_id) || null : null} />)}</ol>}
+          {history.length > 0 && <HistoryList events={history} projectById={projectById} />}
           {historyError && <p className="agent-timeline-empty agent-timeline-error" role="alert">古い履歴を取得できませんでした。{historyError}</p>}
           {historyHasMore && <button type="button" disabled={historyLoading || isPaused} onClick={loadOlderEvents}>{historyLoading ? "履歴を取得中…" : "さらに読み込む"}</button>}
           <div className="agent-timeline-history-actions">

@@ -38,7 +38,9 @@ test("repo更新で再取得し、取得中の表示保持・失敗表示・成�
   let element;
   const render = (repo) => { cursor = 0; element = module.exports.default({ repo }); return renderToStaticMarkup(element); };
   const respond = async (ok, state = "same") => {
-    requests.at(-1).resolve({ ok, status: ok ? 200 : 502, json: async () => ({ submodules: [{ path: "lib", recorded_commit: "a".repeat(40), status: state }] }) });
+    requests.at(-1).resolve({ ok, status: ok ? 200 : 502, json: async () => ({ submodules: [{
+      path: "lib", recorded_commit: "a".repeat(40), checkout_commit: state === "uninitialized" ? null : "a".repeat(40), status: state,
+    }] }) });
     await new Promise(setImmediate);
   };
   let repo = { path: "/repo" };
@@ -53,6 +55,7 @@ test("repo更新で再取得し、取得中の表示保持・失敗表示・成�
   await respond(true, "uninitialized");
   const before = render(repo);
   assert.match(before, /未初期化/);
+  assert.match(before, /現在のチェックアウト <code>未確定<\/code>/);
   assert.doesNotMatch(before, /取得できませんでした/);
   repo = { ...repo };
   render(repo);
@@ -60,6 +63,7 @@ test("repo更新で再取得し、取得中の表示保持・失敗表示・成�
   assert.match(render(repo), /未初期化/);
   await respond(true);
   assert.match(render(repo), /一致/);
+  assert.match(render(repo), /親のindex <code>a{40}<\/code>.*現在のチェックアウト <code>a{40}<\/code>/);
   assert.doesNotMatch(render(repo), /未初期化/);
   assert.equal(requests.length, 3);
   repo = { ...repo };

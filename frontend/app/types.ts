@@ -262,7 +262,8 @@ export type ProjectBranchRow = {
   remote_repository: string | null;
   tracking_ref: string | null;
   locals: ProjectLane[];
-  commit_hashes: string[];
+  /** Positions in this response's branch_commits, in Git history order. */
+  commit_indices: number[];
   tip_commits: ProjectBranchCommit[];
   tip_metadata_available: boolean;
   history_heads: string[];
@@ -362,6 +363,7 @@ export type ProjectWorktree = {
   branch: string | null;
   head: string | null;
   state: "ok" | "prunable" | "locked" | null;
+  lock_reason: string | null;
   detached: boolean;
   is_main: boolean;
 };
@@ -441,7 +443,7 @@ export type ProjectResponse = {
   snapshot?: { observed_at: number; status: "ready" | "refreshing" | "failed"; error: string | null };
   github: { open?: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; checked_at: number | null; pulls: OpenPullRequest[] }; status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
   branch_rows: ProjectBranchRow[] | null;
-  branch_commits: Record<string, ProjectBranchCommit> | null;
+  branch_commits: ProjectBranchCommit[] | null;
   branch_connections: ProjectBranchConnections | null;
   id: string;
   name: string;

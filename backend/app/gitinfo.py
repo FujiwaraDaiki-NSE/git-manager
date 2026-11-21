@@ -206,6 +206,8 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
             return
         if current.get("state") is None:
             current["state"] = "ok"
+        if current["state"] != "locked":
+            current["lock_reason"] = None
         current["detached"] = not bool(current.get("branch"))
         worktrees.append(current.copy())
 
@@ -239,8 +241,9 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
                 current["detached"] = True
             elif field.startswith("prunable"):
                 current["state"] = "prunable"
-            elif field.startswith("locked") and current.get("state") != "prunable":
+            elif (field == "locked" or field.startswith("locked ")) and current.get("state") != "prunable":
                 current["state"] = "locked"
+                current["lock_reason"] = field.partition(" ")[2] or None
         finish()
         return worktrees
 
@@ -266,15 +269,16 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
             current["detached"] = True
         elif line.startswith("prunable"):
             current["state"] = "prunable"
-        elif line.startswith("locked") and current.get("state") != "prunable":
+        elif (line == "locked" or line.startswith("locked ")) and current.get("state") != "prunable":
             current["state"] = "locked"
+            current["lock_reason"] = line.partition(" ")[2] or None
     finish()
     return worktrees
 
 
-@project_facts.cached
 def list_worktrees(repo: str) -> list[dict[str, Any]] | None:
     """Return worktree metadata, or ``None`` when git cannot list it."""
+    # Parse the cached Git output so existing snapshots also expose lock reasons.
     raw = _run(repo, ["worktree", "list", "--porcelain", "-z"])
     if raw is None:
         return None
@@ -453,12 +457,24 @@ def operations(repo: str) -> list[dict[str, Any]] | None:
     result = []
     markers = [("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"), ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect")]
     try:
+        todo = "sequencer/todo"
+        try:
+            with (directory / todo).open(encoding="utf-8", errors="replace") as pending:
+                action = pending.readline().split(maxsplit=1)
+        except FileNotFoundError:
+            action = []
+        if len(action) == 2 and action[0] in ("pick", "revert"):
+            markers.append((todo, "cherry-pick" if action[0] == "pick" else "revert"))
         for marker, kind in markers:
             target = directory / marker
-            try:
-                target.stat()
-            except FileNotFoundError:
-                continue
+            if marker == todo:
+                if any(operation["kind"] == kind for operation in result):
+                    continue
+            else:
+                try:
+                    target.stat()
+                except FileNotFoundError:
+                    continue
             step = total = None
             if kind == "rebase":
                 step_file, total_file = ("msgnum", "end") if marker == "rebase-merge" else ("next", "last")

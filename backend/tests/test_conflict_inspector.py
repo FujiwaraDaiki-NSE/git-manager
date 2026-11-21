@@ -115,6 +115,10 @@ def test_add_add_inventory_explicitly_reports_missing_base(tmp_path: Path) -> No
     assert item["ours"] is not None
     assert item["theirs"] is not None
     assert item["missing_stages"] == [1]
+    comparison = get_conflict_comparison(str(repo), "new.txt", 2, 3, item["ours"]["hash"], item["theirs"]["hash"])
+    assert comparison["patch_complete"]
+    with pytest.raises(ConflictChangedError, match="BASE"):
+        get_conflict_comparison(str(repo), "new.txt", 1, 2, "0" * 40, item["ours"]["hash"])
 
 
 def test_delete_modify_inventory_explicitly_reports_missing_theirs(tmp_path: Path) -> None:
@@ -158,12 +162,12 @@ def test_binary_stage_and_comparison_are_explicit(tmp_path: Path) -> None:
     assert stage is not None
     assert stage["binary"] is True
     assert stage["text"] is None
-    comparison = get_conflict_comparison(str(repo), "image.bin", item["ours"]["hash"], item["theirs"]["hash"])
+    comparison = get_conflict_comparison(str(repo), "image.bin", 2, 3, item["ours"]["hash"], item["theirs"]["hash"])
     assert comparison is not None
     assert comparison["binary"] is True
     assert "Binary files" in comparison["patch"] or "GIT binary patch" in comparison["patch"]
     assert comparison["patch_complete"] is True
-    assert comparison["input"]["ours_hash"] == item["ours"]["hash"]
+    assert comparison["input"]["from_hash"] == item["ours"]["hash"]
 
 
 def test_symlink_stage_is_not_followed(tmp_path: Path) -> None:
@@ -204,7 +208,7 @@ def test_changed_index_hash_is_rejected_before_object_read(tmp_path: Path) -> No
     with pytest.raises(ConflictChangedError):
         get_conflict_stage(str(repo), "conflict.txt", 2, old_hash)
     with pytest.raises(ConflictChangedError):
-        get_conflict_comparison(str(repo), "conflict.txt", old_hash, item["theirs"]["hash"])
+        get_conflict_comparison(str(repo), "conflict.txt", 2, 3, old_hash, item["theirs"]["hash"])
 
 
 def test_stage_rechecks_index_after_blob_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -248,7 +252,7 @@ def test_comparison_rechecks_index_after_diff_read(tmp_path: Path, monkeypatch: 
 
     monkeypatch.setattr(conflict_inspector, "_read_limited_output", diff_then_change)
     with pytest.raises(ConflictChangedError):
-        get_conflict_comparison(str(repo), "conflict.txt", item["ours"]["hash"], item["theirs"]["hash"])
+        get_conflict_comparison(str(repo), "conflict.txt", 1, 3, item["base"]["hash"], item["theirs"]["hash"])
 
 
 def test_input_rejects_unsafe_paths_and_non_exact_stages(tmp_path: Path) -> None:
@@ -304,7 +308,7 @@ def test_comparison_patch_limit_preserves_identity_and_bounds_output(tmp_path: P
     item = inventory["files"][0]
     monkeypatch.setattr(conflict_inspector, "MAX_PATCH_BYTES", 120)
 
-    result = get_conflict_comparison(str(repo), "large.txt", item["ours"]["hash"], item["theirs"]["hash"])
+    result = get_conflict_comparison(str(repo), "large.txt", 1, 2, item["base"]["hash"], item["ours"]["hash"])
 
     assert result is not None
     assert result["patch_truncated"] is True
@@ -312,8 +316,10 @@ def test_comparison_patch_limit_preserves_identity_and_bounds_output(tmp_path: P
     assert len(result["patch"].encode("utf-8")) <= 120
     assert result["input"] == {
         "file": "large.txt",
-        "ours_hash": item["ours"]["hash"],
-        "theirs_hash": item["theirs"]["hash"],
+        "from_stage": 1,
+        "to_stage": 2,
+        "from_hash": item["base"]["hash"],
+        "to_hash": item["ours"]["hash"],
     }
 
 
@@ -350,7 +356,7 @@ def test_module_does_not_change_index_or_worktree(tmp_path: Path) -> None:
     assert inventory is not None
     item = inventory["files"][0]
     get_conflict_stage(str(repo), "conflict.txt", 2, item["ours"]["hash"])
-    get_conflict_comparison(str(repo), "conflict.txt", item["ours"]["hash"], item["theirs"]["hash"])
+    get_conflict_comparison(str(repo), "conflict.txt", 2, 3, item["ours"]["hash"], item["theirs"]["hash"])
     after_status = git(repo, "status", "--porcelain=v2", "-z", check=True)
     after_index_hash = hashlib.sha256(Path(before_index).read_bytes()).hexdigest()
     assert after_status == before_status

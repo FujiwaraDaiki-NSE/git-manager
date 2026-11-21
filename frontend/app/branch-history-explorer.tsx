@@ -90,7 +90,7 @@ function commitEvent(
 function recordsForRow(project: ProjectResponse, row: ProjectBranchRow, commits: ProjectBranchCommit[]): HistoryRecord[] {
   const metadata = new Map([...commits, ...row.tip_commits].map((commit) => [commit.hash, commit]));
   const hashes = Array.from(new Set([
-    ...row.commit_hashes,
+    ...commits.map((commit) => commit.hash),
     ...row.tip_commits.map((commit) => commit.hash),
   ]));
   return hashes.map((hash) => {
@@ -162,6 +162,10 @@ export default function BranchHistoryExplorer({
   }, [project.id, project.main_path]);
 
   const selectedRow = rows.find((row) => row.id === selectedRowId) ?? null;
+  const selectedCommits = useMemo(
+    () => selectedRow ? resolveBranchCommits(project, selectedRow) : [],
+    [project, selectedRow],
+  );
   const selectedIdentity = useMemo(() => {
     if (!selectedRow) return null;
     return historyRequestKey(
@@ -169,11 +173,11 @@ export default function BranchHistoryExplorer({
       selectedRow.id,
       selectedRow.history_heads,
       [
-        ...selectedRow.commit_hashes,
+        ...selectedCommits.map((commit) => commit.hash),
         ...selectedRow.tip_commits.map((commit) => commit.hash),
       ],
     );
-  }, [project.main_path, selectedRow]);
+  }, [project.main_path, selectedCommits, selectedRow]);
 
   useEffect(() => {
     requestControllerRef.current?.abort();
@@ -192,11 +196,11 @@ export default function BranchHistoryExplorer({
 
   const records = useMemo(() => {
     if (!selectedRow) return [];
-    const initial = recordsForRow(project, selectedRow, resolveBranchCommits(project, selectedRow));
+    const initial = recordsForRow(project, selectedRow, selectedCommits);
     const known = new Set(initial.map((commit) => commit.hash));
     const extras = extraCommits.filter((commit) => !known.has(commit.hash));
-    return [...initial, ...recordsForRow(project, { ...selectedRow, commit_hashes: extras.map((commit) => commit.hash), tip_commits: [] }, extras)];
-  }, [extraCommits, project, selectedRow]);
+    return [...initial, ...recordsForRow(project, { ...selectedRow, tip_commits: [] }, extras)];
+  }, [extraCommits, project, selectedCommits, selectedRow]);
 
   const dateRangeError = useMemo(() => historyDateRangeError(startDate, endDate), [endDate, startDate]);
   const filtered = useMemo(

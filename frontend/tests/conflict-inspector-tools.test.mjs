@@ -55,11 +55,11 @@ const files = [
 test("conflict query helpers keep every API input explicit", () => {
   assert.equal(conflictInventoryQuery("/repo"), "path=%2Frepo");
   assert.equal(conflictStageQuery("/repo", "odd\tname\n.txt", 2, hash("b")), `path=%2Frepo&file=odd%09name%0A.txt&stage=2&expectedHash=${hash("b")}`);
-  assert.equal(conflictComparisonQuery("/repo", "conflict.txt", hash("b"), hash("c")), `path=%2Frepo&file=conflict.txt&oursHash=${hash("b")}&theirsHash=${hash("c")}`);
+  assert.equal(conflictComparisonQuery("/repo", "conflict.txt", 1, 3, hash("a"), hash("c")), `path=%2Frepo&file=conflict.txt&fromStage=1&toStage=3&fromHash=${hash("a")}&toHash=${hash("c")}`);
   assert.throws(() => conflictInventoryQuery(), /path/);
   assert.throws(() => conflictStageQuery("/repo", "file", 4, hash("b")), /stage/);
   assert.throws(() => conflictStageQuery("/repo", "file", 2, "HEAD"), /hash/);
-  assert.throws(() => conflictComparisonQuery("/repo", "file", hash("b"), undefined), /theirsHash/);
+  assert.throws(() => conflictComparisonQuery("/repo", "file", 2, 3, hash("b"), undefined), /toHash/);
 });
 
 test("stage labels, hashes, and availability keep missing or non-file stages explicit", () => {
@@ -69,16 +69,17 @@ test("stage labels, hashes, and availability keep missing or non-file stages exp
   assert.equal(conflictStageHash(files[0], 2), hash("b"));
   assert.equal(conflictStageHash(files[1], 1), null);
   assert.deepEqual(conflictStageAvailability(files[1], 1), { available: false, reason: "BASE のINDEX stageがありません。" });
-  assert.equal(conflictComparisonAvailability(files[0]).available, true);
+  assert.equal(conflictComparisonAvailability(files[0], 1, 2).available, true);
   const addAdd = { ...files[1], stages: { "2": files[1].ours, "3": files[1].theirs } };
-  assert.equal(conflictComparisonAvailability(addAdd).available, true);
+  assert.equal(conflictComparisonAvailability(addAdd, 2, 3).available, true);
+  assert.deepEqual(conflictComparisonAvailability(addAdd, 1, 2), { available: false, reason: "BASE のINDEX stageがありません。" });
   const symlink = {
     ...files[0],
     ours: { ...files[0].ours, kind: "symlink", mode: "120000" },
     stages: { ...files[0].stages, "2": { ...files[0].ours, kind: "symlink", mode: "120000" } },
   };
   assert.equal(conflictStageAvailability(symlink, 2).available, false);
-  assert.equal(conflictComparisonAvailability(symlink).available, false);
+  assert.equal(conflictComparisonAvailability(symlink, 2, 3).available, false);
 });
 
 test("inventory CSV preserves odd paths and protects formula prefixes", () => {

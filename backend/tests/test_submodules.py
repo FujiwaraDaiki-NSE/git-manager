@@ -1,4 +1,5 @@
 from app import detail
+from test_project import commit, git, init_repo
 
 
 def test_parse_submodule_states_and_recorded_commit():
@@ -6,10 +7,31 @@ def test_parse_submodule_states_and_recorded_commit():
     checkout = "b" * 40
     for marker, state in [("-", "uninitialized"), ("+", "different"), (" ", "same"), ("U", "conflict")]:
         index = f"160000 {recorded} {1 if marker == 'U' else 0}\tlibs/a module\0"
-        assert detail.parse_submodule_status(f"{marker}{checkout} libs/a module (heads/main)\n", index) == [
-            {"path": "libs/a module", "recorded_commit": None if marker == "U" else recorded, "status": state}
+        status_sha = recorded if marker in (" ", "-") else checkout
+        assert detail.parse_submodule_status(f"{marker}{status_sha} libs/a module (heads/main)\n", index) == [
+            {"path": "libs/a module", "recorded_commit": None if marker == "U" else recorded,
+             "checkout_commit": status_sha if marker in (" ", "+") else None, "status": state}
         ]
     assert detail.parse_submodule_status("invalid", "") is None
+
+
+def test_checkout_and_index_shas_match_git(tmp_path):
+    source = tmp_path / "source"
+    repo = tmp_path / "repo"
+    init_repo(source)
+    init_repo(repo)
+    git(repo, "-c", "protocol.file.allow=always", "submodule", "add", str(source), "libs/module")
+    submodule = repo / "libs/module"
+    recorded = git(repo, "rev-parse", ":libs/module").strip()
+    for status in ("same", "different"):
+        checkout = git(submodule, "rev-parse", "HEAD").strip()
+        assert detail.get_submodules(str(repo)) == {"submodules": [{
+            "path": "libs/module", "recorded_commit": recorded, "checkout_commit": checkout, "status": status,
+        }]}
+        if status == "same":
+            git(submodule, "config", "user.name", "Test")
+            git(submodule, "config", "user.email", "test@example.com")
+            commit(submodule, "local submodule commit")
 
 
 def test_without_gitmodules_does_not_run_git(tmp_path, monkeypatch):

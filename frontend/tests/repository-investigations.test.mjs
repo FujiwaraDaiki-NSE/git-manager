@@ -42,7 +42,7 @@ test("commit search pages send large SHA arrays in POST bodies and refresh with 
     exports: module.exports, URLSearchParams, AbortController,
     fetch: async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => result }; },
     require: id => id === "react" ? { ...React, useId: () => "test", useEffect: () => {}, useRef: () => ({ current: null }),
-      useState: initial => [[fields, result, fields, null, false, null][state++], () => {}] }
+      useState: initial => [[fields, result, { ...fields, since_at: "", until_at: "" }, null, false, null][state++], () => {}] }
       : id.startsWith("./") ? { __esModule: true, default: () => null } : baseRequire(id),
   });
   const outer = module.exports.CommitSearch({ path: "/repo" });
@@ -71,7 +71,7 @@ test("commit search pages send large SHA arrays in POST bodies and refresh with 
   assert.equal(calls[1].init.method, undefined);
 });
 
-async function investigationHarness(kind, initial, fetchResult) {
+async function investigationHarness(kind, initial, fetchResult, props = {}) {
   const { fileStatusDescription } = await import("../app/file-status.mjs");
   const source = readFileSync(new URL("../app/repository-investigations.tsx", import.meta.url), "utf8").replace(/^import .*\.css";$/gm, "");
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
@@ -90,7 +90,7 @@ async function investigationHarness(kind, initial, fetchResult) {
   });
   function render() {
     cursor = 0;
-    const outer = module.exports[kind]({ path: "/repo" });
+    const outer = module.exports[kind]({ path: "/repo", ...props });
     return outer.type(outer.props);
   }
   function nodes(tree, type) {
@@ -118,6 +118,37 @@ test("date validation describes both date inputs and blocks only reversed ranges
     }
     h.nodes(tree, "form")[0].props.onSubmit({ preventDefault() {} });
     assert.equal(h.calls.length, invalid ? 0 : 1);
+  }
+});
+
+test("search uses local date boundaries and keeps the submitted instants when paging", async () => {
+  const originalZone = process.env.TZ;
+  try {
+    for (const [zone, date, since, until] of [
+      ["America/New_York", "2026-07-01", "2026-07-01T04:00:00.000Z", "2026-07-02T03:59:59.000Z"],
+      ["America/New_York", "2026-03-08", "2026-03-08T05:00:00.000Z", "2026-03-09T03:59:59.000Z"],
+      ["America/New_York", "2026-11-01", "2026-11-01T04:00:00.000Z", "2026-11-02T04:59:59.000Z"],
+      ["Asia/Tokyo", "2026-01-02", "2026-01-01T15:00:00.000Z", "2026-01-02T14:59:59.000Z"],
+    ]) {
+      process.env.TZ = zone;
+      const fields = { ...searchFields, since: date, until: date };
+      const result = { commits: [], offset: 0, has_more: true, fixed_shas: [] };
+      const h = await investigationHarness("CommitSearch", [fields], async () => ({ ok: true, json: async () => result }));
+      h.nodes(h.render(), "form")[0].props.onSubmit({ preventDefault() {} });
+      await new Promise(resolve => setImmediate(resolve));
+      const params = new URLSearchParams(h.calls[0][0].split("?")[1]);
+      assert.equal(params.get("since_at"), since);
+      assert.equal(params.get("until_at"), until);
+
+      process.env.TZ = "UTC";
+      h.nodes(h.render(), "button").find(n => n.props.children === "次の50件").props.onClick();
+      const body = JSON.parse(h.calls[1][1].body);
+      assert.equal(body.since_at, since);
+      assert.equal(body.until_at, until);
+    }
+  } finally {
+    if (originalZone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalZone;
   }
 });
 
@@ -150,13 +181,19 @@ test("search ranges use returned length and distinguish empty first and later pa
 
 test("overlaps retain XY codes and caution alongside shared Japanese status descriptions", async () => {
   const worktrees = [
-    { worktree: "/repo0", branch: null, xy: ["M ", " M", "??"] },
-    { worktree: "/repo1", branch: null, xy: ["UU"] },
+    { worktree: "/repo0", branch: "refs/heads/topic", xy: ["M ", " M", "??"] },
+    { worktree: "/repo1", branch: "refs/heads/topic", xy: ["UU"] },
   ];
-  const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees }] }, null, null, false, null]);
+  const opened = [];
+  const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees }] }], undefined, { onOpenWorktree: path => opened.push(path) });
   const html = h.html();
   for (const text of ["M ", " M", "??", "UU", "ステージ: 変更", "作業: 変更", "未追跡", "競合を解消してください", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"]) assert.ok(html.includes(text));
   const rows = h.nodes(h.render(), "li").filter(node => node.props.className === "tag-explorer-commit-meta");
   assert.equal(rows.length, 2);
   assert.match(renderToStaticMarkup(rows[0]), /\/repo0.*ステージ: 変更.*作業: 変更.*未追跡/);
+  for (const row of rows) {
+    const openButton = h.nodes(row, "button").find(node => node.props.children === "このworktreeの状態を開く");
+    openButton.props.onClick();
+  }
+  assert.deepEqual(opened, ["/repo0", "/repo1"]);
 });

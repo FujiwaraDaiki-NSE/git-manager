@@ -1,6 +1,6 @@
 """Read-only repository investigation, with explicit failures and request scopes."""
 from collections import defaultdict
-from datetime import date
+from datetime import datetime
 import shlex
 import json
 import re
@@ -68,16 +68,25 @@ class InvalidSearchSnapshot(ValueError):
     pass
 
 
-def search(repo, scope, grep, author, since, until, file, offset, tz_offset, fixed_shas=None):
+def _search_boundary(value: str) -> datetime | None:
+    if value == "":
+        return None
+    try:
+        boundary = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("検索期間はタイムゾーン付きのISO 8601日時で指定してください") from error
+    if boundary.utcoffset() is None or boundary.microsecond:
+        raise ValueError("検索期間はタイムゾーン付きのISO 8601日時を秒単位で指定してください")
+    return boundary
+
+
+def search(repo, scope, grep, author, since_at, until_at, file, offset, fixed_shas=None):
     if offset < 0:
         raise ValueError("offset は0以上で指定してください")
-    if not -14 * 60 <= tz_offset <= 14 * 60:
-        raise ValueError("tz_offset は -840〜840 分で指定してください")
-    for value in (since, until):
-        if value:
-            date.fromisoformat(value)
-    if since and until and since > until:
-        raise ValueError("開始日は終了日以前にしてください")
+    since = _search_boundary(since_at)
+    until = _search_boundary(until_at)
+    if since is not None and until is not None and since > until:
+        raise ValueError("開始日時は終了日時以前にしてください")
     if fixed_shas is None:
         if scope == "--all":
             revision = sorted(set(run(repo, ["log", "--all", "--no-walk", "--format=%H", "--"]).splitlines()))
@@ -108,12 +117,13 @@ def search(repo, scope, grep, author, since, until, file, offset, tz_offset, fix
             if checked.stdout.splitlines() != ["commit"] * len(revision):
                 raise InvalidSearchSnapshot("fixed_shas に存在しない、またはcommitではないSHAがあります")
     args = ["log", *revision, f"--format={FORMAT}", f"--skip={offset}", f"--max-count={PAGE_SIZE + 1}"]
-    # Date inputs are calendar days in the viewer's timezone (minutes east of UTC).
-    zone = f"{'+' if tz_offset >= 0 else '-'}{abs(tz_offset) // 60:02d}{abs(tz_offset) % 60:02d}"
-    bounds = (("since", f"{since} 00:00:00 {zone}" if since else ""), ("until", f"{until} 23:59:59 {zone}" if until else ""))
-    for flag, value in (("grep", grep), ("author", author), *bounds):
+    for flag, value in (("grep", grep), ("author", author)):
         if value:
             args.append(f"--{flag}={value}")
+    if since is not None:
+        args.append(f"--since={since.isoformat()}")
+    if until is not None:
+        args.append(f"--until={until.isoformat()}")
     args.append("--")
     if file:
         args.append(file)

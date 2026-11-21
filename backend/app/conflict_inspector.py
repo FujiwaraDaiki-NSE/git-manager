@@ -680,8 +680,10 @@ def get_conflict_stage(repo: str, file: str, stage: int, expected_hash: str) -> 
 def _current_comparison(
     repo: str,
     file: str,
-    ours_hash: str,
-    theirs_hash: str,
+    from_stage: int,
+    to_stage: int,
+    from_hash: str,
+    to_hash: str,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
     inventory = _inventory(repo)
     if inventory is None:
@@ -690,87 +692,58 @@ def _current_comparison(
     for item in files:
         if item["path"] != file:
             continue
-        ours = item["stages"].get(2)
-        theirs = item["stages"].get(3)
-        if ours is None or theirs is None:
-            raise ConflictChangedError("OURSまたはTHEIRSのINDEX stageがありません。最新の一覧を取得して再試行してください")
-        if ours["hash"] != ours_hash or theirs["hash"] != theirs_hash:
+        source = item["stages"].get(from_stage)
+        target = item["stages"].get(to_stage)
+        if source is None or target is None:
+            pair = f"{_STAGE_NAMES[from_stage].upper()} → {_STAGE_NAMES[to_stage].upper()}"
+            raise ConflictChangedError(f"{pair} の比較に必要なINDEX stageがありません。最新の一覧を取得して再試行してください")
+        if source["hash"] != from_hash or target["hash"] != to_hash:
             raise ConflictChangedError("競合のINDEXが変わりました。最新の一覧を取得して再試行してください")
-        ours_info = infos.get(ours["hash"])
-        theirs_info = infos.get(theirs["hash"])
-        if ours_info is None or theirs_info is None:
+        source_info = infos.get(from_hash)
+        target_info = infos.get(to_hash)
+        if source_info is None or target_info is None:
             return None
-        ours_public = _stage_record_with_info(ours, ours_info)
-        theirs_public = _stage_record_with_info(theirs, theirs_info)
-        snapshot = _snapshot_file(item)
-        return ours_public, theirs_public, snapshot
+        return _stage_record_with_info(source, source_info), _stage_record_with_info(target, target_info), _snapshot_file(item)
     raise ConflictChangedError("指定した競合パスがINDEXにありません。最新の一覧を取得して再試行してください")
 
 
 def get_conflict_comparison(
     repo: str,
     file: str,
-    ours_hash: str,
-    theirs_hash: str,
+    from_stage: int,
+    to_stage: int,
+    from_hash: str,
+    to_hash: str,
 ) -> dict[str, Any] | None:
-    """Compare current regular-file OURS and THEIRS blobs with bounded output."""
+    """Compare two current regular-file stage blobs with bounded output."""
     file = validate_file_path(file)
-    ours_hash = _validate_hash(ours_hash, "ours_hash")
-    theirs_hash = _validate_hash(theirs_hash, "theirs_hash")
+    from_stage = _validate_stage(from_stage)
+    to_stage = _validate_stage(to_stage)
+    if from_stage >= to_stage:
+        raise ConflictInspectorInputError("比較元と比較先は BASE → OURS、BASE → THEIRS、OURS → THEIRS のいずれかで指定してください")
+    from_hash = _validate_hash(from_hash, "from_hash")
+    to_hash = _validate_hash(to_hash, "to_hash")
     marker_before = _index_marker(repo)
-    current = _current_comparison(repo, file, ours_hash, theirs_hash)
+    current = _current_comparison(repo, file, from_stage, to_stage, from_hash, to_hash)
     if current is None:
         return None
-    ours, theirs, snapshot = current
-    identity = {"file": file, "ours_hash": ours_hash, "theirs_hash": theirs_hash}
-    if (
-        ours["mode"] not in _REGULAR_MODES
-        or theirs["mode"] not in _REGULAR_MODES
-        or ours["type"] != "blob"
-        or theirs["type"] != "blob"
-    ):
-        unavailable = {
-            "input": identity,
-            "path": file,
-            "ours_hash": ours_hash,
-            "theirs_hash": theirs_hash,
-            "snapshot": snapshot,
-            "patch": "",
-            "patch_bytes": 0,
-            "patch_limit_bytes": MAX_PATCH_BYTES,
-            "patch_truncated": False,
-            "patch_complete": False,
-            "binary": False,
-            "unavailable_reason": "シンボリックリンクまたはgitlinkは比較しません",
-            "command": None,
-        }
-        marker_after = _index_marker(repo)
-        current_after = _current_comparison(repo, file, ours_hash, theirs_hash)
-        if current_after is None:
+    source, target, snapshot = current
+    identity = {"file": file, "from_stage": from_stage, "to_stage": to_stage, "from_hash": from_hash, "to_hash": to_hash}
+    command = None
+    patch_bytes = b""
+    truncated = False
+    unavailable_reason = None
+    if all(stage["mode"] in _REGULAR_MODES and stage["type"] == "blob" for stage in (source, target)):
+        command = _git_command(repo, "diff", "--no-ext-diff", "--no-textconv", from_hash, to_hash, "--")
+        result = _read_limited_output(command, max_bytes=MAX_PATCH_BYTES)
+        if result is None:
             return None
-        if marker_before is not None and marker_after is not None and marker_before != marker_after:
-            raise ConflictChangedError("競合のINDEXが読み出し中に変わりました。最新の一覧を取得して再試行してください")
-        if current_after[2]["stages"] != snapshot["stages"]:
-            raise ConflictChangedError("競合のINDEXが読み出し中に変わりました。最新の一覧を取得して再試行してください")
-        return unavailable
+        patch_bytes, truncated = result
+    else:
+        unavailable_reason = "シンボリックリンクまたはgitlinkは比較しません"
 
-    command = _git_command(
-        repo,
-        "diff",
-        "--no-ext-diff",
-        "--no-textconv",
-        ours_hash,
-        theirs_hash,
-        "--",
-    )
-    result = _read_limited_output(command, max_bytes=MAX_PATCH_BYTES)
-    if result is None:
-        return None
-    patch_bytes, truncated = result
-    patch = patch_bytes.decode("utf-8", errors="replace")
-    binary = b"Binary files " in patch_bytes or b"GIT binary patch" in patch_bytes
     marker_after = _index_marker(repo)
-    current_after = _current_comparison(repo, file, ours_hash, theirs_hash)
+    current_after = _current_comparison(repo, file, from_stage, to_stage, from_hash, to_hash)
     if current_after is None:
         return None
     if marker_before is not None and marker_after is not None and marker_before != marker_after:
@@ -780,17 +753,15 @@ def get_conflict_comparison(
     return {
         "input": identity,
         "path": file,
-        "ours_hash": ours_hash,
-        "theirs_hash": theirs_hash,
         "snapshot": snapshot,
-        "patch": patch,
+        "patch": patch_bytes.decode("utf-8", errors="replace"),
         "patch_bytes": len(patch_bytes),
         "patch_limit_bytes": MAX_PATCH_BYTES,
         "patch_truncated": truncated,
-        "patch_complete": not truncated,
-        "binary": binary,
-        "unavailable_reason": None,
-        "command": shlex.join(command),
+        "patch_complete": unavailable_reason is None and not truncated,
+        "binary": b"Binary files " in patch_bytes or b"GIT binary patch" in patch_bytes,
+        "unavailable_reason": unavailable_reason,
+        "command": shlex.join(command) if command is not None else None,
     }
 
 

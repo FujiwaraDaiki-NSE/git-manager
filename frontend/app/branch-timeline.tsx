@@ -269,7 +269,7 @@ function FlowEventPopover({
       <time dateTime={event.row.date ?? undefined}>{relativeTime(event.row.date)} · {exactDate(event.row.date)}</time>
       <span>branch {rowLabel(event.lane)} · {event.row.is_head ? "HEAD" : "履歴"}</span>
       <span>{event.row.is_unpushed ? "未push（git push で送られます）" : ""}</span>
-      <span>親 {event.row.parents.length ? event.row.parents.map(shortHash).join(", ") : "未取得"}</span>
+      <span>{event.row.parents.length ? `親 ${event.row.parents.map(shortHash).join(", ")}` : "この履歴上の親なし"}</span>
       <code>git show {shortHash(event.row.hash)}</code><CopyButton value={`git show ${shortHash(event.row.hash)}`} label="git showをコピー" />
       <button type="button" onClick={onSelect}>詳細を開く</button>
     </div>,

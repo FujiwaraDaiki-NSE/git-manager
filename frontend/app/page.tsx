@@ -57,6 +57,7 @@ type LaneGitFilter = "all" | "dirty" | "conflict" | "ahead" | "behind";
 type GitFilter = LaneGitFilter | "fetch-failure";
 type ProjectSort = "priority" | "name" | "latest";
 type CardDensity = "comfortable" | "compact";
+type GitStatusFailure = { path: string; error: string };
 type HomeView = {
   query: string;
   agentFilter: AgentFilter;
@@ -111,6 +112,7 @@ function stateClass(state: AgentRunState | null | undefined) {
 function ProjectCard({
   acknowledgements,
   project,
+  gitStatusFailures,
   favorite,
   density,
   homeQuery,
@@ -121,6 +123,7 @@ function ProjectCard({
 }: {
   acknowledgements: Acknowledgements | null;
   project: ProjectSummary;
+  gitStatusFailures: GitStatusFailure[] | null;
   favorite: boolean;
   density: CardDensity;
   homeQuery: string;
@@ -232,8 +235,14 @@ function ProjectCard({
           const targetHref = workHref(key);
           return !project.git_status_available ? <span key={key} className="fact" title={title}>{label} <strong>未取得</strong></span> : count > 0 && targetHref ? <Link key={key} className={`fact fact-${color} fact-link`} prefetch={false} href={targetHref} title={`${title}。クリックして該当する作業を表示`} aria-label={`${project.name}の${label} ${count}件の作業を表示`}>{label} <strong>{count}</strong><span className="fact-arrow" aria-hidden="true">↗</span></Link> : <span key={key} className={count > 0 ? `fact fact-${color}` : "fact"} title={title}>{label} <strong>{count}</strong></span>;
         })}
-        {project.git_status_failed > 0 && <span className="fact fact-danger" role="status">Git状態の取得失敗 {project.git_status_failed}件{project.git_status_available ? "（件数は取得できた範囲）" : ""}</span>}
       </div>
+      {project.git_status_failed > 0 && <details className="project-card-extra">
+        <summary><strong className="fact fact-danger">Git状態の取得失敗 {project.git_status_failed}件</strong>{project.git_status_available ? "（件数は取得できた範囲）" : ""}</summary>
+        <p role="status">ライブ明細 {gitStatusFailures === null ? 0 : gitStatusFailures.length}件</p>
+        {gitStatusFailures !== null && <dl>{gitStatusFailures.map(({ path, error }) => (
+          <div key={path}><dt>作業パス</dt><dd><code>{path}</code><br />{error}</dd></div>
+        ))}</dl>}
+      </details>}
       {(() => {
         const task = nextAgentCheck(project, acknowledgements);
         const branch = task ? task.branch : project.next_lane;
@@ -268,7 +277,26 @@ function SkeletonGrid() {
 
 export default function Page() {
   useProjectsLiveUpdates();
-  const { scanning, fetching, connected, projectSummaries: projects, projectsLoading: loading, projectsCachedAt, projectsError: error, refreshProjects } = useRepoStream();
+  const { repos, scanning, fetching, connected, projectSummaries: projects, projectsLoading: loading, projectsCachedAt, projectsError: error, refreshProjects } = useRepoStream();
+  const [hasLoadedEmptyList, setHasLoadedEmptyList] = useState(false);
+  useEffect(() => {
+    if (!loading && error === null && projects.length === 0) setHasLoadedEmptyList(true);
+  }, [loading, error, projects.length]);
+  const hasPreviousProjects = projectsCachedAt !== null || projects.length > 0 || hasLoadedEmptyList;
+  const projectsUnavailable = !hasPreviousProjects && (loading || error !== null);
+  const projectsUnavailableLabel = loading ? "取得中…" : "取得失敗";
+  const showingPreviousProjects = hasPreviousProjects && (projectsCachedAt !== null || error !== null);
+  const previousLabel = showingPreviousProjects ? "前回取得 · " : "";
+  const gitStatusFailuresByProject = useMemo(() => {
+    const failures = new Map<string, GitStatusFailure[]>();
+    for (const { common_dir, path, error } of repos.values()) {
+      if (!error) continue;
+      const projectFailures = failures.get(common_dir);
+      if (projectFailures === undefined) failures.set(common_dir, [{ path, error }]);
+      else projectFailures.push({ path, error });
+    }
+    return failures;
+  }, [repos]);
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
   const [deferredOrder, setDeferredOrder] = useState<string[] | null>(null);
   const [interactionId, setInteractionId] = useState<string | null>(null);
@@ -428,9 +456,9 @@ export default function Page() {
   const oldActiveReports = countOldActiveReports(projects, Date.now());
   const totals = useMemo(() => aggregateAgentCounts(projects), [projects]);
   useEffect(() => {
-    document.title = `${projectsCachedAt === null ? "" : "前回取得 · "}${homeDocumentTitle(totals.waiting_for_user)}`;
+    document.title = `${previousLabel}${homeDocumentTitle(totals.waiting_for_user)}`;
     return () => { document.title = "gitdash"; };
-  }, [totals.waiting_for_user, projectsCachedAt]);
+  }, [totals.waiting_for_user, previousLabel]);
   const unknownProjectTotal = useMemo(() => countProjectsWithUnknownAgentCounts(projects), [projects]);
   const gitTotals = useMemo(() => ({ conflicts: projects.reduce((sum, item) => sum + item.git.conflict, 0), dirty: projects.reduce((sum, item) => sum + item.git.dirty, 0), failed: projects.reduce((sum, item) => sum + item.git_status_failed, 0), available: projects.some((item) => item.git_status_available), lanes: projects.every((item) => item.lane_count !== null) ? projects.reduce((sum, item) => sum + (item.lane_count ?? 0), 0) : null }), [projects]);
   const hasActiveFilters = Boolean(view.query.trim() || view.agentFilter !== "all" || view.gitFilter !== "all" || view.favoritesOnly || view.hideDormant || invalidUrlParams.length);
@@ -475,8 +503,8 @@ export default function Page() {
   const agentSummaryQuiet = projects.length > 0 && !projects.some((project) => summaryCards.some(({ key }) => { const count = agentCount(project, key); return count !== null && count > 0; }));
   const agentSummary = (<div className="home-summary" aria-label="ブランチの作業状況サマリー">
         {invalidUrlParams.length > 0 ? <span className="filter-unavailable">URL条件を確認してから一覧を表示します。</span> : <>
-          {summaryCards.filter(({ key }) => loading || error !== null || totals[key] !== null).map(({ key, label }) => <button type="button" className="home-summary-card" data-empty={totals[key] === 0} key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : formatAgentCount(totals[key])}</strong><span>{label}</span>{key === "active" && projects.length > 0 && <small>うち24時間以上更新なし {oldActiveReports}件</small>}</button>)}
-          <button type="button" className="home-summary-card" aria-label="agent報告がないプロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{loading && !projects.length ? "取得中…" : error && !projects.length ? "取得失敗" : unknownProjectTotal}</strong><span>agent報告なし</span></button>
+          {summaryCards.filter(({ key }) => loading || error !== null || totals[key] !== null).map(({ key, label }) => <button type="button" className="home-summary-card" data-empty={totals[key] === 0} key={key} aria-label={`${label}のプロジェクトを表示`} aria-pressed={view.agentFilter === key} onClick={() => applyView({ agentFilter: view.agentFilter === key ? "all" : key })}><strong className={totals[key] === null ? "count-unknown" : undefined}>{projectsUnavailable ? projectsUnavailableLabel : formatAgentCount(totals[key])}</strong><span>{label}</span>{key === "active" && projects.length > 0 && <small>うち24時間以上更新なし {oldActiveReports}件</small>}</button>)}
+          <button type="button" className="home-summary-card" aria-label="agent報告がないプロジェクトを表示" aria-pressed={view.agentFilter === "unknown"} onClick={() => applyView({ agentFilter: view.agentFilter === "unknown" ? "all" : "unknown" })}><strong>{projectsUnavailable ? projectsUnavailableLabel : unknownProjectTotal}</strong><span>agent報告なし</span></button>
         </>}
         <p className="home-summary-note">集計とタブタイトルの入力待ち件数は、確認済みを含む最新の報告件数です。</p>
       </div>);
@@ -485,15 +513,15 @@ export default function Page() {
     <main className="home-shell" id="main-content" tabIndex={-1}>
       <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><ShortcutHelp /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}</div></div></header>
       {fetchProgressLabel(fetching) !== null && <p className="fetch-progress" role="status">{fetchProgressLabel(fetching)}</p>}
-      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{loading && !projects.length ? "…" : projects.length}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>ブランチの作業状況{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトでagent報告なし`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
+      <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{projectsUnavailable ? projectsUnavailableLabel : `${previousLabel}${projects.length}`}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>ブランチの作業状況{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトでagent報告なし`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
       {invalidUrlParams.length === 0 && <section className="home-toolbar" aria-label="プロジェクト検索と絞り込み">
         <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input ref={searchRef} aria-keyshortcuts="/" value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /><kbd aria-hidden="true">/</kbd></label>
         <label>並び順<select value={view.sort} onChange={(event) => applyView({ sort: event.target.value as ProjectSort })} aria-label="プロジェクトの並び順"><option value="priority">優先度</option><option value="name">名前</option><option value="latest">最新更新</option></select></label>
-        <div role="group" aria-label="Git状態で絞り込み"><button type="button" aria-pressed={view.gitFilter === "all"} onClick={() => applyView({ gitFilter: "all" })}>すべて</button>{gitFilters.map(({ key, label }) => <button type="button" key={key} aria-pressed={view.gitFilter === key} onClick={() => applyView({ gitFilter: view.gitFilter === key ? "all" : key })}>{label}<span className="filter-count">{loading && !projects.length ? "…" : gitProjectCounts[key]}</span></button>)}</div>
+        <div role="group" aria-label="Git状態で絞り込み"><button type="button" aria-pressed={view.gitFilter === "all"} onClick={() => applyView({ gitFilter: "all" })}>すべて</button>{gitFilters.map(({ key, label }) => <button type="button" key={key} aria-pressed={view.gitFilter === key} onClick={() => applyView({ gitFilter: view.gitFilter === key ? "all" : key })}>{label}<span className="filter-count">{projectsUnavailable ? "—" : gitProjectCounts[key]}</span></button>)}</div>
         <button type="button" aria-pressed={view.favoritesOnly} onClick={() => applyView({ favoritesOnly: !view.favoritesOnly })}>{view.favoritesOnly ? "★ お気に入りのみ" : "☆ お気に入り"}</button>
-        <button type="button" aria-pressed={view.hideDormant} title="最新コミットが30日以上前で、変更・未push・未確認の判断待ち・実行中がないプロジェクト" onClick={() => applyView({ hideDormant: !view.hideDormant })}>休眠プロジェクトを隠す<span className="filter-count">{dormantIds.size}件{view.hideDormant ? "を非表示" : ""}</span></button>
+        <button type="button" aria-pressed={view.hideDormant} title="最新コミットが30日以上前で、変更・未push・未確認の判断待ち・実行中がないプロジェクト" onClick={() => applyView({ hideDormant: !view.hideDormant })}>休眠プロジェクトを隠す<span className="filter-count">{projectsUnavailable ? "—" : `${dormantIds.size}件${view.hideDormant ? "を非表示" : ""}`}</span></button>
         <div role="group" aria-label="カード密度"><button type="button" aria-pressed={view.density === "comfortable"} onClick={() => applyView({ density: "comfortable" })}>ゆったり</button><button type="button" aria-pressed={view.density === "compact"} onClick={() => applyView({ density: "compact" })}>コンパクト</button></div>
-        <span className="toolbar-note">{loading && !projects.length ? "Git件数を取得中…" : <>{gitTotals.lanes === null ? "ブランチ数は一部未取得" : `${gitTotals.lanes} ブランチ`} · {gitTotals.failed === 0 ? `${gitTotals.dirty} 作業ディレクトリに変更` : `${gitTotals.available ? `取得できた範囲で ${gitTotals.dirty} 作業ディレクトリに変更` : "変更件数は未取得"} · Git状態の取得失敗 ${gitTotals.failed}件`}</>}</span>
+        <span className="toolbar-note">{projectsUnavailable ? (loading ? "Git件数を取得中…" : "Git件数の取得失敗") : <>{previousLabel}{gitTotals.lanes === null ? "ブランチ数は一部未取得" : `${gitTotals.lanes} ブランチ`} · {gitTotals.failed === 0 ? `${gitTotals.dirty} 作業ディレクトリに変更` : `${gitTotals.available ? `取得できた範囲で ${gitTotals.dirty} 作業ディレクトリに変更` : "変更件数は未取得"} · Git状態の取得失敗 ${gitTotals.failed}件`}</>}</span>
       </section>}
       <section className="home-saved-views" aria-label="表示条件の保存">
         <p>名前を付けた表示条件は、このブラウザ内（localStorage）に保存します。件数・検索結果は保存しません。</p>
@@ -530,14 +558,14 @@ export default function Page() {
       {favoritesStorageIssue && <div className="home-results" role="alert"><span>{favoritesStorageIssue === "read" ? "お気に入りの保存データを読み込めません。" : favoritesStorageIssue === "format" ? "お気に入りの保存データの形式が正しくありません。" : favoritesStorageIssue === "write" ? "お気に入りの変更を保存できませんでした。この画面には反映されていますが、再読み込み後は失われる可能性があります。" : "お気に入りの保存データを削除できませんでした。"} 保存データを削除すると、この画面のお気に入りもすべて解除されます。</span><button type="button" onClick={resetFavoriteStorage}>保存データを削除してお気に入りを解除</button></div>}
       {invalidUrlParams.length > 0 && <div className="home-state home-state-error" role="alert"><span>URLの絞り込み条件を認識できませんでした: {invalidUrlParams.join("、")}</span><button type="button" onClick={resetView}>条件をリセット</button></div>}
       {invalidUrlParams.length === 0 && deferredOrder && view.sort === "priority" && <div className="order-update" role="status"><span>優先度の並び順に更新があります</span><button type="button" onClick={applyOrder}>並び順を更新</button></div>}
-      {invalidUrlParams.length === 0 && <div className="home-results" role="status" aria-live="polite"><span>{loading && !projects.length ? "プロジェクトを読み込み中…" : `${visible.length} / ${projects.length} プロジェクトを表示中`}</span>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
+      {invalidUrlParams.length === 0 && <div className="home-results" role="status" aria-live="polite"><span>{projectsUnavailable ? (loading ? "プロジェクトを読み込み中…" : "プロジェクト一覧の取得失敗") : `${previousLabel}${visible.length} / ${projects.length} プロジェクトを表示中`}</span>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
       {invalidUrlParams.length === 0 && view.gitFilter === "fetch-failure" && <FetchFailureBreakdown projects={visible} />}
       {invalidUrlParams.length === 0 && <WorkspaceExport projects={visible} view={view} disabled={loading || error !== null} />}
       {projectsCachedAt !== null && <div className="home-state" role="status"><strong>前回取得したデータを表示中（{Math.max(0, Math.floor((Date.now() - projectsCachedAt) / 60000))}分前）{loading ? "・最新を取得中…" : ""}</strong><span>一覧・件数・タブタイトルは前回取得時点の情報です。ファビコンの入力待ち件数は最新取得まで表示しません。</span></div>}
-      {invalidUrlParams.length === 0 && loading && projects.length === 0 && <SkeletonGrid />}
-      {error && <div className="home-state home-state-error" role="alert"><strong>{projects.length ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
+      {invalidUrlParams.length === 0 && projectsUnavailable && loading && <SkeletonGrid />}
+      {error && <div className="home-state home-state-error" role="alert"><strong>{hasPreviousProjects ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
       {invalidUrlParams.length === 0 && !loading && !error && visible.length === 0 && <div className="home-state home-empty"><h3>該当するプロジェクトがありません</h3><p>{hasActiveFilters ? "現在の条件に一致するプロジェクトはありません。条件をリセットして一覧を確認できます。" : "登録されたプロジェクトはありません。"}</p>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
-      {invalidUrlParams.length === 0 && <section ref={gridRef} className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard acknowledgements={acknowledgements} key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} />)}</section>}
+      {invalidUrlParams.length === 0 && <section ref={gridRef} className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard acknowledgements={acknowledgements} key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} gitStatusFailures={gitStatusFailuresByProject.get(project.id) ?? null} />)}</section>}
       <GitGuide path={null} />
       <details className="git-reading-guide"><summary>Git状態の見方</summary><div>
         <p><strong>変更あり</strong> 作業ディレクトリに未コミットの変更があります。<code>git status</code> で確認できます。</p>

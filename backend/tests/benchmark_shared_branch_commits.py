@@ -43,7 +43,10 @@ def main():
         before = json.loads(payloads["before"])
         after = json.loads(payloads["after"])
         for old, new in zip(before["branch_rows"], after["branch_rows"], strict=True):
-            assert old == {**new, "commits": [after["branch_commits"][h] for h in new["commit_hashes"]]}
+            restored = dict(new)
+            restored["commits"] = [after["branch_commits"][index] for index in restored.pop("commit_indices")]
+            restored["commit_hashes"] = [commit["hash"] for commit in restored["commits"]]
+            assert old == restored
         files = {}
         for mode, payload in payloads.items():
             path = Path(directory) / f"{mode}.json"
@@ -72,7 +75,7 @@ for (const [mode, file] of Object.entries(files)) {
         node = subprocess.check_output(["node", "--input-type=module", "-e", script], text=True)
         print(json.dumps({
             "branches": len(after["branch_rows"]),
-            "entries": sum(len(row["commit_hashes"]) for row in after["branch_rows"]),
+            "entries": sum(len(row["commit_indices"]) for row in after["branch_rows"]),
             "unique": len(after["branch_commits"]),
             "build_serialize_ms": {mode: statistics.median(values) for mode, values in samples.items()},
             "json_bytes": {mode: len(payload) for mode, payload in payloads.items()},

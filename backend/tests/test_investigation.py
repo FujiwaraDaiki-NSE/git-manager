@@ -54,14 +54,14 @@ def test_rename_and_recreated_source_count_once_per_worktree(repo, tmp_path):
 def test_search_filters_and_paging(repo):
     for i in range(52):
         git(repo, 'commit', '--allow-empty', '-m', f'needle {i}', '-m', 'body match')
-    first = investigation.search(str(repo), '--all', 'body match', 'Investigator', '', '', '', 0, 540)
-    second = investigation.search(str(repo), '--all', 'body match', 'Investigator', '', '', '', 50, 540)
+    first = investigation.search(str(repo), '--all', 'body match', 'Investigator', '', '', '', 0)
+    second = investigation.search(str(repo), '--all', 'body match', 'Investigator', '', '', '', 50)
     assert len(first['commits']) == 50 and first['has_more']
     assert len(second['commits']) == 2 and not second['has_more']
     assert not {v['hash'] for v in first['commits']} & {v['hash'] for v in second['commits']}
-    assert len(investigation.search(str(repo), '--all', '', '', '', '', 'shared.txt', 0, 540)['commits']) == 1
+    assert len(investigation.search(str(repo), '--all', '', '', '', '', 'shared.txt', 0)['commits']) == 1
     with pytest.raises(ValueError):
-        investigation.search(str(repo), '--all', '', '', 'bad-date', '', '', 0, 540)
+        investigation.search(str(repo), '--all', '', '', 'bad-date', '', '', 0)
 
 
 def test_recovery_sources_and_reachable_exclusion(repo):
@@ -131,7 +131,7 @@ def test_routes_require_explicit_inputs_and_reject_unknown_repo(repo):
             assert client.get('/api/repo/worktree-overlaps', params={'path': str(repo)}).json()['complete']
             assert client.get('/api/repo/recovery-candidates', params={'path': str(repo)}).json()['commits'] == []
             assert client.get('/api/repo/patch-equivalence', params={'path': str(repo), 'left': 'main', 'right': 'main'}).json()['commits'] == []
-            params = dict(path=str(repo), scope='--all', grep='', author='', since='', until='', file='', offset=0, tz_offset=540)
+            params = dict(path=str(repo), scope='--all', grep='', author='', since_at='', until_at='', file='', offset=0)
             assert len(client.get('/api/repo/commit-search', params=params).json()['commits']) == 1
             for invalid in ('not-json', '{}', '[null]', '["main"]', '["--all"]', json.dumps(['f' * 40]), json.dumps([git(repo, 'rev-parse', 'HEAD:shared.txt')])):
                 response = client.get('/api/repo/commit-search', params={**params, 'fixed_shas': invalid})
@@ -143,17 +143,21 @@ def test_routes_require_explicit_inputs_and_reject_unknown_repo(repo):
 
 
 
-def test_search_date_bounds_cover_whole_calendar_days(tmp_path):
+@pytest.mark.parametrize(("start", "end", "next_day"), [
+    ("2026-07-01T00:00:00-04:00", "2026-07-01T23:59:59-04:00", "2026-07-02T00:00:00-04:00"),
+    ("2026-03-08T00:00:00-05:00", "2026-03-08T23:59:59-04:00", "2026-03-09T00:00:00-04:00"),
+    ("2026-11-01T00:00:00-04:00", "2026-11-01T23:59:59-05:00", "2026-11-02T00:00:00-05:00"),
+    ("2026-01-02T00:00:00+09:00", "2026-01-02T23:59:59+09:00", "2026-01-03T00:00:00+09:00"),
+])
+def test_search_date_bounds_cover_whole_calendar_days(tmp_path, start, end, next_day):
     repo = tmp_path / 'dates'
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
-    for stamp in ('2026-01-01T08:00:00+0000', '2026-01-01T12:00:00+0000', '2026-01-02T15:30:00+0000'):
+    for stamp in (start, end, next_day):
         env = {**os.environ, 'GIT_AUTHOR_DATE': stamp, 'GIT_COMMITTER_DATE': stamp}
         subprocess.run(['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@x', 'commit', '-q', '--allow-empty', '-m', stamp], check=True, env=env)
-    same_day = investigation.search(str(repo), '--all', '', '', '2026-01-01', '2026-01-01', '', 0, 0)
-    assert [c['subject'] for c in same_day['commits']] == ['2026-01-01T12:00:00+0000', '2026-01-01T08:00:00+0000']
-    # 2026-01-02T15:30Z is 2026-01-03 00:30 in UTC+9, so it is outside Jan 2 in that zone.
-    jst = investigation.search(str(repo), '--all', '', '', '2026-01-02', '2026-01-02', '', 0, 540)
-    assert jst['commits'] == []
+    result = investigation.search(str(repo), '--all', '', '', start, end, '', 0)
+    assert [c['subject'] for c in result['commits']] == [end, start]
+
 
 
 @pytest.mark.parametrize("scope", ["--all", "main"])
@@ -161,20 +165,20 @@ def test_search_snapshot_survives_ref_advance(repo, scope):
     for i in range(52):
         git(repo, 'commit', '--allow-empty', '-m', f'history {i}')
     expected = git(repo, 'log', '--format=%H', scope).splitlines()
-    first = investigation.search(str(repo), scope, '', '', '', '', '', 0, 540)
+    first = investigation.search(str(repo), scope, '', '', '', '', '', 0)
     git(repo, 'commit', '--allow-empty', '-m', 'new commit')
     git(repo, 'branch', 'new-ref')
-    second = investigation.search(str(repo), scope, '', '', '', '', '', 50, 540, json.dumps(first['fixed_shas']))
+    second = investigation.search(str(repo), scope, '', '', '', '', '', 50, json.dumps(first['fixed_shas']))
     actual = [c['hash'] for c in first['commits'] + second['commits']]
     assert actual == expected
     assert len(actual) == len(set(actual)) == 53
     assert second['fixed_shas'] == first['fixed_shas']
-    refreshed = investigation.search(str(repo), scope, '', '', '', '', '', 0, 540)
+    refreshed = investigation.search(str(repo), scope, '', '', '', '', '', 0)
     assert refreshed['commits'][0]['subject'] == 'new commit'
 
 
 def test_empty_snapshot_does_not_use_head(repo):
-    result = investigation.search(str(repo), '--all', '', '', '', '', '', 0, 540, '[]')
+    result = investigation.search(str(repo), '--all', '', '', '', '', '', 0, '[]')
     assert result['commits'] == []
     assert result['fixed_shas'] == []
 
@@ -200,8 +204,8 @@ def test_large_snapshot_post_uses_one_batch_validation(repo, monkeypatch):
         return original(args, **kwargs)
 
     monkeypatch.setattr(investigation.subprocess, 'run', tracked)
-    body = dict(path=str(repo), scope='--all', grep='', author='', since='', until='',
-                file='', offset=50, tz_offset=540, fixed_shas=shas)
+    body = dict(path=str(repo), scope='--all', grep='', author='', since_at='', until_at='',
+                file='', offset=50, fixed_shas=shas)
     with ThreadPoolExecutor() as pool:
         app = FastAPI()
         app.include_router(create_router(lambda path: path, lambda _: Lock(), pool))

@@ -28,14 +28,27 @@ function Detail({ path, hash }: { path: string; hash: string }) {
   }, [path, hash]);
   return <section className="tag-explorer-detail"><div className="tag-explorer-detail-heading"><h3>コミット詳細</h3><code>{hash}</code></div>{error && <p className="tag-explorer-error" role="alert">{error}</p>}{!data && !error && <p className="tag-explorer-state" role="status">取得中…</p>}{data && <><p className="tag-explorer-note">{data.subject}</p><CommitFiles files={data.files} downloadName={`${hash}.tsv`} /><PatchView patch={data.patch} />{data.patch_truncated && <p className="tag-explorer-note">パッチは一部省略されています。</p>}</>}</section>;
 }
-type Kind = "overlaps" | "search" | "recovery" | "cherry";
+type InvestigationProps = { path: string } & (
+  | { kind: "overlaps"; onOpenWorktree: (path: string) => void }
+  | { kind: "search" | "recovery" | "cherry" }
+);
+function searchDateBounds(since: string, until: string) {
+  const sinceAt = since === "" ? "" : new Date(`${since}T00:00:00`).toISOString();
+  if (until === "") return { since_at: sinceAt, until_at: "" };
+  // Advance the calendar date before interpreting midnight in the browser's timezone.
+  const nextDate = new Date(`${until}T00:00:00Z`);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const nextMidnight = new Date(`${nextDate.toISOString().split("T")[0]}T00:00:00`);
+  return { since_at: sinceAt, until_at: new Date(nextMidnight.getTime() - 1000).toISOString() };
+}
 const settings = {
   overlaps: ["worktree間の変更パス重なり", "worktree-overlaps", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"],
   search: ["リポジトリ全体のコミット検索", "commit-search", "件名・本文と作成者はGitの正規表現、変更パスはGitのpathspecで検索します。検索対象の参照SHAはページ間で固定します。"],
   recovery: ["到達不能コミットの復旧候補", "recovery-candidates", "現在のref・HEADから到達できない、reflogに残る履歴を表示します。reflog保存期間外は検出できません。復旧コマンドは対象リポジトリで実行してください。"],
   cherry: ["パッチ同等コミットの判定", "patch-equivalence", "パッチ同等＝安全な重複とは限りません。= はパッチ同等、< はAのみ、> はBのみです。共通コミットは表示しません。"],
 };
-function Investigation({ path, kind }: { path: string; kind: Kind }) {
+function Investigation(props: InvestigationProps) {
+  const { path, kind } = props;
   const inputId = useId();
   const [fields, setFields] = useState<Record<string, string>>({ scope: "--all", grep: "", author: "", since: "", until: "", file: "", left: "", right: "" });
   const [data, setData] = useState<Result | null>(null);
@@ -58,17 +71,28 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
     setPageLoading(fixedShas === null ? null : offset > data!.offset! ? "次の50件を取得中…" : "前の50件を取得中…");
     if (fixedShas === null) setData(null);
     setError(null); setSelected(null);
-    setRequest(values);
-    const params: Record<string, string> = { path };
-    for (const [key] of inputs) params[key] = values[key];
-    if (kind === "search") { params.offset = String(offset); params.tz_offset = String(-new Date().getTimezoneOffset()); }
-    const url = fixedShas === null ? `/api/repo/${endpoint}?${new URLSearchParams(params)}` : `/api/repo/${endpoint}`;
-    const init: RequestInit | undefined = fixedShas === null ? undefined : {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...params, offset, tz_offset: -new Date().getTimezoneOffset(), fixed_shas: fixedShas }),
-    };
-    try { const result = await read<Result>(url, current.signal, init); if (!current.signal.aborted) setData(result); }
-    catch (e) { if (!current.signal.aborted) setError(String(e)); }
+    try {
+      const submitted = kind === "search" && fixedShas === null
+        ? { ...values, ...searchDateBounds(values.since, values.until) }
+        : values;
+      setRequest(submitted);
+      const params: Record<string, string> = { path };
+      for (const [key] of inputs) {
+        if (key !== "since" && key !== "until") params[key] = submitted[key];
+      }
+      if (kind === "search") {
+        params.offset = String(offset);
+        params.since_at = submitted.since_at;
+        params.until_at = submitted.until_at;
+      }
+      const url = fixedShas === null ? `/api/repo/${endpoint}?${new URLSearchParams(params)}` : `/api/repo/${endpoint}`;
+      const init: RequestInit | undefined = fixedShas === null ? undefined : {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...params, offset, fixed_shas: fixedShas }),
+      };
+      const result = await read<Result>(url, current.signal, init);
+      if (!current.signal.aborted) setData(result);
+    } catch (e) { if (!current.signal.aborted) setError(String(e)); }
     finally { if (!current.signal.aborted) { setLoading(false); setPageLoading(null); } }
   }
   return (
@@ -96,7 +120,7 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
           {data.left && <p className="tag-explorer-note">A: {data.left} @ {data.left_sha?.slice(0, 12)} ／ B: {data.right} @ {data.right_sha?.slice(0, 12)}</p>}
           {data.command && <p className="tag-explorer-note"><code>{data.command}</code></p>}
           {data.unavailable && data.unavailable.length > 0 && <p className="tag-explorer-error" role="alert">一部worktreeを取得できませんでした。重なりの一覧は不完全です: {data.unavailable.join("、")}</p>}
-          {data.overlaps && (data.overlaps.length ? (
+          {kind === "overlaps" && data.overlaps && (data.overlaps.length ? (
             <ul className="repository-investigation-list">
               {data.overlaps.map(item => <li className="tag-explorer-commit" key={item.path}>
                 <div className="tag-explorer-commit-heading"><strong><code>{item.path}</code></strong></div>
@@ -105,6 +129,7 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
                     <span>{w.worktree}</span>
                     <span>{w.branch === null ? "detached HEAD（ブランチなし）" : w.branch.replace(/^refs\/heads\//, "")}</span>
                     {w.xy.map((xy) => <span key={xy}><code className="repository-investigation-xy">{xy}</code> {fileStatusDescription(xy)}</span>)}
+                    <button className="tag-explorer-export" type="button" onClick={() => props.onOpenWorktree(w.worktree)}>このworktreeの状態を開く</button>
                   </li>)}
                 </ul>
               </li>)}
@@ -141,7 +166,7 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
     </details>
   );
 }
-export function WorktreeOverlaps({ path }: { path: string }) { return <Investigation key={path} path={path} kind="overlaps" />; }
+export function WorktreeOverlaps({ path, onOpenWorktree }: { path: string; onOpenWorktree: (path: string) => void }) { return <Investigation key={path} path={path} kind="overlaps" onOpenWorktree={onOpenWorktree} />; }
 export function CommitSearch({ path }: { path: string }) { return <Investigation key={path} path={path} kind="search" />; }
 export function RecoveryCandidates({ path }: { path: string }) { return <Investigation key={path} path={path} kind="recovery" />; }
 export function PatchEquivalence({ path }: { path: string }) { return <Investigation key={path} path={path} kind="cherry" />; }

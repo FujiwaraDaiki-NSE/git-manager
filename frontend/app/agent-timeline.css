@@ -231,6 +231,14 @@
   padding: 0;
 }
 
+.agent-timeline-history-date {
+  color: var(--control-muted);
+  border-bottom: 1px solid var(--control-border);
+  font: 600 11px/1.5 var(--control-sans);
+  margin: 12px 0 7px;
+  padding: 0 4px 4px;
+}
+
 .agent-timeline-list > li {
   border-left: 3px solid var(--control-border-strong);
   border-radius: 6px;
