@@ -29,9 +29,26 @@ def test_overlaps_including_rename_and_untracked(repo, tmp_path):
     result = investigation.overlaps(str(repo))
     assert result['complete']
     assert [v['path'] for v in result['overlaps']] == ['new file.txt', 'shared.txt']
-    assert {w['xy'] for v in result['overlaps'] for w in v['worktrees']} == {' M', '??'}
+    assert {xy for v in result['overlaps'] for w in v['worktrees'] for xy in w['xy']} == {' M', '??'}
     git(repo, 'mv', 'shared.txt', 'renamed.txt')
     assert 'shared.txt' in [v['path'] for v in investigation.overlaps(str(repo))['overlaps']]
+
+
+def test_rename_and_recreated_source_count_once_per_worktree(repo, tmp_path):
+    other = tmp_path / 'other'
+    git(repo, 'worktree', 'add', '-b', 'other', str(other))
+    git(other, 'mv', 'shared.txt', 'renamed.txt')
+    (other / 'shared.txt').write_text('recreated\n')
+    assert investigation.overlaps(str(repo))['overlaps'] == []
+
+    (repo / 'shared.txt').write_text('changed\n')
+    assert investigation.overlaps(str(repo))['overlaps'] == [{
+        'path': 'shared.txt',
+        'worktrees': [
+            {'worktree': str(repo), 'branch': 'refs/heads/main', 'xy': [' M']},
+            {'worktree': str(other), 'branch': 'refs/heads/other', 'xy': ['R ', '??']},
+        ],
+    }]
 
 
 def test_search_filters_and_paging(repo):

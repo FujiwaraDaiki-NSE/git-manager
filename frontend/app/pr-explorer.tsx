@@ -6,6 +6,7 @@ import CopyButton from "./copy-button";
 import {
   buildPullRequestExplorerData,
   localCalendarDate,
+  openPullRequestsNeedingAttention,
   pullRequestsToCsv,
   targetBranchName,
   validHttpUrl,
@@ -65,6 +66,37 @@ function githubStatusMessage(status: string) {
     default:
       return "GitHubのPR情報の取得状態が未取得です。表示できるPRだけを確認してください。";
   }
+}
+
+function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["open"] }) {
+  const matches = open?.status === "available" ? openPullRequestsNeedingAttention(open.pulls) : null;
+  return (
+    <section className="pr-explorer" aria-labelledby="open-pr-attention-title">
+      <div className="pr-explorer-heading">
+        <h4 id="open-pr-attention-title">対応が必要なオープンPR</h4>
+      </div>
+      {matches === null ? (
+        <div className={`pr-explorer-coverage pr-explorer-coverage-${open === undefined ? "unknown" : open.status}`} role="status">
+          <strong>{open?.status === "not_applicable" ? "オープンPR情報は対象外です" : open?.status === "unavailable" ? "オープンPRを取得できませんでした" : "オープンPR情報は未取得です"}</strong>
+          {open?.reason && <small>{open.reason}</small>}
+        </div>
+      ) : matches.length === 0 ? (
+        <p className="pr-explorer-inline-note" role="status">対応が必要なオープンPRはありません。</p>
+      ) : (
+        <ul className="pr-explorer-open-list">
+          {matches.map(({ number, url, reasons }) => {
+            const href = validHttpUrl(url);
+            return (
+              <li key={number}>
+                {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(number)}</strong>}
+                <span>{reasons.join(" · ")}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 function PullRequestCard({ record }: { record: PullRequestRecord }) {
@@ -139,7 +171,7 @@ function PullRequestTable({ records }: { records: PullRequestRecord[] }) {
   );
 }
 
-export default function PullRequestExplorer({ project }: { project: ProjectResponse }) {
+function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState("all");
   const [source, setSource] = useState("all");
@@ -282,6 +314,15 @@ export default function PullRequestExplorer({ project }: { project: ProjectRespo
         </div>
       )}
     </section>
+  );
+}
+
+export default function PullRequestExplorer({ project }: { project: ProjectResponse }) {
+  return (
+    <>
+      <OpenPullRequestAttention open={project.github.open} />
+      <MergedPullRequestExplorer project={project} />
+    </>
   );
 }
 

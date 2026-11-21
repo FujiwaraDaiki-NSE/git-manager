@@ -12,6 +12,7 @@ import {
   matchesGitFilter,
   parseFavoriteIds,
   parseHomeUrl,
+  parseSavedViews,
   projectMatchesView,
   sortHomeProjects,
 } from "../app/home-overview.mjs";
@@ -71,6 +72,24 @@ test("agent and Git filters use the published counts", () => {
   assert.equal(matchesGitFilter(waiting, "dirty"), true);
   assert.equal(matchesGitFilter(waiting, "conflict"), false);
   assert.equal(matchesGitFilter(clean, "behind"), false);
+});
+
+test("fetch failure filter round-trips and only matches the latest failed result", () => {
+  const { view } = parseHomeUrl("?git=fetch-failure");
+  assert.equal(homeSearch(view), "git=fetch-failure");
+  const savedViews = [{ name: "fetch失敗", view }];
+  assert.deepEqual(parseSavedViews(JSON.stringify(savedViews)), savedViews);
+
+  const failed = { id: "failed", name: "Failed", fetch_status: { result: "failure" } };
+  const projects = [
+    failed,
+    { id: "success", name: "Success", fetch_status: { result: "success" } },
+    { id: "unrecorded", name: "Unrecorded", fetch_status: null },
+    { id: "missing", name: "Missing" },
+  ];
+  const matches = (entries) => entries.filter((project) => projectMatchesView(project, view, new Set()));
+  assert.deepEqual(matches(projects), [failed]);
+  assert.deepEqual(matches([{ ...failed, fetch_status: { result: "success" } }, ...projects.slice(1)]), []);
 });
 
 test("search, favorites, agent, and Git filters compose without losing the query", () => {

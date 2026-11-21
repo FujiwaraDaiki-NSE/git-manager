@@ -328,6 +328,12 @@ def default_branch(repo: str) -> str | None:
     return value[len(prefix):] if value.startswith(prefix) else None
 
 
+def next_command_without_status(worktree_state: str | None) -> dict[str, str] | None:
+    if worktree_state == "prunable":
+        return {"command": "git worktree prune", "reason": "prunable な worktree があります"}
+    return None
+
+
 def next_command(
     info: dict[str, Any],
     remote: str | None,
@@ -369,7 +375,7 @@ def next_command(
     if info["detached"]:
         return {"command": "git switch -", "reason": "detached HEAD です"}
     if worktree_state == "prunable":
-        return {"command": "git worktree prune", "reason": "prunable な worktree があります"}
+        return next_command_without_status(worktree_state)
     if worktree_state == "locked" and merged and worktree:
         # Git refuses to remove a locked worktree.  Unlocking is safe to
         # present only after dirty/conflict checks above have passed.
@@ -523,8 +529,9 @@ def _config_bool(value: str | None) -> bool | None:
 def branch_destinations_many(repo: str, branches: list[str]) -> dict[str, dict[str, Any] | None]:
     """Resolve a repository's branches using one config observation per batch."""
     settings = _branch_config(repo)
-    raw = _run(repo, ["for-each-ref", f"--format={_DESTINATION_REF_FORMAT}", "refs/heads/"]) if settings is not None else None
-    refs = {line.split("\0")[0]: line.split("\0") for line in raw.splitlines()} if raw is not None else None
+    # Fetch refspecs can place tracking refs outside refs/remotes/.
+    raw = _run(repo, ["for-each-ref", f"--format={_DESTINATION_REF_FORMAT}", "refs/"]) if settings is not None else None
+    refs = {fields[0]: fields for fields in (line.split("\0") for line in raw.splitlines())} if raw is not None else None
     return {branch: _branch_destinations(repo, branch, settings, refs) if settings is not None and refs is not None else None for branch in dict.fromkeys(branches)}
 
 
@@ -532,7 +539,7 @@ def branch_destinations(repo: str, branch: str) -> dict[str, Any] | None:
     return branch_destinations_many(repo, [branch])[branch]
 
 
-_DESTINATION_REF_FORMAT = "%(refname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:remoteref)%00%(push:remotename)%00%(push:remoteref)"
+_DESTINATION_REF_FORMAT = "%(refname)%00%(upstream)%00%(objectname)"
 
 
 def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | None]], refs: dict[str, list[str]]) -> dict[str, Any] | None:
@@ -643,7 +650,11 @@ def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | 
             return ["."]
         value = _run(repo, ["remote", "get-url", *(["--push", "--all"] if push else []), "--", remote])
         return value.splitlines() if value is not None else None
-    return {"fetch_remote": fetch_remote, "fetch_urls": urls(fetch_remote, False), "upstream": fields[1] or None, "upstream_ref": merge, "upstream_state": "unset" if merge is None else "configured", "push_remote": push_remote, "push_urls": urls(push_remote, True), "push_ref": " / ".join(push_refs) if push_refs else None, "push_ref_reason": push_reason, "push_refspecs": refspecs, "push_default": mode, "push_next_command": {"command": push_command, "reason": push_reason if push_command != "git push" else "未 push のコミットがあります"}}
+    upstream = fields[1] or None
+    tracking = refs.get(upstream) if upstream is not None else None
+    upstream_head = tracking[2] if tracking is not None else None
+    upstream_gone = upstream is not None and tracking is None
+    return {"fetch_remote": fetch_remote, "fetch_urls": urls(fetch_remote, False), "upstream": upstream, "upstream_ref": merge, "upstream_state": "unset" if merge is None else "configured", "upstream_head": upstream_head, "upstream_gone": upstream_gone, "push_remote": push_remote, "push_urls": urls(push_remote, True), "push_ref": " / ".join(push_refs) if push_refs else None, "push_ref_reason": push_reason, "push_refspecs": refspecs, "push_default": mode, "push_next_command": {"command": push_command, "reason": push_reason if push_command != "git push" else "未 push のコミットがあります"}}
 
 
 def collect(
@@ -765,23 +776,8 @@ def collect(
     status = _run(repo, ["--no-optional-locks", "status", "--porcelain=v2", "--branch", "-z"])
     if status is None:
         result["error"] = "git status を実行できませんでした"
-        status_info = {
-            "branch": result["branch"],
-            "detached": result["detached"],
-            "upstream": result["upstream"],
-            "ahead": result["ahead"],
-            "behind": result["behind"],
-            "entries": result["entries"],
-        }
-        result["branch_line"] = branch_line(status_info)
-        result["next_command"] = next_command(
-            status_info,
-            result["remote"],
-            context,
-            worktree_state=resolved_worktree_state,
-            merged=resolved_merged,
-            worktree=resolved_worktree,
-        )
+        result["branch_line"] = branch_line(result)
+        result["next_command"] = next_command_without_status(resolved_worktree_state)
         return result
 
     info = _parse_status_v2(status)

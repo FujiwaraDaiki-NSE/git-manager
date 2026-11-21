@@ -12,6 +12,7 @@ export const TIMELINE_STATUS_VALUES: readonly string[];
 export type TimelineFilterOptions = {
   query: string | null;
   projectId: string | null;
+  historyBranch: { projectId: string; branch: string } | null;
   status: string | null;
   kind: "all" | "status" | "lifecycle" | null;
   startDate: string | null;

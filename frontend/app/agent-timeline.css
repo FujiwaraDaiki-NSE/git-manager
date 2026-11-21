@@ -211,6 +211,7 @@
 .agent-timeline-section-heading h3 {
   font: 600 12px var(--control-sans);
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .agent-timeline-section-heading > span {

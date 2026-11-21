@@ -42,6 +42,7 @@ import type { AgentEvent, AgentTask, ProjectResponse, ProjectSummary } from "./t
 import "./agent-timeline.css";
 
 type TimelineProject = ProjectSummary | ProjectResponse;
+type HistoryBranch = NonNullable<TimelineFilterOptions["historyBranch"]>;
 type CurrentRow = { project: TimelineProject; task: AgentTask };
 type TimelineSnapshot = {
   events: AgentEvent[];
@@ -146,9 +147,10 @@ function currentStatus(task: AgentTask) {
   return agentStateLabel(agentTaskState(task));
 }
 
-function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknowledge, now }: {
+function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknowledge, onBranchHistory, now }: {
   project: TimelineProject; task: AgentTask; oldDecision?: boolean;
   now: number; acknowledged: boolean; onAcknowledge: (task: AgentTask, acknowledged: boolean) => void;
+  onBranchHistory: (branch: HistoryBranch) => void;
 }) {
   const projectId = typeof task.project_id === "string" ? task.project_id : project.id;
   const decision = AGENT_DECISION_STATUSES.includes(agentTaskState(task));
@@ -156,6 +158,8 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
   const freshness = agentReportFreshness(task.occurred_at, now);
   const reportKey = agentReportKey(task);
   const canAcknowledge = reportKey !== null && reportIdentity(task) !== null;
+  const reportProjectId = task.project_id;
+  const branch = task.branch;
   return (
     <li className={`agent-timeline-current-row status-${statusClass(agentTaskState(task))}${decision ? ` report-age-${freshness}` : ""}`}>
       <AgentDecisionDetails decision={task.decision} />
@@ -168,6 +172,7 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
         <TimeValue value={task.occurred_at} />
       </ProjectBranch>
       {decision && <div className="agent-timeline-card-actions">
+        {reportProjectId && branch && <button type="button" className="agent-timeline-pause" onClick={() => onBranchHistory({ projectId: reportProjectId, branch })}>このブランチの履歴</button>}
         {canAcknowledge && <button id={reportKey === null ? undefined : `agent-ack-${encodeURIComponent(reportKey)}`} type="button" className="agent-timeline-pause" onClick={() => onAcknowledge(task, !acknowledged)}>{acknowledged ? "未確認に戻す" : "確認済みにする"}</button>}
         {command !== null && <CopyButton value={command} label="worktreeへ移動するコマンドをコピー" />}
       </div>}
@@ -310,6 +315,7 @@ export default function AgentTimelineSidebar({
   };
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [historyBranch, setHistoryBranch] = useState<HistoryBranch | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>(TIMELINE_STATUS_ALL);
   const [kindFilter, setKindFilter] = useState<"all" | "status" | "lifecycle">(TIMELINE_KIND_ALL);
   const [startDate, setStartDate] = useState("");
@@ -333,12 +339,13 @@ export default function AgentTimelineSidebar({
   const filterOptions = useMemo<TimelineFilterOptions>(() => ({
     query,
     projectId: scoped ? scopedProjectId : projectFilter,
+    historyBranch,
     status: statusFilter,
     kind: kindFilter,
     startDate,
     endDate,
     sort: historySort,
-  }), [query, projectFilter, scoped, scopedProjectId, statusFilter, kindFilter, startDate, endDate, historySort]);
+  }), [query, projectFilter, scoped, scopedProjectId, historyBranch, statusFilter, kindFilter, startDate, endDate, historySort]);
 
   const filteredCurrentRows = useMemo(
     () => scoped && scopedProjectId === null ? [] : filterTimelineCurrentRows(currentRows, filterOptions),
@@ -350,8 +357,12 @@ export default function AgentTimelineSidebar({
     () => classifyCurrentAgentRows(filteredCurrentRows.filter(({ task }) => !AGENT_DECISION_STATUSES.includes(agentTaskState(task)) || !isAcknowledged(task, acknowledgements)), now),
     [filteredCurrentRows, acknowledgements, now],
   );
+  const openBranchHistory = (branch: HistoryBranch | null) => {
+    setHistoryBranch(branch);
+    window.requestAnimationFrame(() => { document.getElementById("agent-timeline-history-title")?.focus(); });
+  };
   const renderCurrentRows = (rows: CurrentRow[], oldDecision = false) => (
-    <ul className="agent-timeline-list agent-timeline-current-list">{rows.map(({ project, task }) => <CurrentRow key={agentReportKey(task)} project={project} task={task} oldDecision={oldDecision} acknowledged={isAcknowledged(task, acknowledgements)} onAcknowledge={acknowledge} now={now} />)}</ul>
+    <ul className="agent-timeline-list agent-timeline-current-list">{rows.map(({ project, task }) => <CurrentRow key={agentReportKey(task)} project={project} task={task} oldDecision={oldDecision} acknowledged={isAcknowledged(task, acknowledgements)} onAcknowledge={acknowledge} onBranchHistory={openBranchHistory} now={now} />)}</ul>
   );
   const decisionCount = AGENT_DECISION_STATUSES.reduce((sum, status) => sum + currentGroups.decisionCounts[status], 0);
   const historyDetails = useMemo(
@@ -373,7 +384,7 @@ export default function AgentTimelineSidebar({
     return [...labels.entries()].sort((left, right) => left[1].localeCompare(right[1]) || left[0].localeCompare(right[0]));
   }, [events, projects, routeProject]);
 
-  const hasFilters = Boolean(scoped || query.trim() || projectFilter || statusFilter !== TIMELINE_STATUS_ALL || kindFilter !== TIMELINE_KIND_ALL || startDate || endDate || historySort !== TIMELINE_SORT_NEWEST);
+  const hasFilters = Boolean(scoped || query.trim() || projectFilter || historyBranch || statusFilter !== TIMELINE_STATUS_ALL || kindFilter !== TIMELINE_KIND_ALL || startDate || endDate || historySort !== TIMELINE_SORT_NEWEST);
   const filteredSummary = `取得済み ${events.length}件の履歴を対象 · 現在 ${filteredCurrentRows.length}件 / 履歴 ${history.length}件を表示`;
 
   const togglePause = () => {
@@ -389,6 +400,7 @@ export default function AgentTimelineSidebar({
     if (scoped) toggleProjectScope();
     setQuery("");
     setProjectFilter("");
+    setHistoryBranch(null);
     setStatusFilter(TIMELINE_STATUS_ALL);
     setKindFilter(TIMELINE_KIND_ALL);
     setStartDate("");
@@ -455,7 +467,8 @@ export default function AgentTimelineSidebar({
         </section>
 
         <section className="agent-timeline-history" aria-labelledby="agent-timeline-history-title">
-          <div className="agent-timeline-section-heading"><h3 id="agent-timeline-history-title">履歴</h3><span>{history.length} / {events.length}件</span></div>
+          <div className="agent-timeline-section-heading"><h3 id="agent-timeline-history-title" tabIndex={-1}>履歴{historyBranch !== null && <span title={historyBranch.projectId}> · {projectLabel(projectById.get(historyBranch.projectId) || null, historyBranch.projectId)} · {historyBranch.branch}</span>}</h3><span>{history.length} / {events.length}件</span></div>
+          {historyBranch !== null && <button type="button" className="agent-timeline-pause" onClick={() => openBranchHistory(null)}>ブランチ条件を解除</button>}
           <p className="agent-timeline-caption">取得済みイベントだけを表示します。ライフサイクルは状態報告と区別しています。</p>
           {historyDetails.dateWindow.error && <p className="agent-timeline-empty agent-timeline-error" role="alert">{historyDetails.dateWindow.error}</p>}
           {history.length === 0 && displaySnapshot.loading && events.length === 0 && <p className="agent-timeline-empty" role="status">履歴を取得中…</p>}

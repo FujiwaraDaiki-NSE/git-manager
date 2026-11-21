@@ -11,6 +11,7 @@ import {
   highestAgentState,
   isExplicitAgentStatus,
   mergeAgentSnapshot,
+  mergeProjectAgentEvent,
   sortProjects,
   topAgentTasks,
 } from "../app/agent-overview.mjs";
@@ -30,6 +31,33 @@ const task = (task_id, run_state, occurred_at, extra = {}) => ({
   summary: null,
   occurred_at,
   ...extra,
+});
+
+test("reports received during a project fetch preserve the latest decision and deduplicate history", () => {
+  const implementing = task("fix/a", "active", "2026-09-01T01:00:00Z", { event_id: "work" });
+  const waiting = task("fix/a", "waiting_for_user", "2026-09-01T03:00:00Z", {
+    event_id: "question", decision: { question: "この案で進めますか？", options: [], links: [] },
+  });
+  const older = task("fix/a", "active", "2026-09-01T02:00:00Z", { event_id: "older-work" });
+  const otherLane = task("fix/ab", "active", "2026-09-01T02:30:00Z", { event_id: "other-lane" });
+  const otherProject = { ...waiting, event_id: "other-project", project_id: "other" };
+  const response = {
+    id: "repo",
+    lanes: [{ branch: "fix/a", agent: implementing }, { branch: "fix/ab", agent: null }],
+    agent_tasks: [implementing],
+    agent_latest_event: implementing,
+    agent_events: [implementing],
+    events: [{ ...implementing, source: "agent" }],
+  };
+
+  const merged = [waiting, otherLane, otherProject, older, waiting, implementing].reduce(mergeProjectAgentEvent, response);
+  assert.deepEqual(merged.lanes.map(({ agent }) => agent), [waiting, otherLane]);
+  assert.equal(merged.agent_state, "waiting_for_user");
+  assert.deepEqual(merged.agent_tasks[0].decision, waiting.decision);
+  assert.equal(merged.agent_latest_event.event_id, waiting.event_id);
+  const ids = ["work", "question", "other-lane", "older-work"];
+  assert.deepEqual(merged.agent_events.map(({ event_id }) => event_id), ids);
+  assert.deepEqual(merged.events.map(({ event_id }) => event_id), ids);
 });
 
 test("agent priority, top three, and mutually exclusive counts use explicit states", () => {

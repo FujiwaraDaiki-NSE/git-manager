@@ -44,7 +44,7 @@ import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { agentReportKey, agentStateLabel, agentTaskState, isExplicitAgentStatus, laneMatchesAgentEvent, mergeAgentSnapshot, projectMatchesAgentEvent } from "./agent-overview.mjs";
+import { agentReportKey, agentStateLabel, agentTaskState, mergeProjectAgentEvent } from "./agent-overview.mjs";
 import { parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import {
@@ -70,6 +70,7 @@ import type {
   ProjectLane,
   ProjectResponse,
   Repo,
+  AgentEvent,
   AgentTask,
 } from "./types";
 
@@ -660,7 +661,7 @@ function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectRes
         <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
       <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent報告なし</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><AgentDecisionDetails decision={task.decision} /><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
-      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
+      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} directComparison={null} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
       <WorktreeExplorer project={project} onOpenGit={onOpenGit} onSelectLane={onSelectLane} />
       <PrExplorer project={project} />
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
@@ -675,6 +676,14 @@ function InfoField({ label, value, code = false }: { label: string; value: strin
 function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: ProjectLane; project: ProjectResponse; defaultBranch: string | null; onOpenGit: (lane: ProjectLane) => void }) {
   const nextCommand = lane.next_command === null ? null : worktreeCommand(lane.next_command.command, lane.path, project.main_path);
   const nextTarget = lane.next_command === null ? null : commandTarget(lane.next_command.command, lane.path, project.main_path);
+  const destinations = lane.destinations;
+  const directComparison = destinations?.upstream_state === "configured"
+    && destinations.upstream !== null && destinations.upstream_head !== null && lane.head !== null
+    ? { base: destinations.upstream_head, target: lane.head, baseLabel: destinations.upstream } : null;
+  const comparisonUnavailable = lane.branch === null || destinations?.upstream_state === "unset" ? "追跡先が設定されていません。"
+    : destinations?.upstream_gone === true ? "追跡先の参照がローカルにありません。リモートを追跡している場合、未fetchやリモート側での削除が考えられます。"
+    : lane.head === null ? "差分を表示できる作業先端がありません。"
+    : "差分を表示できる追跡先の参照を取得できませんでした。";
   const searchParams = useSearchParams();
   const { incoming, outgoing } = laneRecordedMerges(project.branch_connections, lane);
   const relationText = (edges: typeof incoming) => !project.branch_connections ? "取り込み記録未取得" : edges.map((edge) => `${edgeDisplayLabel(edge, project.branch_connections?.refs ?? [])} (${shortHash(edge.commit_hash)})`).join(" / ") || "確定した取り込み記録なし";
@@ -691,12 +700,13 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
         <div><dt>既定ブランチとの共通祖先</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "未取得"}{!lane.unborn && <small>{exactDate(lane.last_commit?.date)}</small>}</dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
-        <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}</dd></div>
         <div><dt>ブランチの作業状況</dt><dd>{agentStateLabel(agentTaskState(currentLaneAgent(lane)))}</dd></div>
         <div><dt>このローカルブランチからの取り込み記録</dt><dd>{relationText(outgoing)}</dd></div>
         <div><dt>このローカルブランチへの取り込み記録</dt><dd>{relationText(incoming)}</dd></div>
         <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || (currentLaneAgent(lane)?.attention ? agentStateLabel(currentLaneAgent(lane)?.attention) : null) || "未取得"}</dd></div>
+        <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}{directComparison === null && <small>{comparisonUnavailable}</small>}</dd></div>
       </dl>
+      {directComparison !== null && <CommitCompare key={JSON.stringify([project.main_path, lane.id])} path={project.main_path} directComparison={directComparison} />}
       <OperationFacts operations={lane.operations} />
       {lane.branch !== null && <DestinationFacts destinations={lane.destinations} />}
       <p>記録がない場合も、取り込まれていないとは限りません。<Link href={`${relationHref.split("#")[0]}#branch-relations-title`}>現在の包含関係・未解決の記録を確認</Link></p>
@@ -929,7 +939,7 @@ function ProjectSnapshotFreshness({ snapshot }: { snapshot: ProjectResponse["sna
 
 export default function ProjectControl() {
   const [detailWidth, setDetailWidth] = usePaneWidth("gitdash.detail-width", 380);
-  const { repos, scanning, connected, latestAgentEvent, projectUpdates } = useRepoStream();
+  const { repos, scanning, connected, subscribeAgentEvents, projectUpdates } = useRepoStream();
   const { state: urlState, update: updateUrl } = useProjectUrl();
   const homeQuery = useSearchParams().get("home");
   const homeHref = homeReturnHref(homeQuery);
@@ -998,6 +1008,10 @@ export default function ProjectControl() {
       .sort((a, b) => a.path.localeCompare(b.path)));
   }, [repos, urlState.path]);
 
+  useEffect(() => subscribeAgentEvents((event) => {
+    setProject((current) => current === null ? null : mergeProjectAgentEvent(current, event));
+  }), [subscribeAgentEvents]);
+
   useEffect(() => {
     if (invalidUrlKey) return;
     if (!urlState.path) {
@@ -1011,72 +1025,28 @@ export default function ProjectControl() {
     setProjectError(null);
     const projectPath = urlState.path;
     const timer = window.setTimeout(() => {
-    void fetch(`/api/project?path=${encodeURIComponent(projectPath)}&range=${encodeURIComponent(projectFetchRange)}`, { cache: "no-store", signal: controller.signal })
-      .then(async (response) => { if (!response.ok) throw new Error(response.status === 404 ? "指定されたプロジェクトが見つかりません。一覧から選び直してください。" : `サーバーから情報を取得できませんでした（HTTP ${response.status}）。`); return (await response.json()) as ProjectResponse; })
-      .then((value) => { if (controller.signal.aborted) return; setProject(value); setLoadedKey(resourceKey); setProjectState("ready"); })
-      .catch((reason: unknown) => { if (controller.signal.aborted) return; setProjectState("error"); setProjectError(reason instanceof TypeError ? "サーバーとの通信を確認してから再試行してください。" : reason instanceof Error ? reason.message : "情報の取得に失敗しました。"); });
-    // Explicit project/range navigation should start immediately. Debounce
-    // background observations only, where several SSE updates can coalesce.
+      // Replay every report delivered while the response was in flight.
+      const reports: AgentEvent[] = [];
+      const unsubscribe = subscribeAgentEvents((event) => reports.push(event));
+      controller.signal.addEventListener("abort", unsubscribe, { once: true });
+      void fetch(`/api/project?path=${encodeURIComponent(projectPath)}&range=${encodeURIComponent(projectFetchRange)}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => { if (!response.ok) throw new Error(response.status === 404 ? "指定されたプロジェクトが見つかりません。一覧から選び直してください。" : `サーバーから情報を取得できませんでした（HTTP ${response.status}）。`); return (await response.json()) as ProjectResponse; })
+        .then((value) => {
+          if (controller.signal.aborted) return;
+          setProject(reports.reduce(mergeProjectAgentEvent, value));
+          setLoadedKey(resourceKey);
+          setProjectState("ready");
+        })
+        .catch((reason: unknown) => { if (controller.signal.aborted) return; setProjectState("error"); setProjectError(reason instanceof TypeError ? "サーバーとの通信を確認してから再試行してください。" : reason instanceof Error ? reason.message : "情報の取得に失敗しました。"); })
+        .finally(() => {
+          controller.signal.removeEventListener("abort", unsubscribe);
+          unsubscribe();
+        });
+      // Explicit project/range navigation should start immediately. Debounce
+      // background observations only, where several SSE updates can coalesce.
     }, loadedKey === resourceKey ? 180 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [invalidUrlKey, projectFetchRange, projectStateKey, projectUpdateToken, resourceKey, reloadToken, urlState.path]);
-
-  useEffect(() => {
-    if (!project || !latestAgentEvent) return;
-    if (!projectMatchesAgentEvent(project, latestAgentEvent)) return;
-    setProject((current) => {
-      if (!current) return current;
-      // The summary and detail endpoints use different legacy field names;
-      // normalize the already-authoritative detail field before applying one
-      // SSE report so recency comparisons do not lose another branch's newer
-      // report.
-      const normalizedCurrent = { ...current, latest_agent_event: current.agent_latest_event };
-      const summary = mergeAgentSnapshot(normalizedCurrent, latestAgentEvent);
-      // Lifecycle events are activity history only. mergeAgentSnapshot also
-      // rejects stale status snapshots, so a lane/latest report is updated
-      // only when the explicit status was accepted for this branch.
-      const statusApplied = isExplicitAgentStatus(latestAgentEvent) && summary !== normalizedCurrent;
-      const lane = statusApplied ? current.lanes.find((item) => laneMatchesAgentEvent(item, latestAgentEvent)) : null;
-      const activity = {
-        id: `agent:${latestAgentEvent.event_id}`,
-        event_id: latestAgentEvent.event_id,
-        sequence: latestAgentEvent.sequence ?? null,
-        occurred_at: latestAgentEvent.occurred_at,
-        observed_at: latestAgentEvent.observed_at,
-        type: "agent",
-        source: "agent",
-        project_id: latestAgentEvent.project_id ?? current.id,
-        worktree: latestAgentEvent.worktree,
-        branch: latestAgentEvent.branch,
-        lane_id: lane?.id ?? null,
-        task_id: latestAgentEvent.task_id,
-        agent_id: latestAgentEvent.agent_id,
-        kind: latestAgentEvent.kind ?? null,
-        status: latestAgentEvent.status ?? null,
-        run_state: latestAgentEvent.run_state,
-        phase: latestAgentEvent.phase,
-        attention: latestAgentEvent.attention,
-        outcome: latestAgentEvent.outcome,
-        summary: latestAgentEvent.summary,
-      } as ProjectEvent;
-      return {
-        ...current,
-        agent_tasks: summary.agent_tasks,
-        agent_priority_counts: summary.agent_priority_counts,
-        agent_state: summary.agent_state,
-        agent_latest_event: statusApplied ? summary.latest_agent_event : current.agent_latest_event,
-        agent_events: current.agent_events.some((item) => item.event_id === latestAgentEvent.event_id)
-          ? current.agent_events
-          : [...current.agent_events, latestAgentEvent],
-        events: current.events.some((item) => item.id === activity.id) ? current.events : [...current.events, activity],
-        lanes: current.lanes.map((item) => (
-          statusApplied && laneMatchesAgentEvent(item, latestAgentEvent)
-            ? { ...item, agent: latestAgentEvent }
-            : item
-        )),
-      };
-    });
-  }, [latestAgentEvent, project?.id]);
+  }, [invalidUrlKey, projectFetchRange, projectStateKey, projectUpdateToken, resourceKey, reloadToken, subscribeAgentEvents, urlState.path]);
 
   const selectedHash = urlState.event;
   const selectedLane = urlState.lane;

@@ -21,7 +21,7 @@ export const AGENT_SUMMARY_LABELS = {
 
 export const AGENT_COUNT_KEYS = [...AGENT_SUMMARY_KEYS, "completed"];
 
-export const GIT_FILTER_KEYS = ["dirty", "conflict", "ahead", "behind"];
+export const GIT_FILTER_KEYS = ["dirty", "conflict", "ahead", "behind", "fetch-failure"];
 
 export const HOME_DEFAULT_VIEW = {
   query: "",
@@ -144,6 +144,7 @@ export function matchesAgentFilter(project, filter) {
 
 export function matchesGitFilter(project, filter) {
   if (filter === "all") return true;
+  if (filter === "fetch-failure") return project.fetch_status?.result === "failure";
   const value = project?.git?.[filter];
   return typeof value === "number" && value > 0;
 }

@@ -66,9 +66,14 @@ test("stream fetches once initially, replays append cursors and pages history wi
   await new Promise(setImmediate);
   current.loadOlderEvents();
   assert.equal(requests.at(-1).url, "/api/agent-events?before_sequence=1&limit=100");
+  const liveReports = [];
+  const unsubscribe = current.subscribeAgentEvents((event) => liveReports.push(event.event_id));
   stream.emit("agent_event", { event_id: "live", sequence: 101 });
+  stream.emit("agent_event", { event_id: "live-next", sequence: 102 });
+  assert.deepEqual(liveReports, ["live", "live-next"]);
+  unsubscribe();
   stream.onopen();
-  assert.equal(requests.at(-1).url, "/api/agent-events?after_sequence=101");
+  assert.equal(requests.at(-1).url, "/api/agent-events?after_sequence=102");
   assert.equal(requests[0].signal.aborted, false);
   stream.emit("scan", { active: true });
   stream.emit("scan", { active: false });

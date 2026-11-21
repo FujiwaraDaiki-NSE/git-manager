@@ -1,4 +1,4 @@
-/* Merged PR explorer. Kept in its own global sheet so the project-info view
+/* PR explorer. Kept in its own global sheet so the project-info view
    can opt into the explorer without making its layout rules harder to scan. */
 .pr-explorer {
   --pr-blue: var(--accent);
@@ -98,6 +98,23 @@
 .pr-explorer-coverage-unavailable { border-color: color-mix(in srgb, var(--c-behind) 50%, var(--pr-border)); }
 .pr-explorer-coverage-not_applicable { border-color: var(--pr-border); }
 .pr-explorer-coverage-unknown { border-color: color-mix(in srgb, var(--c-conflict) 42%, var(--pr-border)); }
+
+.pr-explorer-open-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pr-explorer-open-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pr-border);
+  font-size: 14px;
+}
+
+.pr-explorer-open-list a { color: var(--pr-blue); }
 
 .pr-explorer-toolbar {
   display: flex;

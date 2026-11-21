@@ -31,6 +31,7 @@ import {
   isDormantProject,
   homeCardKeyAction,
   homeCardIndex,
+  matchesGitFilter,
   parseFavoriteIds,
   parseHomeUrl,
   projectMatchesView,
@@ -51,7 +52,8 @@ const summaryCards: Array<{ key: AgentSummaryKey; label: string }> = [
 ];
 
 type AgentFilter = "all" | "unknown" | AgentSummaryKey;
-type GitFilter = "all" | "dirty" | "conflict" | "ahead" | "behind";
+type LaneGitFilter = "all" | "dirty" | "conflict" | "ahead" | "behind";
+type GitFilter = LaneGitFilter | "fetch-failure";
 type ProjectSort = "priority" | "name" | "latest";
 type CardDensity = "comfortable" | "compact";
 type HomeView = {
@@ -79,6 +81,7 @@ const gitFilters: Array<{ key: Exclude<GitFilter, "all">; label: string }> = [
   { key: "conflict", label: "競合" },
   { key: "ahead", label: "未push" },
   { key: "behind", label: "未pull" },
+  { key: "fetch-failure", label: "fetch失敗" },
 ];
 
 function relativeTime(iso: string | null | undefined) {
@@ -127,7 +130,7 @@ function ProjectCard({
 }) {
   const target = project.main_path;
   const href = target === null ? null : `/project?path=${encodeURIComponent(target)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`;
-  const workHref = (filter: GitFilter, query: string | null = null) => {
+  const workHref = (filter: LaneGitFilter, query: string | null = null) => {
     if (target === null) return null;
     const params = new URLSearchParams({ path: target, tab: "lanes", range: "current" });
     if (filter !== "all") params.set("laneFilter", filter);
@@ -422,7 +425,7 @@ export default function Page() {
   };
   const resetView = () => applyView({ query: "", agentFilter: "all", gitFilter: "all", favoritesOnly: false, hideDormant: false, ...(invalidUrlParams.length ? defaultView : {}) });
   const homeQuery = homeSearch(view);
-  const gitProjectCounts = useMemo(() => Object.fromEntries(gitFilters.map(({ key }) => [key, projects.filter((project) => project.git[key] > 0).length])), [projects]);
+  const gitProjectCounts = useMemo(() => Object.fromEntries(gitFilters.map(({ key }) => [key, projects.filter((project) => matchesGitFilter(project, key)).length])), [projects]);
   const toggleFavorite = (projectId: string) => {
     setFavorites((current) => {
       const next = new Set(current);

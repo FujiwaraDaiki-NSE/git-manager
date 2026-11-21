@@ -14,7 +14,7 @@ export type RepoStreamState = {
   fetching: import("./fetch-progress.mjs").FetchProgress | null;
   connected: boolean;
   agentEvents: AgentEvent[];
-  latestAgentEvent: AgentEvent | null;
+  subscribeAgentEvents: (listener: (event: AgentEvent) => void) => () => void;
   projectSummaries: ProjectSummary[];
   projectUpdates: Map<string, number>;
   agentDataLoading: boolean;
@@ -60,7 +60,6 @@ function useRepoStreamState(): RepoStreamState {
   const [fetching, setFetching] = useState<import("./fetch-progress.mjs").FetchProgress | null>(null);
   const [connected, setConnected] = useState(false);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
-  const [latestAgentEvent, setLatestAgentEvent] = useState<AgentEvent | null>(null);
   const [projectSummaries, setProjectSummaries] = useState<ProjectSummary[]>([]);
   const [projectUpdates, setProjectUpdates] = useState<Map<string, number>>(new Map());
   const [agentDataLoading, setAgentDataLoading] = useState(true);
@@ -72,6 +71,11 @@ function useRepoStreamState(): RepoStreamState {
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const agentEventListeners = useRef(new Set<(event: AgentEvent) => void>());
+  const subscribeAgentEvents = useCallback((listener: (event: AgentEvent) => void) => {
+    agentEventListeners.current.add(listener);
+    return () => { agentEventListeners.current.delete(listener); };
+  }, []);
   const attentionListeners = useRef(new Set<(event: AgentEvent) => void>());
   const subscribeAgentAttention = useCallback((listener: (event: AgentEvent) => void) => {
     attentionListeners.current.add(listener);
@@ -290,7 +294,7 @@ function useRepoStreamState(): RepoStreamState {
       bufferedEvents.push(value);
       const merged = mergeAgentEvents([], bufferedEvents);
       bufferedEvents.splice(0, bufferedEvents.length, ...merged);
-      setLatestAgentEvent(value);
+      for (const listener of agentEventListeners.current) listener(value);
       setAgentEvents((previous) => mergeAgentEvents(previous, [value]));
       if (value.kind === "status" && value.project_id) {
         setProjectSummaries((previous) => previous.map((project) => (
@@ -308,7 +312,7 @@ function useRepoStreamState(): RepoStreamState {
     };
   }, []);
 
-  return { subscribeAgentAttention, subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, latestAgentEvent, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsCachedAt, projectsError, refreshProjects, loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
+  return { subscribeAgentAttention, subscribeAgentEvents, subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsCachedAt, projectsError, refreshProjects, loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
 }
 
 const RepoStreamContext = createContext<RepoStreamState | null>(null);

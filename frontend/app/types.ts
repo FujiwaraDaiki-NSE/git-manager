@@ -1,6 +1,6 @@
 export type FetchStatus = { attempted_at: number; result: "success" | "failure"; category: "authentication" | "connection" | "timeout" | "other" | null; reason: string | null };
 export type GitOperation = { kind: string; marker: string; step: number | null; total: number | null; commands: NextCommand[] };
-export type BranchDestinations = { upstream_state: "unset" | "configured"; push_ref_reason: string | null; push_refspecs: string[] | null; fetch_remote: string | null; fetch_urls: string[] | null; upstream: string | null; upstream_ref: string | null; push_remote: string | null; push_urls: string[] | null; push_ref: string | null; push_default: string | null };
+export type BranchDestinations = { upstream_state: "unset" | "configured"; upstream_gone: boolean; upstream_head: string | null; push_ref_reason: string | null; push_refspecs: string[] | null; fetch_remote: string | null; fetch_urls: string[] | null; upstream: string | null; upstream_ref: string | null; push_remote: string | null; push_urls: string[] | null; push_ref: string | null; push_default: string | null };
 export type Entry = { xy: string; path: string; original_path: string | null };
 export type Count = { xy: string; count: number };
 export type Commit = { hash: string; subject: string; author: string; date: string };

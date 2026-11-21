@@ -4,6 +4,7 @@ import { OperationFacts } from "./git-state-facts";
 
 import PatchView from "./patch-view";
 import CommitFiles from "./commit-files";
+import ConflictInspector from "./conflict-inspector";
 import CopyButton from "./copy-button";
 import { commandTarget, worktreeCommand } from "./next-command-tools.mjs";
 import Submodules from "./submodules";
@@ -242,6 +243,7 @@ function StatusPane({ repo }: { repo: Repo }) {
           })}
           {visible.length === 0 && <div className="status-file-empty">{hasNoUncommittedChanges(repo) ? "未コミットの変更なし" : "条件に一致する変更ファイルはありません。"}{hasFilters && <button className="subtle-button" type="button" onClick={clearFilters}>絞り込みを解除</button>}</div>}
         </div>
+        {entries.some((entry) => fileStatusGroups(entry.xy).conflict) && <ConflictInspector path={repo.path} />}
         {entries.length > 0 && <div className="status-file-diff-tools" aria-labelledby="status-file-diff-title">
           <div className="status-file-diff-heading">
             <div>
@@ -255,7 +257,7 @@ function StatusPane({ repo }: { repo: Repo }) {
             <button type="button" aria-pressed={diffStage === "unstaged"} onClick={() => setDiffStage("unstaged")}>未ステージ</button>
             <span>{selectedDiffFile === null ? "表示範囲: 全体" : <>表示範囲: <code>{selectedDiffFile}</code></>}</span>
           </div>
-          <p className="status-file-diff-note" role="note">未追跡ファイルはGitの差分対象外です。この画面のファイル別表示では競合を扱いません。各行の「差分を表示」からファイル単位を開けます。名前変更・コピーは元と先のパスをまとめて表示します。</p>
+          <p className="status-file-diff-note" role="note">未追跡ファイルと競合はこの差分表示の対象外です。各行の「差分を表示」からファイル単位を開けます。名前変更・コピーは元と先のパスをまとめて表示します。</p>
           <div className="status-file-command-copy">
             <h5>表示中の追跡ファイルの差分コマンド</h5>
             <p className="status-file-diff-empty">コマンドはコピー専用です。この画面では実行しません。</p>

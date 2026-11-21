@@ -68,6 +68,39 @@ def test_unavailable_git_facts(tmp_path):
     assert gitinfo.branch_destinations(str(tmp_path), 'main') is None
 
 
+def test_destinations_observe_tracking_head_and_distinguish_missing_ref_from_unset(tmp_path):
+    repo = tmp_path / 'repo'
+    init_repo(repo)
+    git(repo, 'remote', 'add', 'origin', 'https://example.test/repo.git')
+    unset = gitinfo.branch_destinations(str(repo), 'main')
+    assert unset['upstream_state'] == 'unset'
+    assert unset['upstream'] is None
+    assert unset['upstream_head'] is None
+    assert unset['upstream_gone'] is False
+
+    tracking_ref = 'refs/remotes/origin/different'
+    git(repo, 'config', 'branch.main.remote', 'origin')
+    git(repo, 'config', 'branch.main.merge', 'refs/heads/different')
+    git(repo, 'commit', '--allow-empty', '-qm', 'second')
+    git(repo, 'update-ref', tracking_ref, 'HEAD^')
+    available = gitinfo.branch_destinations(str(repo), 'main')
+    assert available['upstream'] == tracking_ref
+    assert available['upstream_head'] == git(repo, 'rev-parse', 'HEAD^').strip()
+    assert available['upstream_gone'] is False
+
+    git(repo, 'update-ref', tracking_ref, 'HEAD')
+    advanced = gitinfo.branch_destinations(str(repo), 'main')
+    assert advanced['upstream'] == tracking_ref
+    assert advanced['upstream_head'] == git(repo, 'rev-parse', 'HEAD').strip()
+
+    git(repo, 'update-ref', '-d', tracking_ref)
+    gone = gitinfo.branch_destinations(str(repo), 'main')
+    assert gone['upstream_state'] == 'configured'
+    assert gone['upstream'] == tracking_ref
+    assert gone['upstream_head'] is None
+    assert gone['upstream_gone'] is True
+
+
 def test_destinations_precedence_urls_and_push_modes(tmp_path):
     repo = tmp_path / 'repo'
     init_repo(repo)
@@ -105,7 +138,7 @@ def test_destinations_precedence_urls_and_push_modes(tmp_path):
     assert gitinfo.branch_destinations(str(repo), 'main')['push_ref'] == 'refs/heads/review/main'
 
 
-def test_destination_batch_reads_config_once_and_does_not_cache_across_requests(tmp_path, monkeypatch):
+def test_destination_batch_reads_config_and_refs_once_and_does_not_cache_across_requests(tmp_path, monkeypatch):
     repo = tmp_path / 'repo'
     init_repo(repo)
     git(repo, 'branch', 'topic')
@@ -114,19 +147,23 @@ def test_destination_batch_reads_config_once_and_does_not_cache_across_requests(
     original_run = subprocess.run
 
     def record(command, **kwargs):
-        if command[3] == 'config':
+        if command[3] in ('config', 'for-each-ref'):
             calls.append(command[3:])
         return original_run(command, **kwargs)
 
     monkeypatch.setattr(gitinfo.subprocess, 'run', record)
     facts = gitinfo.branch_destinations_many(str(repo), ['main', 'topic'])
     assert set(facts) == {'main', 'topic'}
-    assert calls == [['config', '-z', '--list']]
+    batch_calls = [
+        ['config', '-z', '--list'],
+        ['for-each-ref', '--format=%(refname)%00%(upstream)%00%(objectname)', 'refs/'],
+    ]
+    assert calls == batch_calls
     assert facts['main']['push_default'] == 'simple'
     git(repo, 'config', 'push.default', 'current')
     calls.clear()
     assert gitinfo.branch_destinations_many(str(repo), ['main', 'topic'])['main']['push_default'] == 'current'
-    assert calls == [['config', '-z', '--list']]
+    assert calls == batch_calls
 
 
 def test_destination_config_preserves_multivalues_and_subsection_case(tmp_path):

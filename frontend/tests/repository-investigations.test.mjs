@@ -149,7 +149,14 @@ test("search ranges use returned length and distinguish empty first and later pa
 });
 
 test("overlaps retain XY codes and caution alongside shared Japanese status descriptions", async () => {
-  const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees: ["M ", " M", "??", "UU"].map((xy, i) => ({ worktree: `/repo${i}`, branch: null, xy })) }] }, null, null, false, null]);
+  const worktrees = [
+    { worktree: "/repo0", branch: null, xy: ["M ", " M", "??"] },
+    { worktree: "/repo1", branch: null, xy: ["UU"] },
+  ];
+  const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees }] }, null, null, false, null]);
   const html = h.html();
   for (const text of ["M ", " M", "??", "UU", "ステージ: 変更", "作業: 変更", "未追跡", "競合を解消してください", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"]) assert.ok(html.includes(text));
+  const rows = h.nodes(h.render(), "li").filter(node => node.props.className === "tag-explorer-commit-meta");
+  assert.equal(rows.length, 2);
+  assert.match(renderToStaticMarkup(rows[0]), /\/repo0.*ステージ: 変更.*作業: 変更.*未追跡/);
 });

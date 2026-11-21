@@ -43,6 +43,7 @@ const event = (event_id, occurred_at, extra = {}) => ({
 const filters = (overrides = {}) => ({
   query: "",
   projectId: "",
+  historyBranch: null,
   status: TIMELINE_STATUS_ALL,
   kind: TIMELINE_KIND_ALL,
   startDate: "",
@@ -78,6 +79,19 @@ test("status filtering uses explicit status only and lifecycle never becomes cur
   assert.deepEqual(filterTimelineCurrentRows(current, filters({ status: TIMELINE_STATUS_UNKNOWN })), []);
   assert.deepEqual(filterTimelineHistoryEvents([waiting, lifecycle], filters({ status: "waiting_for_user" }), new Map([[projectA.id, projectA]])).map((item) => item.event_id), ["waiting"]);
   assert.deepEqual(filterTimelineHistoryEvents([waiting, lifecycle], filters({ status: TIMELINE_STATUS_UNKNOWN }), new Map([[projectA.id, projectA]])).map((item) => item.event_id), ["life"]);
+});
+
+test("branch history matches the exact project and branch across additional pages", () => {
+  const first = event("first", "2026-10-01T11:00:00+09:00", { branch: "fix/a" });
+  const prefix = event("prefix", "2026-10-01T11:00:00+09:00", { branch: "fix/ab" });
+  const otherProject = event("other-project", "2026-10-01T11:00:00+09:00", { project_id: projectB.id, branch: "fix/a" });
+  const older = event("older", "2026-09-30T11:00:00+09:00", { branch: "fix/a" });
+  const map = new Map([[projectA.id, projectA], [projectB.id, projectB]]);
+  const options = filters({ historyBranch: { projectId: projectA.id, branch: "fix/a" } });
+  const history = [prefix, first, otherProject];
+  assert.deepEqual(timelineHistoryDetails(history, options, map).filtered, [first]);
+  assert.deepEqual(timelineHistoryDetails([...history, older], options, map).filtered, [first, older]);
+  assert.deepEqual(filterTimelineHistoryEvents(history, filters(), map), history);
 });
 
 test("kind and local calendar filters include boundaries and reject invalid ranges", () => {

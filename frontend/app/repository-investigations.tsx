@@ -9,7 +9,7 @@ import "./tag-explorer.css";
 import "./repository-investigations.css";
 
 type Commit = { hash: string; subject: string; date: string; author: string; mark?: string; sources?: { selector: string; message: string }[]; command?: string };
-type Result = { commits?: Commit[]; scope?: string; fixed_shas?: string[]; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string }[] }[] };
+type Result = { commits?: Commit[]; scope?: string; fixed_shas?: string[]; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string[] }[] }[] };
 async function read<T,>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, cache: "no-store", signal });
   if (!response.ok) {
@@ -102,10 +102,9 @@ function Investigation({ path, kind }: { path: string; kind: Kind }) {
                 <div className="tag-explorer-commit-heading"><strong><code>{item.path}</code></strong></div>
                 <ul className="repository-investigation-list">
                   {item.worktrees.map(w => <li className="tag-explorer-commit-meta" key={w.worktree}>
-                    <code className="repository-investigation-xy">{w.xy}</code>
-                    <span>{fileStatusDescription(w.xy)}</span>
                     <span>{w.worktree}</span>
                     <span>{w.branch === null ? "detached HEAD（ブランチなし）" : w.branch.replace(/^refs\/heads\//, "")}</span>
+                    {w.xy.map((xy) => <span key={xy}><code className="repository-investigation-xy">{xy}</code> {fileStatusDescription(xy)}</span>)}
                   </li>)}
                 </ul>
               </li>)}

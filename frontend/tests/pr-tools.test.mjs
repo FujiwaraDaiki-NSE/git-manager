@@ -8,6 +8,7 @@ import {
   filterPullRequests,
   filterPullRequestDetails,
   localCalendarDate,
+  openPullRequestsNeedingAttention,
   pullRequestsToCsv,
   pullRequestDateRangeError,
   pullRequestUrlDetails,
@@ -227,4 +228,19 @@ test("オープンPRのレビュー・CI状態と欠損を区別する", async (
       assert.deepEqual(openPullRequestLabels({ isDraft: false, reviewDecision, ciState }), [review, ci]);
     }
   }
+});
+
+test("対応が必要なオープンPRを番号ごとに表示し、両方の理由を残す", () => {
+  const pulls = [
+    pr(1, { ciState: "FAILURE", reviewDecision: "APPROVED" }),
+    pr(2, { ciState: "SUCCESS", reviewDecision: "CHANGES_REQUESTED" }),
+    pr(3, { ciState: "ERROR", reviewDecision: "CHANGES_REQUESTED" }),
+    pr(4, { ciState: "SUCCESS", reviewDecision: "APPROVED" }),
+    pr(5, { ciState: null, reviewDecision: null }),
+  ];
+  assert.deepEqual(openPullRequestsNeedingAttention([...pulls, pulls[2]]), [
+    { number: 1, url: pulls[0].url, reasons: ["CI 失敗"] },
+    { number: 2, url: pulls[1].url, reasons: ["変更要求"] },
+    { number: 3, url: pulls[2].url, reasons: ["CI 失敗", "変更要求"] },
+  ]);
 });

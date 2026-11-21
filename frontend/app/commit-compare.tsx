@@ -45,7 +45,7 @@ type ComparisonResponse = {
   command: string;
 };
 
-type CommitCompareProps = { path: string };
+type CommitCompareProps = { path: string; directComparison: { base: string; target: string; baseLabel: string } | null };
 
 function apiQuery(path: string, request: ComparisonRequest) {
   return buildComparisonQuery(path, request.base, request.target, request.mode);
@@ -101,7 +101,7 @@ function ComparisonStats({ stats }: { stats: ComparisonStats }) {
   );
 }
 
-export default function CommitCompare({ path }: CommitCompareProps) {
+export default function CommitCompare({ path, directComparison }: CommitCompareProps) {
   const titleId = `commit-compare-title-${useId().replaceAll(":", "")}`;
   const [base, setBase] = useState("");
   const [target, setTarget] = useState("");
@@ -213,12 +213,18 @@ export default function CommitCompare({ path }: CommitCompareProps) {
     }
   };
 
-  const resultIsCurrent = sameRequest({ base: base.trim(), target: target.trim(), mode }, loadedRequest)
-    || (data !== null && sameRequest({ base: base.trim(), target: target.trim(), mode }, data));
-  return (
-    <details className="commit-compare" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary id={titleId}>2地点を比較する</summary>
+  const comparisonInput: ComparisonRequest = directComparison === null
+    ? { base: base.trim(), target: target.trim(), mode }
+    : { base: directComparison.base, target: directComparison.target, mode: "direct" };
+  const resultIsCurrent = sameRequest(comparisonInput, loadedRequest) || sameRequest(comparisonInput, data);
+  const body = (
       <div className="commit-compare-body">
+        {directComparison !== null ? (
+          <div className="commit-compare-lane-controls">
+            <button type="button" className="commit-compare-run" disabled={state === "loading"} onClick={() => setRequest(comparisonInput)}>追跡先 → ローカル先端の差分</button>
+            <code>{directComparison.baseLabel}</code>
+          </div>
+        ) : <>
         <p className="commit-compare-intro">base と target を明示して、読み取り専用のコミット差分を確認します。ブランチ名の推測や自動fetchは行いません。</p>
         <InvestigationPresets
           kind="compare"
@@ -264,6 +270,7 @@ export default function CommitCompare({ path }: CommitCompareProps) {
           </button>
         </form>
         {validationError && <p className="commit-compare-validation" role="alert">{validationError}</p>}
+        </>}
 
         {state === "loading" && <p className="commit-compare-loading" role="status" aria-live="polite">比較を取得中…</p>}
         {state === "error" && (
@@ -281,7 +288,7 @@ export default function CommitCompare({ path }: CommitCompareProps) {
               <div>
                 <h3 id={`${titleId}-result`}>比較結果</h3>
                 <p className="commit-compare-label"><span>{comparisonModeLabel(data.mode)}</span> <code>{data.comparison_label}</code></p>
-                {!resultIsCurrent && <p className="commit-compare-stale" role="status">入力値が変更されています。表示中の結果は前回の比較です。「この2地点を比較」で更新してください。</p>}
+                {!resultIsCurrent && <p className="commit-compare-stale" role="status">{directComparison === null ? "入力値が変更されています。表示中の結果は前回の比較です。「この2地点を比較」で更新してください。" : "比較対象が更新されました。表示中の結果は前回の比較です。"}</p>}
               </div>
               <div className="commit-compare-actions">
                 <button type="button" onClick={exportCsv}>ファイル一覧をCSV保存</button>
@@ -297,8 +304,10 @@ export default function CommitCompare({ path }: CommitCompareProps) {
                 <dt>差分の開始地点</dt><dd><code>{data.comparison_base}</code></dd>
               </dl>
               <div className="commit-compare-actions">
-                <button type="button" onClick={() => applyPreset({ base: data.base, target: data.target, mode: data.mode })}>取得したハッシュを入力欄へ</button>
-                <button type="button" onClick={() => applyPreset({ base: data.target, target: data.comparison_base, mode: "direct" })}>この差分の逆方向を入力欄へ</button>
+                {directComparison === null && <>
+                  <button type="button" onClick={() => applyPreset({ base: data.base, target: data.target, mode: data.mode })}>取得したハッシュを入力欄へ</button>
+                  <button type="button" onClick={() => applyPreset({ base: data.target, target: data.comparison_base, mode: "direct" })}>この差分の逆方向を入力欄へ</button>
+                </>}
                 {origin !== null && <CopyButton value={pinnedComparisonUrl(origin, path, data)} label="ハッシュ固定の比較URLをコピー" />}
                 <CopyButton value={buildComparisonMarkdown(path, data)} label="比較レポートをMarkdownでコピー" />
                 <button type="button" onClick={() => {
@@ -334,6 +343,12 @@ export default function CommitCompare({ path }: CommitCompareProps) {
           </section>
         )}
       </div>
+  );
+  if (directComparison !== null) return <div className="commit-compare commit-compare-lane">{body}</div>;
+  return (
+    <details className="commit-compare" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary id={titleId}>2地点を比較する</summary>
+      {body}
     </details>
   );
 }

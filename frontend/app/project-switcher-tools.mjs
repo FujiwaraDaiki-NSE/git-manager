@@ -49,7 +49,11 @@ function projectMatchesQuery(project, normalizedQuery) {
   );
 }
 
-/** Apply switcher filters while preserving the source array and project IDs. */
+/**
+ * Apply switcher filters while preserving the source array and project IDs.
+ * @param {import("./types").ProjectSummary[]} projects
+ * @param {{ query: string, favoritesOnly: boolean, recentOnly: boolean, favoriteIds: Set<string>, recentPaths: string[] }} filters
+ */
 export function filterProjectSwitcherProjects(projects, {
   query,
   favoritesOnly,
@@ -62,6 +66,42 @@ export function filterProjectSwitcherProjects(projects, {
     if (favoritesOnly && !favoriteIds.has(project.id)) return false;
     if (recentOnly && (project.main_path === null || !recentPaths.includes(project.main_path))) return false;
     return projectMatchesQuery(project, normalizedQuery);
+  });
+}
+
+/**
+ * @param {import("./types").ProjectSummary[]} projects
+ * @param {Map<string, import("./types").Repo>} repos
+ * @param {Parameters<typeof filterProjectSwitcherProjects>[1]} filters
+ * @param {string | null} homeQuery
+ */
+export function findProjectSwitcherWorktrees(projects, repos, filters, homeQuery) {
+  const query = filters.query.trim().toLocaleLowerCase();
+  if (!query) return [];
+
+  /** @type {Map<string, { path: string, branch: string | null }[]>} */
+  const matchesByProject = new Map();
+  for (const repo of repos.values()) {
+    if (repo.pending || repo.worktree_state === "prunable") continue;
+    const branch = repo.detached === true || typeof repo.branch !== "string" || !repo.branch ? null : repo.branch;
+    if (branch === null && repo.detached !== true) continue;
+    if (!repo.path.toLocaleLowerCase().includes(query) && !branch?.toLocaleLowerCase().includes(query)) continue;
+    const checkout = { path: repo.path, branch };
+    const matches = matchesByProject.get(repo.common_dir);
+    if (matches) matches.push(checkout);
+    else matchesByProject.set(repo.common_dir, [checkout]);
+  }
+
+  return filterProjectSwitcherProjects(projects, { ...filters, query: "" }).flatMap((project) => {
+    const matches = matchesByProject.get(project.id);
+    if (project.main_path === null || matches === undefined) return [];
+    const mainPath = project.main_path;
+    return matches.map(({ path, branch }) => {
+      const lane = branch === null ? `worktree:${path}` : `branch:${branch}`;
+      const params = new URLSearchParams({ path: mainPath, tab: "flow", range: "7d", lane });
+      if (homeQuery) params.set("home", homeQuery);
+      return { project, path, branch, href: `/project?${params}` };
+    });
   });
 }
 
@@ -78,6 +118,8 @@ function compareProjectName(left, right) {
 /**
  * Sort switcher results by the selected explicit order. Unknown activity is
  * kept after projects with a known authoritative activity time.
+ * @param {import("./types").ProjectSummary[]} projects
+ * @param {"recent" | "name"} order
  */
 export function sortProjectSwitcherProjects(projects, order) {
   if (!PROJECT_SWITCHER_ORDERS.includes(order)) {

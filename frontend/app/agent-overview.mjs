@@ -277,6 +277,43 @@ export function mergeAgentSnapshot(project, event) {
   };
 }
 
+/**
+ * Apply one live report to the project detail and its activity history.
+ * @param {import("./types").ProjectResponse} project
+ * @param {import("./types").AgentEvent} event
+ * @returns {import("./types").ProjectResponse}
+ */
+export function mergeProjectAgentEvent(project, event) {
+  if (!projectMatchesAgentEvent(project, event)) return project;
+  const normalized = { ...project, latest_agent_event: project.agent_latest_event };
+  const summary = mergeAgentSnapshot(normalized, event);
+  const statusApplied = summary !== normalized;
+  const sameEvent = (item) => item.event_id === event.event_id;
+  const knownReport = project.agent_events.some(sameEvent);
+  const knownActivity = project.events.some((item) => item.source === "agent" && sameEvent(item));
+  if (!statusApplied && knownReport && knownActivity) return project;
+  const activity = {
+    ...event,
+    id: `agent:${event.event_id}`,
+    type: "agent",
+    source: "agent",
+    project_id: project.id,
+    lane_id: event.branch ? `branch:${event.branch}` : `worktree:${event.worktree}`,
+  };
+  return {
+    ...project,
+    agent_tasks: summary.agent_tasks,
+    agent_priority_counts: summary.agent_priority_counts,
+    agent_state: summary.agent_state,
+    agent_latest_event: summary.latest_agent_event,
+    agent_events: knownReport ? project.agent_events : [...project.agent_events, event],
+    events: knownActivity ? project.events : [...project.events, activity],
+    lanes: statusApplied ? project.lanes.map((lane) => (
+      laneMatchesAgentEvent(lane, event) ? { ...lane, agent: event } : lane
+    )) : project.lanes,
+  };
+}
+
 export function deferProjectOrder(current, next, interactionActive) {
   if (!interactionActive) return { order: [...next], deferred: false };
   const nextIds = new Set(next);

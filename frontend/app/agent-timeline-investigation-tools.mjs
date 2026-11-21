@@ -56,7 +56,7 @@ function assertOptions(options) {
   if (options === null || typeof options !== "object") {
     throw new TypeError("timeline filter options must be provided explicitly");
   }
-  const required = ["query", "projectId", "status", "kind", "startDate", "endDate", "sort"];
+  const required = ["query", "projectId", "historyBranch", "status", "kind", "startDate", "endDate", "sort"];
   if (required.some((key) => options[key] === undefined)) {
     throw new TypeError(`${required.join(", ")} must be provided explicitly; use null or an empty string for no filter`);
   }
@@ -236,8 +236,10 @@ export function filterTimelineHistoryEvents(events, options, projectById) {
   if (dateWindow.state === "invalid") return [];
   const terms = timelineSearchTerms(options.query);
   const projectId = options.projectId === null ? "" : options.projectId;
+  const branch = options.historyBranch;
   return events.filter((event) => (
     matchesProject(typeof event?.project_id === "string" ? event.project_id : null, projectId)
+    && (branch === null || (event?.project_id === branch.projectId && event?.branch === branch.branch))
     && matchesStatus(event, options.status)
     && matchesKind(event, options.kind)
     && matchesSearch(historySearchValues(event, projectById), terms)

@@ -32,7 +32,7 @@ def records(raw):
 
 def overlaps(repo):
     inventory = run(repo, ["worktree", "list", "--porcelain", "-z"])
-    groups = defaultdict(list)
+    groups = defaultdict(dict)
     unavailable = []
     for block in inventory.split("\0\0"):
         fields = block.split("\0")
@@ -41,10 +41,11 @@ def overlaps(repo):
         worktree = fields[0].removeprefix("worktree ")
         if "bare" in fields:
             continue
+        host_path = paths.to_host(worktree)
         branch = next((v.removeprefix("branch ") for v in fields if v.startswith("branch ")), None)
         raw = gitinfo._run(worktree, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])
         if raw is None:
-            unavailable.append(paths.to_host(worktree))
+            unavailable.append(host_path)
             continue
         entries = raw.split("\0")
         index = 0
@@ -56,9 +57,11 @@ def overlaps(repo):
                 index += 1
                 changed_paths.append(entries[index])
             for file in set(changed_paths):
-                groups[file].append({"worktree": paths.to_host(worktree), "branch": branch, "xy": xy})
+                change = groups[file].setdefault(host_path, {"worktree": host_path, "branch": branch, "xy": []})
+                if xy not in change["xy"]:
+                    change["xy"].append(xy)
             index += 1
-    return {"overlaps": [{"path": file, "worktrees": values} for file, values in sorted(groups.items()) if len(values) > 1], "unavailable": unavailable, "complete": not unavailable}
+    return {"overlaps": [{"path": file, "worktrees": list(values.values())} for file, values in sorted(groups.items()) if len(values) > 1], "unavailable": unavailable, "complete": not unavailable}
 
 
 class InvalidSearchSnapshot(ValueError):

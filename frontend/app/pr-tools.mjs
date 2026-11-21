@@ -311,13 +311,31 @@ export function buildPullRequestExplorerData(project, options) {
   };
 }
 
+const changesRequestedLabel = "変更要求";
+const ciFailureLabel = "CI 失敗";
+
 /** GitHubの明示値を表示し、nullを待機状態と混同しない。 */
 export function openPullRequestLabels(pr) {
-  const review = { APPROVED: "レビュー承認", CHANGES_REQUESTED: "変更要求", REVIEW_REQUIRED: "レビュー待ち" };
-  const ci = { SUCCESS: "CI 成功", FAILURE: "CI 失敗", ERROR: "CI 失敗", PENDING: "CI 実行中", EXPECTED: "CI 実行中" };
+  const review = { APPROVED: "レビュー承認", CHANGES_REQUESTED: changesRequestedLabel, REVIEW_REQUIRED: "レビュー待ち" };
+  const ci = { SUCCESS: "CI 成功", FAILURE: ciFailureLabel, ERROR: ciFailureLabel, PENDING: "CI 実行中", EXPECTED: "CI 実行中" };
   return [
     ...(pr.isDraft ? ["Draft"] : []),
     pr.reviewDecision === null ? "レビュー情報なし" : review[pr.reviewDecision],
     pr.ciState === null ? "CI なし" : ci[pr.ciState],
   ];
+}
+
+/** @param {import("./types").OpenPullRequest[]} pulls */
+export function openPullRequestsNeedingAttention(pulls) {
+  /** @type {Map<number, {number: number, url: string, reasons: string[]}>} */
+  const matches = new Map();
+  for (const pr of pulls) {
+    const reasons = [];
+    if (pr.ciState === "FAILURE" || pr.ciState === "ERROR") reasons.push(ciFailureLabel);
+    if (pr.reviewDecision === "CHANGES_REQUESTED") reasons.push(changesRequestedLabel);
+    if (reasons.length > 0 && !matches.has(pr.number)) {
+      matches.set(pr.number, { number: pr.number, url: pr.url, reasons });
+    }
+  }
+  return [...matches.values()];
 }

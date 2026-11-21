@@ -16,6 +16,11 @@
 .commit-compare > summary::marker { color: var(--accent); }
 .commit-compare > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .commit-compare-body { border-top: 1px solid var(--rule); }
+.commit-compare-lane { margin-top: 0; }
+.commit-compare-lane .commit-compare-body { border-top: 0; }
+.commit-compare-lane-controls { display: grid; justify-items: start; gap: 6px; padding: 12px 14px; }
+.commit-compare-lane-controls .commit-compare-run { grid-column: auto; }
+.commit-compare-lane-controls code { font-size: 11px; overflow-wrap: anywhere; }
 .commit-compare-intro { margin: 0; padding: 12px 14px; color: var(--muted); font: 11px/1.6 var(--sans); }
 
 .commit-compare-form {

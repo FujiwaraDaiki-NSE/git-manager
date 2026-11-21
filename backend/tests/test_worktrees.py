@@ -555,6 +555,36 @@ def test_discovery_submits_all_project_metadata_concurrently(
     main.STATE.clear()
 
 
+def test_failed_worktree_status_only_suggests_pruning_when_git_marks_it_prunable(
+    repo_with_worktree: tuple[Path, Path],
+) -> None:
+    _, worktree = repo_with_worktree
+    index = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "index").strip())
+    original_index = index.read_bytes()
+    index.write_bytes(b"invalid index")
+
+    for state in ("ok", "locked", "prunable"):
+        result = gitinfo.collect(str(worktree), context={
+            "branch": "feature",
+            "merged": True,
+            "merged_branch": "merged-unused",
+            "worktree_state": state,
+        })
+        assert result["error"] == "git status を実行できませんでした"
+        expected = {"command": "git worktree prune", "reason": "prunable な worktree があります"} if state == "prunable" else None
+        assert result["next_command"] == expected
+
+    index.write_bytes(original_index)
+    (worktree / "draft.txt").write_text("unfinished")
+    dirty = gitinfo.collect(str(worktree), worktree_state="ok", merged=True)
+    assert dirty["error"] is None
+    assert dirty["next_command"]["command"] == "git add -A"
+    (worktree / "draft.txt").unlink()
+    clean = gitinfo.collect(str(worktree), worktree_state="ok", merged=True)
+    assert clean["error"] is None
+    assert clean["next_command"]["command"] == f"git worktree remove {worktree}"
+
+
 def test_worktree_states_and_next_command_precedence() -> None:
     records = gitinfo.parse_worktree_list(
         """worktree /repo
