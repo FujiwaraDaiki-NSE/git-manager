@@ -188,6 +188,11 @@ function currentLaneAgent(lane: ProjectLane) {
   return lane.agent;
 }
 
+function laneNextPhaseOrAttention(lane: ProjectLane) {
+  const attention = currentLaneAgent(lane)?.attention;
+  return lane.next_phase || (attention ? agentStateLabel(attention) : "未取得");
+}
+
 
 function agentElapsed(occurredAt: string | null | undefined) {
   if (!occurredAt) return "経過時間 未取得";
@@ -434,7 +439,7 @@ function WorkLanes({
                 <td className="mono-cell" data-label="既定ブランチとの差">{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</td>
                 <td className="lane-message" data-label="最新メッセージ"><span title={lane.last_commit?.subject}>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "コミット未取得"}</span>{currentLaneAgent(lane)?.summary && <small>報告: {currentLaneAgent(lane)?.summary}</small>}</td>
                 <td className="unknown-cell" data-label="合流関係">{laneMergeSummary(lane, project)}</td>
-                <td className="unknown-cell" data-label="次の工程 / 注意">{lane.next_phase || currentLaneAgent(lane)?.attention || "未取得"}</td>
+                <td className="unknown-cell" data-label="次の工程 / 注意">{laneNextPhaseOrAttention(lane)}</td>
                 <td data-label="操作"><button className="table-action" type="button" disabled={!lane.path} title={!lane.path ? "このブランチには作業ディレクトリがありません" : undefined} onClick={() => onOpenGit(lane)}>Git詳細</button>{!lane.path && <small className="no-checkout">作業ディレクトリなし</small>}</td>
               </tr>
             ))}
@@ -661,7 +666,7 @@ function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectRes
         <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
       <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent報告なし</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><AgentDecisionDetails decision={task.decision} /><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
-      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} directComparison={null} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
+      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} laneComparison={null} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
       <WorktreeExplorer project={project} onOpenGit={onOpenGit} onSelectLane={onSelectLane} />
       <PrExplorer project={project} />
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
@@ -677,9 +682,9 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
   const nextCommand = lane.next_command === null ? null : worktreeCommand(lane.next_command.command, lane.path, project.main_path);
   const nextTarget = lane.next_command === null ? null : commandTarget(lane.next_command.command, lane.path, project.main_path);
   const destinations = lane.destinations;
-  const directComparison = destinations?.upstream_state === "configured"
+  const laneComparison = destinations?.upstream_state === "configured"
     && destinations.upstream !== null && destinations.upstream_head !== null && lane.head !== null
-    ? { base: destinations.upstream_head, target: lane.head, baseLabel: destinations.upstream } : null;
+    ? { base: destinations.upstream_head, target: lane.head, baseLabel: destinations.upstream, supportsMergeBase: laneUpstreamState(lane) === "diverged" } : null;
   const comparisonUnavailable = lane.branch === null || destinations?.upstream_state === "unset" ? "追跡先が設定されていません。"
     : destinations?.upstream_gone === true ? "追跡先の参照がローカルにありません。リモートを追跡している場合、未fetchやリモート側での削除が考えられます。"
     : lane.head === null ? "差分を表示できる作業先端がありません。"
@@ -688,7 +693,7 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
   const { incoming, outgoing } = laneRecordedMerges(project.branch_connections, lane);
   const relationText = (edges: typeof incoming) => !project.branch_connections ? "取り込み記録未取得" : edges.map((edge) => `${edgeDisplayLabel(edge, project.branch_connections?.refs ?? [])} (${shortHash(edge.commit_hash)})`).join(" / ") || "確定した取り込み記録なし";
   const localRef = lane.branch !== null ? `refs/heads/${lane.branch}` : lane.path !== null ? `detached:${lane.path}` : null;
-  const relationHref = updateProjectUrl(`/project?${searchParams.toString()}`, { tab: "flow", lane: null, event: null, branchRow: null, relationRef: localRef });
+  const relationHref = updateProjectUrl(`/project?${searchParams.toString()}`, { tab: "flow", flowSection: "relations", lane: null, event: null, branchRow: null, relationRef: localRef });
   return (
     <div className="selection-content">
       <div className="selection-kicker">作業レーン</div>
@@ -703,10 +708,10 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
         <div><dt>ブランチの作業状況</dt><dd>{agentStateLabel(agentTaskState(currentLaneAgent(lane)))}</dd></div>
         <div><dt>このローカルブランチからの取り込み記録</dt><dd>{relationText(outgoing)}</dd></div>
         <div><dt>このローカルブランチへの取り込み記録</dt><dd>{relationText(incoming)}</dd></div>
-        <div><dt>次の工程 / 注意</dt><dd>{lane.next_phase || (currentLaneAgent(lane)?.attention ? agentStateLabel(currentLaneAgent(lane)?.attention) : null) || "未取得"}</dd></div>
-        <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}{directComparison === null && <small>{comparisonUnavailable}</small>}</dd></div>
+        <div><dt>次の工程 / 注意</dt><dd>{laneNextPhaseOrAttention(lane)}</dd></div>
+        <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}{laneComparison === null && <small>{comparisonUnavailable}</small>}</dd></div>
       </dl>
-      {directComparison !== null && <CommitCompare key={JSON.stringify([project.main_path, lane.id])} path={project.main_path} directComparison={directComparison} />}
+      {laneComparison !== null && <CommitCompare key={JSON.stringify([project.main_path, lane.id])} path={project.main_path} laneComparison={laneComparison} />}
       <OperationFacts operations={lane.operations} />
       {lane.branch !== null && <DestinationFacts destinations={lane.destinations} />}
       <p>記録がない場合も、取り込まれていないとは限りません。<Link href={`${relationHref.split("#")[0]}#branch-relations-title`}>現在の包含関係・未解決の記録を確認</Link></p>

@@ -3,7 +3,7 @@
 import "./project-switcher.css";
 import { useRepoStream } from "./repo-stream";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { FAVORITES_STORAGE_KEY, parseFavoriteIds } from "./home-overview.mjs";
 import {
@@ -33,6 +33,7 @@ function focusResult(dialog: HTMLDialogElement | null, index: number) {
 export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPath: string | null; homeQuery: string | null }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const searchHintId = useId();
   const { repos, projectSummaries: projects, projectsLoading: loading, projectsError, refreshProjects, subscribeProjectsLiveUpdates } = useRepoStream();
   const error = !loading && projectsError !== null;
   const initialLoading = loading && projects.length === 0;
@@ -195,7 +196,10 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
     <button ref={trigger} className="project-switch-trigger" type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>プロジェクトを切り替え <kbd>Ctrl K</kbd></button>
     <dialog className="project-switch-dialog" ref={dialog} aria-labelledby="project-switch-title" onCancel={(event) => { event.preventDefault(); closeSwitcher(); }} onClick={(event) => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeSwitcher(); } }}>
       <div className="project-switch-heading"><div><span className="eyebrow">QUICK SWITCH</span><h2 id="project-switch-title">プロジェクトを切り替え</h2></div><button className="icon-close" type="button" aria-label="プロジェクトの切り替えを閉じる" onClick={closeSwitcher}>×</button></div>
-      <label className="project-switch-search"><span className="sr-only">プロジェクト・ブランチ・作業ディレクトリを検索</span><input ref={input} type="search" placeholder="プロジェクト名・ブランチ名・パス・リモート" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={handleSearchKeyDown} /></label>
+      <div className="project-switch-search">
+        <label><span className="sr-only">プロジェクト・ブランチ・作業ディレクトリを検索</span><input ref={input} type="search" placeholder="プロジェクト名・ブランチ名・パス・リモート" aria-describedby={searchHintId} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={handleSearchKeyDown} /></label>
+        <p className="project-switch-local-note" id={searchHintId}>作業ディレクトリの検索例 <code>git-manager main</code></p>
+      </div>
       <div className="project-switch-options" role="group" aria-label="プロジェクトの絞り込みと並び順">
         <button className="project-switch-filter" type="button" aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly((value) => !value)}>{favoritesOnly ? "★ お気に入りのみ" : "☆ お気に入りのみ"}</button>
         <button className="project-switch-filter" type="button" aria-pressed={recentOnly} onClick={() => setRecentOnly((value) => !value)}>最近見たもの <span aria-hidden="true">{recentPaths.length}</span></button>

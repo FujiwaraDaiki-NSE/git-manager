@@ -439,7 +439,7 @@ export type ProjectSummary = {
 export type ProjectResponse = {
   fetch_status?: FetchStatus | null;
   snapshot?: { observed_at: number; status: "ready" | "refreshing" | "failed"; error: string | null };
-  github: { open?: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; pulls: OpenPullRequest[] }; status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
+  github: { open?: { status: "available" | "unavailable" | "not_applicable"; reason: string | null; checked_at: number | null; pulls: OpenPullRequest[] }; status: "available" | "unavailable" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
   branch_rows: ProjectBranchRow[] | null;
   branch_commits: Record<string, ProjectBranchCommit> | null;
   branch_connections: ProjectBranchConnections | null;

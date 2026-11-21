@@ -47,6 +47,9 @@ test("worktree search keeps same-name branches in their own projects and links t
   ]);
   assert.deepEqual(search({ favoritesOnly: true }).map(({ path }) => path), ["/a-task"]);
   assert.deepEqual(search({ recentOnly: true }).map(({ path }) => path), ["/b"]);
+  assert.deepEqual(search({ query: "alpha   FEATURE/SHARED /a-task" }), [matches[0]]);
+  assert.deepEqual(search({ query: "/a-task\tfeature/shared Alpha" }), [matches[0]]);
+  assert.deepEqual(search({ query: "beta feature/shared /a-task" }), []);
   assert.deepEqual(search({ query: " " }), []);
   const [detached] = search({ query: "detached #1" });
   assert.equal(detached.branch, null);

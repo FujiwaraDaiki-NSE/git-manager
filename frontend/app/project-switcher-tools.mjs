@@ -78,6 +78,7 @@ export function filterProjectSwitcherProjects(projects, {
 export function findProjectSwitcherWorktrees(projects, repos, filters, homeQuery) {
   const query = filters.query.trim().toLocaleLowerCase();
   if (!query) return [];
+  const terms = query.split(/\s+/);
 
   /** @type {Map<string, { path: string, branch: string | null }[]>} */
   const matchesByProject = new Map();
@@ -85,7 +86,6 @@ export function findProjectSwitcherWorktrees(projects, repos, filters, homeQuery
     if (repo.pending || repo.worktree_state === "prunable") continue;
     const branch = repo.detached === true || typeof repo.branch !== "string" || !repo.branch ? null : repo.branch;
     if (branch === null && repo.detached !== true) continue;
-    if (!repo.path.toLocaleLowerCase().includes(query) && !branch?.toLocaleLowerCase().includes(query)) continue;
     const checkout = { path: repo.path, branch };
     const matches = matchesByProject.get(repo.common_dir);
     if (matches) matches.push(checkout);
@@ -96,11 +96,15 @@ export function findProjectSwitcherWorktrees(projects, repos, filters, homeQuery
     const matches = matchesByProject.get(project.id);
     if (project.main_path === null || matches === undefined) return [];
     const mainPath = project.main_path;
-    return matches.map(({ path, branch }) => {
+    const projectName = project.name.toLocaleLowerCase();
+    return matches.flatMap(({ path, branch }) => {
+      const checkoutPath = path.toLocaleLowerCase();
+      const branchName = branch?.toLocaleLowerCase();
+      if (!terms.every((term) => projectName.includes(term) || checkoutPath.includes(term) || branchName?.includes(term))) return [];
       const lane = branch === null ? `worktree:${path}` : `branch:${branch}`;
       const params = new URLSearchParams({ path: mainPath, tab: "flow", range: "7d", lane });
       if (homeQuery) params.set("home", homeQuery);
-      return { project, path, branch, href: `/project?${params}` };
+      return [{ project, path, branch, href: `/project?${params}` }];
     });
   });
 }

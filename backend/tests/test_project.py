@@ -785,13 +785,23 @@ def test_project_marks_a_prunable_linked_worktree_as_foldable_git_fact(tmp_path:
     # the project endpoint must preserve that fact for the UI fold decision.
     shutil.rmtree(linked)
 
-    result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
+    status_error = "git status を実行できませんでした"
+    result = project.build(str(repo), str(repo), {
+        str(repo): {"entries": [], "error": None},
+        str(linked): {"entries": [], "error": status_error},
+    })
 
     assert result is not None
     stale = next(lane for lane in result["lanes"] if lane["branch"] == "stale")
     assert stale["is_worktree"] is True
     assert stale["worktree_state"] == "prunable"
+    assert stale["error"] == status_error
+    assert stale["dirty"] is None
+    assert stale["conflict"] is None
     assert result["maintenance"]["prunable"] == 1
+    main = next(lane for lane in result["lanes"] if lane["branch"] == "main")
+    assert main["dirty"] is False
+    assert main["conflict"] is False
 
 
 def test_readme_html_intro_is_plain_prose(tmp_path: Path) -> None:

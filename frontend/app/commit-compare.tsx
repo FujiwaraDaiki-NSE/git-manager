@@ -45,7 +45,11 @@ type ComparisonResponse = {
   command: string;
 };
 
-type CommitCompareProps = { path: string; directComparison: { base: string; target: string; baseLabel: string } | null };
+type CommitCompareProps = { path: string; laneComparison: { base: string; target: string; baseLabel: string; supportsMergeBase: boolean } | null };
+const laneComparisonLabels: Record<ComparisonMode, string> = {
+  direct: "追跡先 → ローカル先端の差分",
+  "merge-base": "共通祖先 → ローカル先端の差分",
+};
 
 function apiQuery(path: string, request: ComparisonRequest) {
   return buildComparisonQuery(path, request.base, request.target, request.mode);
@@ -101,7 +105,7 @@ function ComparisonStats({ stats }: { stats: ComparisonStats }) {
   );
 }
 
-export default function CommitCompare({ path, directComparison }: CommitCompareProps) {
+export default function CommitCompare({ path, laneComparison }: CommitCompareProps) {
   const titleId = `commit-compare-title-${useId().replaceAll(":", "")}`;
   const [base, setBase] = useState("");
   const [target, setTarget] = useState("");
@@ -213,16 +217,17 @@ export default function CommitCompare({ path, directComparison }: CommitCompareP
     }
   };
 
-  const comparisonInput: ComparisonRequest = directComparison === null
+  const comparisonInput: ComparisonRequest | null = laneComparison === null
     ? { base: base.trim(), target: target.trim(), mode }
-    : { base: directComparison.base, target: directComparison.target, mode: "direct" };
+    : request === null ? null : { base: laneComparison.base, target: laneComparison.target, mode: request.mode };
   const resultIsCurrent = sameRequest(comparisonInput, loadedRequest) || sameRequest(comparisonInput, data);
   const body = (
       <div className="commit-compare-body">
-        {directComparison !== null ? (
+        {laneComparison !== null ? (
           <div className="commit-compare-lane-controls">
-            <button type="button" className="commit-compare-run" disabled={state === "loading"} onClick={() => setRequest(comparisonInput)}>追跡先 → ローカル先端の差分</button>
-            <code>{directComparison.baseLabel}</code>
+            <button type="button" className="commit-compare-run" disabled={state === "loading"} onClick={() => setRequest({ base: laneComparison.base, target: laneComparison.target, mode: "direct" })}>{laneComparisonLabels.direct}</button>
+            {laneComparison.supportsMergeBase && <button type="button" className="commit-compare-run" disabled={state === "loading"} onClick={() => setRequest({ base: laneComparison.base, target: laneComparison.target, mode: "merge-base" })}>{laneComparisonLabels["merge-base"]}</button>}
+            <code>{laneComparison.baseLabel}</code>
           </div>
         ) : <>
         <p className="commit-compare-intro">base と target を明示して、読み取り専用のコミット差分を確認します。ブランチ名の推測や自動fetchは行いません。</p>
@@ -286,9 +291,9 @@ export default function CommitCompare({ path, directComparison }: CommitCompareP
           <section className={`commit-compare-result${resultIsCurrent ? "" : " is-stale"}`} aria-labelledby={`${titleId}-result`}>
             <div className="commit-compare-result-head">
               <div>
-                <h3 id={`${titleId}-result`}>比較結果</h3>
+                <h3 id={`${titleId}-result`}>{laneComparison === null ? "比較結果" : laneComparisonLabels[data.mode]}</h3>
                 <p className="commit-compare-label"><span>{comparisonModeLabel(data.mode)}</span> <code>{data.comparison_label}</code></p>
-                {!resultIsCurrent && <p className="commit-compare-stale" role="status">{directComparison === null ? "入力値が変更されています。表示中の結果は前回の比較です。「この2地点を比較」で更新してください。" : "比較対象が更新されました。表示中の結果は前回の比較です。"}</p>}
+                {!resultIsCurrent && <p className="commit-compare-stale" role="status">{laneComparison === null ? "入力値が変更されています。表示中の結果は前回の比較です。「この2地点を比較」で更新してください。" : "表示中の結果は前回の比較です。"}</p>}
               </div>
               <div className="commit-compare-actions">
                 <button type="button" onClick={exportCsv}>ファイル一覧をCSV保存</button>
@@ -304,7 +309,7 @@ export default function CommitCompare({ path, directComparison }: CommitCompareP
                 <dt>差分の開始地点</dt><dd><code>{data.comparison_base}</code></dd>
               </dl>
               <div className="commit-compare-actions">
-                {directComparison === null && <>
+                {laneComparison === null && <>
                   <button type="button" onClick={() => applyPreset({ base: data.base, target: data.target, mode: data.mode })}>取得したハッシュを入力欄へ</button>
                   <button type="button" onClick={() => applyPreset({ base: data.target, target: data.comparison_base, mode: "direct" })}>この差分の逆方向を入力欄へ</button>
                 </>}
@@ -344,7 +349,7 @@ export default function CommitCompare({ path, directComparison }: CommitCompareP
         )}
       </div>
   );
-  if (directComparison !== null) return <div className="commit-compare commit-compare-lane">{body}</div>;
+  if (laneComparison !== null) return <div className="commit-compare commit-compare-lane">{body}</div>;
   return (
     <details className="commit-compare" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary id={titleId}>2地点を比較する</summary>

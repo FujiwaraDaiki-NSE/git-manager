@@ -2,11 +2,25 @@
 
 import "./git-state-facts.css";
 import CopyButton from "./copy-button";
-import type { FetchStatus, GitOperation, BranchDestinations } from "./types";
+import type { FetchStatus, GitOperation, BranchDestinations, ProjectSummary } from "./types";
 
 const categories = { authentication: "認証", connection: "接続", timeout: "タイムアウト", other: "その他" };
+export function fetchCategoryLabel(category: FetchStatus["category"]) {
+  return category === null ? "未取得" : categories[category];
+}
+
+export function FetchFailureBreakdown({ projects }: { projects: Pick<ProjectSummary, "fetch_status">[] }) {
+  const counts = new Map<FetchStatus["category"], number>();
+  for (const { fetch_status: status } of projects) {
+    if (status?.result !== "failure") continue;
+    counts.set(status.category, (counts.get(status.category) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  return <p className="toolbar-note" role="status">fetch失敗の内訳　{Array.from(counts, ([category, count]) => `${fetchCategoryLabel(category)} ${count}件`).join(" · ")}</p>;
+}
+
 export function FetchFacts({ fetchedAt, status }: { fetchedAt: number | null | undefined; status: FetchStatus | null | undefined }) {
-  return <div className="git-state-facts"><div>最後に成功したfetch: {fetchedAt == null ? "記録なし" : new Date(fetchedAt * 1000).toLocaleString("ja-JP")}</div><div>直近の試行: {status == null ? "記録なし" : `${status.result === "success" ? "成功" : "失敗"}（${new Date(status.attempted_at * 1000).toLocaleString("ja-JP")}）`}</div>{status?.result === "failure" && <div role="status">失敗理由: {status.category === null ? "未取得" : categories[status.category]} · {status.reason === null ? "stderr未取得" : status.reason === "" ? "stderrなし" : status.reason}</div>}</div>;
+  return <div className="git-state-facts"><div>最後に成功したfetch: {fetchedAt == null ? "記録なし" : new Date(fetchedAt * 1000).toLocaleString("ja-JP")}</div><div>直近の試行: {status == null ? "記録なし" : `${status.result === "success" ? "成功" : "失敗"}（${new Date(status.attempted_at * 1000).toLocaleString("ja-JP")}）`}</div>{status?.result === "failure" && <div role="status">失敗理由: {fetchCategoryLabel(status.category)} · {status.reason === null ? "stderr未取得" : status.reason === "" ? "stderrなし" : status.reason}</div>}</div>;
 }
 function Command({ command, reason }: { command: string; reason: string }) {
   return <div className="selection-command"><code>{command}</code><CopyButton value={command} label="コマンドをコピー" /><small>{reason}</small></div>;

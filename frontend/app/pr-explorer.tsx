@@ -69,31 +69,41 @@ function githubStatusMessage(status: string) {
 }
 
 function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["open"] }) {
-  const matches = open?.status === "available" ? openPullRequestsNeedingAttention(open.pulls) : null;
+  const result = open?.status === "available" ? {
+    total: new Set(open.pulls.map((pr) => pr.number)).size,
+    matches: openPullRequestsNeedingAttention(open.pulls),
+    checkedAt: open.checked_at === null ? null : new Date(open.checked_at * 1000).toISOString(),
+  } : null;
   return (
     <section className="pr-explorer" aria-labelledby="open-pr-attention-title">
       <div className="pr-explorer-heading">
         <h4 id="open-pr-attention-title">対応が必要なオープンPR</h4>
       </div>
-      {matches === null ? (
+      {result === null ? (
         <div className={`pr-explorer-coverage pr-explorer-coverage-${open === undefined ? "unknown" : open.status}`} role="status">
           <strong>{open?.status === "not_applicable" ? "オープンPR情報は対象外です" : open?.status === "unavailable" ? "オープンPRを取得できませんでした" : "オープンPR情報は未取得です"}</strong>
           {open?.reason && <small>{open.reason}</small>}
         </div>
-      ) : matches.length === 0 ? (
-        <p className="pr-explorer-inline-note" role="status">対応が必要なオープンPRはありません。</p>
       ) : (
-        <ul className="pr-explorer-open-list">
-          {matches.map(({ number, url, reasons }) => {
-            const href = validHttpUrl(url);
-            return (
-              <li key={number}>
-                {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(number)}</strong>}
-                <span>{reasons.join(" · ")}</span>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <p className="pr-explorer-inline-note" role="status">
+            オープンPR {result.total}件中、CI失敗・変更要求 {result.matches.length}件
+            {" · 照会時刻 "}{result.checkedAt === null ? "未取得" : <time dateTime={result.checkedAt}>{exactDate(result.checkedAt)}</time>}
+          </p>
+          {result.matches.length > 0 && (
+            <ul className="pr-explorer-open-list">
+              {result.matches.map(({ number, url, reasons }) => {
+                const href = validHttpUrl(url);
+                return (
+                  <li key={number}>
+                    {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(number)}</strong>}
+                    <span>{reasons.join(" · ")}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
     </section>
   );

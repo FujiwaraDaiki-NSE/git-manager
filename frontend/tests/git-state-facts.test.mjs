@@ -13,7 +13,7 @@ const module = { exports: {} };
 const baseRequire = createRequire(import.meta.url);
 const CopyButton = ({ value, label }) => React.createElement("button", { type: "button", "aria-label": label, "data-value": value }, "コピー");
 runInNewContext(compiled.outputText, { exports: module.exports, require: (id) => id === "./copy-button" ? { __esModule: true, default: CopyButton } : baseRequire(id) });
-const { FetchFacts, OperationFacts, DestinationFacts } = module.exports;
+const { FetchFacts, FetchFailureBreakdown, OperationFacts, DestinationFacts } = module.exports;
 const render = (component, props) => renderToStaticMarkup(React.createElement(component, props));
 
 test("fetch failure retains success time and displays category and stderr", () => {
@@ -22,6 +22,14 @@ test("fetch failure retains success time and displays category and stderr", () =
   assert.match(html, /直近の試行: 失敗/);
   assert.match(html, /認証 · Permission denied/);
   assert.match(render(FetchFacts, { fetchedAt: null, status: null }), /記録なし/);
+});
+
+test("fetch failure breakdown counts the supplied projects and keeps missing categories separate", () => {
+  const project = (category, result = "failure") => ({ fetch_status: { result, category } });
+  const projects = [project("authentication"), project("timeout"), project("timeout"), project("other"), project(null), project(null, "success")];
+  assert.match(render(FetchFailureBreakdown, { projects }), /認証 1件 · タイムアウト 2件 · その他 1件 · 未取得 1件/);
+  assert.match(render(FetchFailureBreakdown, { projects: projects.slice(1, 3) }), /内訳　タイムアウト 2件<\/p>/);
+  assert.equal(render(FetchFailureBreakdown, { projects: [project(null, "success")] }), "");
 });
 
 test("operation progress and copyable commands render separately from unknown and absent operations", () => {

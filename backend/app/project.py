@@ -287,7 +287,7 @@ def _repo_status(row: Mapping[str, Any] | None) -> dict[str, Any]:
             "next_command": None,
             "error": "未取得",
         }
-    entries = row.get("entries")
+    entries = row.get("entries") if row.get("error") is None else None
     dirty = len(entries) > 0 if isinstance(entries, list) else None
     conflict_codes = {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
     conflict = (

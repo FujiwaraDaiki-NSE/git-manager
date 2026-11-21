@@ -1402,11 +1402,21 @@ body {
   padding: 10px 0;
 }
 .project-card-agent-counts span,
+.project-card-agent-counts button,
 .project-card-secondary {
   color: var(--control-muted);
   font: 10px var(--control-mono);
 }
 .project-card-agent-counts strong { color: var(--control-ink); font-size: 12px; }
+.project-card-agent-counts button {
+  background: var(--control-panel-soft);
+  border: 1px solid var(--control-border);
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 3px 6px;
+}
+.project-card-agent-counts button:hover,
+.project-card-agent-counts button[aria-expanded="true"] { border-color: var(--control-blue); }
 .project-card-agent-list { display: grid; gap: 6px; min-width: 0; }
 .agent-task-row {
   align-items: center;
@@ -1422,6 +1432,9 @@ body {
   white-space: nowrap;
 }
 .agent-task-row > span:last-child { color: var(--control-muted); font: 10px var(--control-mono); }
+.project-card-agent-list-expanded .agent-task-entry { border-bottom: 1px solid var(--control-border); padding-bottom: 6px; }
+.project-card-agent-list-expanded .agent-task-row > strong,
+.project-card-agent-list-expanded .agent-task-row > span:last-child { white-space: normal; overflow-wrap: anywhere; }
 .agent-task-state { font-size: 9px; padding: 3px 6px; }
 .agent-task-unknown { grid-template-columns: auto auto minmax(0, 1fr); }
 .agent-remainder { color: var(--control-blue); font: 10px var(--control-mono); justify-self: end; }

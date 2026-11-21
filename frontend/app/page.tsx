@@ -8,14 +8,15 @@ import { homeDocumentTitle } from "./agent-attention.mjs";
 import Link from "next/link";
 import { ACKNOWLEDGEMENTS_STORAGE_KEY, parseAcknowledgements } from "./agent-acknowledgements.mjs";
 import type { Acknowledgements } from "./agent-acknowledgements.mjs";
-import { FetchFacts } from "./git-state-facts";
+import { FetchFacts, FetchFailureBreakdown, fetchCategoryLabel } from "./git-state-facts";
 import GitGuide from "./git-guide";
 import WorkspaceExport from "./workspace-export";
 import ShortcutHelp from "./shortcut-help";
 import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { AGENT_DECISION_STATUSES } from "./agent-timeline-tools.mjs";
 import {
   AGENT_SUMMARY_LABELS,
   FAVORITES_STORAGE_KEY,
@@ -139,10 +140,17 @@ function ProjectCard({
     return `/project?${params}`;
   };
   const state = project.agent_state;
-  const tasks = topAgentTasks(project.agent_tasks, 3);
+  const [selectedStatus, setSelectedStatus] = useState<AgentSummaryKey | null>(null);
+  const agentListId = useId();
+  const selectedCount = selectedStatus === null ? null : agentCount(project, selectedStatus);
+  const expandedStatus = selectedCount !== null && selectedCount > 0 ? selectedStatus : null;
+  const topTasks = topAgentTasks(project.agent_tasks, 3);
+  const tasks = expandedStatus === null
+    ? topTasks
+    : project.agent_tasks?.filter((task) => agentTaskState(task) === expandedStatus);
   const latestAgent = project.latest_agent_event;
   const latestGit = project.latest_event;
-  const maxRemainder = Math.max(0, (project.agent_tasks?.length ?? 0) - tasks.length);
+  const maxRemainder = Math.max(0, (project.agent_tasks?.length ?? 0) - topTasks.length);
   const hasAttention = project.git.conflict > 0 || project.git.dirty > 0 || project.git.behind > 0 || project.git.ahead > 0 || state === "blocked";
   const unknownKeys = unknownAgentSummaryKeys(project);
   const unknownLabels = unknownKeys.map((key) => AGENT_SUMMARY_LABELS[key as keyof typeof AGENT_SUMMARY_LABELS] || key).join("・");
@@ -186,13 +194,31 @@ function ProjectCard({
       {hasAgentCounts && <div className="project-card-agent-counts" aria-label="ブランチの作業状況件数">
         {summaryCards.map(({ key, label }) => {
           const count = agentCount(project, key);
-          return count === null ? null : <span key={key}><strong>{formatAgentCount(count)}</strong> {label}</span>;
+          if (count === null) return null;
+          if (count > 0 && AGENT_DECISION_STATUSES.includes(key)) {
+            const isOpen = expandedStatus === key;
+            return <button key={key} type="button" aria-controls={agentListId} aria-expanded={isOpen} onClick={() => setSelectedStatus(isOpen ? null : key)}>
+              <strong>{formatAgentCount(count)}</strong> {label} <span aria-hidden="true">{isOpen ? "▴" : "▾"}</span>
+            </button>;
+          }
+          return <span key={key}><strong>{formatAgentCount(count)}</strong> {label}</span>;
         })}
         {completedCount !== null && <span><strong>{formatAgentCount(completedCount)}</strong> 完了</span>}
       </div>}
-      {tasks.length > 0 && <div className="project-card-agent-list" aria-label="上位ブランチの作業状況">
-        {tasks.length ? tasks.map((task) => { const taskState = agentTaskState(task); const branchHref = homeBranchHref(target, task.branch, homeQuery); return <div className="agent-task-row" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><span title={taskState === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span><strong>{branchHref ? <Link href={branchHref} prefetch={false}>{task.branch}</Link> : task.branch || "ブランチ未取得"}</strong><span>{task.summary || "報告内容なし"}</span></div>; }) : <div className="agent-task-row agent-task-unknown"><span className="agent-dot" aria-hidden="true" /><strong>agent報告なし</strong><span>明示的な報告はありません</span></div>}
-        {maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
+      {(expandedStatus !== null || topTasks.length > 0) && <div id={agentListId} className={`project-card-agent-list${expandedStatus !== null ? " project-card-agent-list-expanded" : ""}`} aria-label={expandedStatus === null ? "上位ブランチの作業状況" : `${AGENT_SUMMARY_LABELS[expandedStatus]}のブランチ`}>
+        {tasks?.map((task) => {
+          const taskState = agentTaskState(task);
+          const branchHref = homeBranchHref(target, task.branch, homeQuery);
+          return <div className="agent-task-entry" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}>
+            <div className="agent-task-row">
+              <span title={taskState === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className={`agent-task-state ${stateClass(taskState)}`}>{agentStateLabel(taskState)}</span>
+              <strong>{branchHref ? <Link href={branchHref} prefetch={false}>{task.branch}</Link> : task.branch || "ブランチ未取得"}</strong>
+              <span>{task.summary || "報告内容なし"}</span>
+            </div>
+            {expandedStatus !== null && <AgentDecisionDetails decision={task.decision} />}
+          </div>;
+        })}
+        {expandedStatus === null && maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
       </div>}
       <div className="project-card-event"><span className="eyebrow">{latestAgent ? "最新のブランチ報告" : "最新コミット"}</span>{latestAgent ? <><strong title={latestAgent.summary || undefined}>{latestAgent.summary || "報告内容なし"}</strong><span>{latestAgent.branch || "ブランチ未取得"} · {agentStateLabel(agentTaskState(latestAgent))}</span><time dateTime={latestAgent.occurred_at ?? undefined} title={exactDate(latestAgent.occurred_at)}>{relativeTime(latestAgent.occurred_at)} · {exactDate(latestAgent.occurred_at)}</time></> : latestGit ? <><strong title={latestGit.subject}>{latestGit.subject}</strong><time dateTime={latestGit.date} title={exactDate(latestGit.date)}>{relativeTime(latestGit.date)} · {exactDate(latestGit.date)}</time></> : <strong className="unknown">未取得</strong>}</div>
       <div className="project-card-facts" aria-label="Git状態">
@@ -216,7 +242,7 @@ function ProjectCard({
         const label = branch === "(detached)" ? "HEAD切り離し（ブランチなし）" : branch;
         return <div className="project-card-footer"><span>次に確認 {nextHref ? <Link href={nextHref} prefetch={false}><strong>{label}</strong><span aria-hidden="true"> →</span></Link> : <strong>{label}</strong>}{task && <span title={task.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined}> · {task.status === "waiting_for_user" ? "agentが入力待ち" : task.status === "blocked" ? "agentが問題を報告" : task.status === "review_required" ? "agentがレビュー待ち" : task.status === "merge_ready" ? "agentがマージ準備完了を報告" : null}</span>}</span><AgentDecisionDetails decision={task?.decision} compact /></div>;
       })()}
-      {project.fetch_status?.result === "failure" && <span className="fact fact-danger" role="status">⚠ fetch失敗</span>}
+      {project.fetch_status?.result === "failure" && <span className="fact fact-danger" role="status">⚠ fetch失敗（{fetchCategoryLabel(project.fetch_status.category)}）</span>}
       <details className="project-card-extra">
         <summary>管理情報 <span>{project.worktree_count} worktree</span></summary>
         <FetchFacts fetchedAt={project.fetched_at} status={project.fetch_status} />
@@ -505,6 +531,7 @@ export default function Page() {
       {invalidUrlParams.length > 0 && <div className="home-state home-state-error" role="alert"><span>URLの絞り込み条件を認識できませんでした: {invalidUrlParams.join("、")}</span><button type="button" onClick={resetView}>条件をリセット</button></div>}
       {invalidUrlParams.length === 0 && deferredOrder && view.sort === "priority" && <div className="order-update" role="status"><span>優先度の並び順に更新があります</span><button type="button" onClick={applyOrder}>並び順を更新</button></div>}
       {invalidUrlParams.length === 0 && <div className="home-results" role="status" aria-live="polite"><span>{loading && !projects.length ? "プロジェクトを読み込み中…" : `${visible.length} / ${projects.length} プロジェクトを表示中`}</span>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
+      {invalidUrlParams.length === 0 && view.gitFilter === "fetch-failure" && <FetchFailureBreakdown projects={visible} />}
       {invalidUrlParams.length === 0 && <WorkspaceExport projects={visible} view={view} disabled={loading || error !== null} />}
       {projectsCachedAt !== null && <div className="home-state" role="status"><strong>前回取得したデータを表示中（{Math.max(0, Math.floor((Date.now() - projectsCachedAt) / 60000))}分前）{loading ? "・最新を取得中…" : ""}</strong><span>一覧・件数・タブタイトルは前回取得時点の情報です。ファビコンの入力待ち件数は最新取得まで表示しません。</span></div>}
       {invalidUrlParams.length === 0 && loading && projects.length === 0 && <SkeletonGrid />}

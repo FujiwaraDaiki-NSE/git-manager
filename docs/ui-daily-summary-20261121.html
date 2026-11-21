@@ -1,0 +1,56 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-21</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>再起動直後のfetch殺到を解消、ブランチ横断の移動・差分・判断待ちの見通しを強化 — 2026-11-21</h1>
+<p>最優先課題「再起動直後のfetch殺到」は、原因を2つ特定して直し、同条件の実測で<b>解消を確認</b>しました。1つはイベントループ上で全worktree行ぶんのスナップショット鮮度チェック（refs走査）が直列に走り、<code>/api/health</code> すら最大12秒応答しなかったこと。もう1つは、fetchが何も取ってこなくても成功のたびにプロジェクトの全worktreeを再計算していたことです。</p>
+<p>開始時30点 + 検証済み加点62点 = <b>92点</b>（100点未達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+
+<h2>fetch殺到の計測（backend再起動直後、fetch対象84〜85件、同じ計測スクリプト）</h2>
+<table><thead><tr><th>指標</th><th>改善前（2回）</th><th>修正1のみ</th><th>修正1+2（2回、2回目は最終コード）</th></tr></thead><tbody>
+<tr><td><code>/api/health</code> 最大応答（イベントループの詰まり）</td><td>12.0s</td><td>1.5s</td><td>1.6s / 2.1s</td></tr>
+<tr><td>起動後40秒の <code>/api/health</code> 0.5秒超の合計</td><td>16.9s</td><td>2.2s</td><td>2.8s / 3.2s</td></tr>
+<tr><td>小さいリポジトリ（device-transcribe）初回 <code>/api/project</code></td><td>1.9s / 13.8s</td><td>0.55s</td><td>0.53s / 0.65s</td></tr>
+<tr><td>起動時の全件状態更新の完了</td><td>27.6s / 28.0s</td><td>16.5s</td><td>16.9s / 16.2s</td></tr>
+<tr><td>fetch一巡の完了（再起動からの秒）</td><td>205s / 158s</td><td>230s</td><td>109s / 97.5s</td></tr>
+<tr><td>同時実行gitプロセス 最大</td><td>9 / 7</td><td>10</td><td>7 / 8</td></tr>
+<tr><td>CPU 平均 / 最大</td><td>250% / 418%、86% / 272%</td><td>192% / 443%</td><td>69% / 252%、70% / 253%</td></tr>
+</tbody></table>
+<ul>
+<li>fetch中（起動20秒以降）の <code>/api/project</code> は、PR取得が絡まないリポジトリで平均0.02〜0.34秒（アイドル時 0.01〜0.07秒〜）。design_db は平均0.7〜1.1秒（アイドル0.5秒、自身のスナップショット再構築時に1回4.2秒）。</li>
+<li>残っている遅延はfetch殺到とは別件：起動後約16秒の全件状態更新中の初回オープン（design_db 2.9〜5.2秒、GitHub PRの初回取得を含む）、PRが大量のリポジトリ（thinkplatform / PaddleOCR）の初回PR取得15秒タイムアウト。</li>
+<li>git-manager の初回 <code>/api/project</code> 約16秒は今回も再現せず（1.1〜2.7秒）。</li>
+</ul>
+
+<table><thead><tr><th>No.</th><th>改善内容</th><th>分類・点数</th><th>検証根拠</th></tr></thead><tbody>
+<tr><td>1</td><td>スナップショット鮮度チェックをイベントループから <code>refresh_pool</code> へ移し、同一プロジェクトの待機中チェックを1件にまとめる</td><td>高速化 +5</td><td>上表「修正1」。コンテナ内で640行ぶんの指紋計算が直列14.9秒かかることを事前に実測</td></tr>
+<tr><td>2</td><td>fetch前後でrefsの指紋が変わらなければ、fetch後のプロジェクト全worktree再計算を省く</td><td>高速化 +5</td><td>上表「修正1+2」。fetch一巡 158〜230s → 97.5〜109s、CPU平均 → 約70%</td></tr>
+<tr><td>3</td><td>Ctrl K の切り替え検索で、チェックアウト中のブランチ名・作業ディレクトリをプロジェクト横断で検索し、作業レーンを直接開く</td><td>機能追加 +5</td><td>一時リポジトリの7 worktree（切り離しHEAD含む）が候補に出て、↓↓Enterで <code>lane=branch:local-fix</code> が開いた</td></tr>
+<tr><td>4</td><td>作業詳細「追跡先 → ローカル先端の差分」（観測した追跡先SHAで比較）</td><td>機能追加 +5</td><td><code>local-fix</code>（追跡先 <code>origin/review-fix</code>、ahead 1）で base c54ebe6 → target 3d2c90b、fix.txt +1</td></tr>
+<tr><td>5</td><td>プロジェクト情報「対応が必要なオープンPR」（CI失敗・変更要求）</td><td>機能追加 +5</td><td>応答差し替えで4件中3件を理由つき表示、取得失敗・0件・対象外を区別</td></tr>
+<tr><td>6</td><td>worktreeのGit詳細から、そのworktreeの競合 BASE/OURS/THEIRS を開く</td><td>機能追加 +5</td><td>本体clean・linked worktreeのみ競合の一時リポジトリで THEIRS=theirs（7 bytes）を表示</td></tr>
+<tr><td>7</td><td>agentタイムラインの判断依頼から「このブランチの履歴」</td><td>機能追加 +5</td><td>実データ design_db <code>fix/agent-log-mcp-input-rejection</code> で 7 / 100件に絞り込み</td></tr>
+<tr><td>8</td><td>ホームのGit状態フィルタ「fetch失敗」</td><td>機能追加 +5</td><td>実データで 9 / 112 プロジェクト、URL <code>?git=fetch-failure</code> から復元</td></tr>
+<tr><td>9</td><td>ホームカードの「入力待ち」「レビュー待ち」等の件数を押して該当ブランチを全件展開</td><td>機能追加 +5</td><td>design_db で 入力待ち7行・レビュー待ち6行（従来は上位3件のみ）</td></tr>
+<tr><td>10</td><td>分岐したブランチで「共通祖先 → ローカル先端の差分」</td><td>機能追加 +5</td><td>design_db <code>fix/agent-log-calendar-date</code>（ahead 1 / behind 70）で 直接比較117ファイル → 5ファイル</td></tr>
+<tr><td>11</td><td>Ctrl K で「プロジェクト名＋ブランチ名」を空白区切りで組み合わせ検索、入力例を表示</td><td>UIリッチ化 +2</td><td><code>main git-manager</code> で2件の作業ディレクトリに絞り込み</td></tr>
+<tr><td>12</td><td>fetch失敗フィルタ選択時に原因別の内訳、カードのバッジに分類名</td><td>UIリッチ化 +2</td><td>「タイムアウト 5件 · 認証 3件 · その他 1件」、バッジ9件と一致</td></tr>
+<tr><td>13</td><td>要対応PRの母数と照会時刻を表示</td><td>UIリッチ化 +2</td><td>design_db「オープンPR 2件中、CI失敗・変更要求 0件 · 照会時刻 …」、git-manager は0件中</td></tr>
+<tr><td>14</td><td>再取得中に届いたagent報告が、遅れて到着した古い応答で巻き戻る不具合</td><td>バグ修正 +1</td><td>古い「実装中」応答を保留 → 「入力待ち」報告 → 保留解除でも入力待ちと質問が残ることを確認（一時報告は後で上書き）</td></tr>
+<tr><td>15</td><td><code>git status</code> 取得失敗時に <code>worktree remove</code> を案内していた不具合</td><td>バグ修正 +1</td><td>indexを一時的に壊したマージ済みworktreeで案内が消え、復元後に戻る</td></tr>
+<tr><td>16</td><td>同じworktree内の名前変更＋未追跡が「worktree間の重なり」に出る不具合</td><td>バグ修正 +1</td><td>1か所だけでは「重なりはありません」、別worktreeで編集後に2か所を表示</td></tr>
+<tr><td>17</td><td>status取得失敗のworktreeが作業ツリー一覧で「変更なし」になる不具合</td><td>バグ修正 +1</td><td>実データの参照先なしworktreeが「未取得」表示</td></tr>
+<tr><td>18</td><td>作業詳細の「現在の包含関係…」リンクが目的のタブを開かない不具合</td><td>バグ修正 +1</td><td><code>flowSection=relations&amp;relationRef=…</code> で「全関係と関連履歴」が選択される</td></tr>
+<tr><td>19</td><td>作業一覧の「次の工程 / 注意」に内部値 <code>waiting_for_user</code> が出ていた</td><td>文言修正 +1</td><td>design_db の作業一覧に内部値が残っていないことを確認</td></tr>
+</tbody></table>
+
+<h2>加点しなかったもの</h2>
+<ul>
+<li>ホーム集計でagent履歴を1回だけ読む変更：本番 <code>/api/projects</code> 0.51s → 0.49s（約3%）。取り消し。</li>
+<li><code>/api/project</code> のJSON化をワーカースレッドへ移す変更：langchain 1.29s → 1.30s、<code>/api/health</code> の待ち0.5sも変わらず（<code>jsonable_encoder</code> 単体は0.3sだがGILで相殺）。取り消し。</li>
+<li>レビュー指摘への対応（切り離しHEADのリンク先、追跡先の先端SHAでの比較、<code>upstream:trackshort</code> の履歴走査回避、「削除済み」と断定しない文言）は当日中の自己修正。</li>
+</ul>
+
+<h2>テスト・稼働</h2>
+<ul>
+<li>backend <code>uv run --with pytest python -m pytest</code>、frontend <code>npm test</code> / <code>npx tsc --noEmit</code> 成功。GUIは実データと一時リポジトリ（確認後に削除）で確認。</li>
+<li><code>gitdash-compose up -d --build</code> で反映。アクセス先 <a href="http://localhost:4412">http://localhost:4412</a>。</li>
+</ul>
+</html>
