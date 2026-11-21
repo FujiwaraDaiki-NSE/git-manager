@@ -1,7 +1,7 @@
 from collections import Counter
 import subprocess
 
-from app import project
+from app import project, project_facts
 from test_project import init_repo, commit, git
 from test_project_snapshots import without_times
 
@@ -184,3 +184,25 @@ def test_history_subject_control_character_does_not_split_commit():
     from app import branch_history
     raw = "hash\x1fshort\x1fadd \ffooter\x1fauthor\x1fdate\x1fparent\n"
     assert branch_history._parse(raw)[0]["subject"] == "add \ffooter"
+
+
+def test_first_history_page_reuses_batch_git_log(tmp_path, monkeypatch):
+    from app import branch_history, project_git_batch
+
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    head = git(repo, "rev-parse", "HEAD").strip()
+    run = subprocess.run
+    history_calls = []
+
+    def record(args, **kwargs):
+        if args[3:5] == ["log", "--date-order"]:
+            history_calls.append(args)
+        return run(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", record)
+    with project_facts.using({}):
+        batch = project_git_batch._read(str(repo))
+        page = branch_history.read_page(str(repo), [head], 0)
+    assert page == {"commits": batch["commits"], "next_offset": None}
+    assert len(history_calls) == 1

@@ -55,10 +55,11 @@ def read_tips(repo: str, heads: list[str]) -> list[dict[str, Any]] | None:
 def read_page(repo: str, heads: list[str], offset: int) -> dict[str, Any] | None:
     if not heads:
         return {"commits": [], "next_offset": None}
-    raw = gitinfo._run(repo, [
-        "log", "--date-order", f"--skip={offset}", f"--max-count={PAGE_SIZE + 1}",
-        f"--format={FORMAT}", *heads, "--",
-    ])
+    args = ["log", "--date-order"]
+    if offset != 0:
+        args.append(f"--skip={offset}")
+    args.extend([f"--max-count={PAGE_SIZE + 1}", f"--format={FORMAT}", *heads, "--"])
+    raw = gitinfo._run(repo, args)
     if raw is None:
         return None
     commits = _parse(raw)

@@ -159,7 +159,7 @@ class Batch:
 def scoped(function):
     @wraps(function)
     def build(repo, *args, **kwargs):
-        data = project_facts.observe("project.batch", [repo], lambda: _read(repo))
+        data = project_facts.observe("project.batch", [repo], lambda: _read(repo), copy_value=False)
         batch = Batch(repo, data)
         batch.prepare_pr_ancestry(kwargs.get("github_data"))
         token = _active.set(batch)

@@ -7,14 +7,17 @@ import re
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from app import gitinfo
+from app import config, gitinfo, paths, scanner
+from app.bus import bus
 
 # Response cache only: discard on restart, never retain old success after failure.
 _cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _lock = threading.Lock()
-_repository_locks: dict[str, threading.Lock] = {}
+_pending: dict[str, set[str]] = {}
+_executor = ThreadPoolExecutor(max_workers=config.GITHUB_PR_WORKERS, thread_name_prefix="github-pr-refresh")
 
 
 def unavailable(reason: str) -> dict[str, Any]:
@@ -37,41 +40,50 @@ def load_open(repo: str) -> dict[str, Any]:
     return _load(repo, "open", _read_open)
 
 
+def shutdown() -> None:
+    _executor.shutdown(wait=False, cancel_futures=True)
+
+
 def _load(repo: str, kind: str, reader) -> dict[str, Any]:
     name = repository(repo)
     if name is None:
         return {**unavailable("GitHubのoriginがないためPR情報は対象外です"), "status": "not_applicable"}
     key = f"{kind}:{name}"
     with _lock:
-        repository_lock = _repository_locks.setdefault(key, threading.Lock())
         cached = _cache.get(key)
-        if cached is not None:
-            if time.monotonic() >= cached[0] and repository_lock.acquire(blocking=False):
-                try:
-                    threading.Thread(target=_refresh, args=(key, name, reader, repository_lock), daemon=True).start()
-                except Exception:
-                    repository_lock.release()
-                    raise
+        if cached is not None and time.monotonic() < cached[0]:
             return cached[1]
-    with repository_lock:
-        with _lock:
-            cached = _cache.get(key)
-            if cached is not None:
-                return cached[1]
-        result = reader(name)
-        with _lock:
-            _cache[key] = (time.monotonic() + 60, result)
-        return result
+        if key in _pending:
+            _pending[key].add(repo)
+        else:
+            _pending[key] = {repo}
+            try:
+                _executor.submit(_refresh, key, name, reader)
+            except RuntimeError:
+                del _pending[key]
+                raise
+        if cached is not None:
+            return cached[1]
+        return {**unavailable("PR情報は未取得です。GitHubに照会しています"), "repository": name}
 
 
-def _refresh(key: str, name: str, reader, repository_lock: threading.Lock) -> None:
+def _refresh(key: str, name: str, reader) -> None:
     try:
         result = reader(name)
+    except Exception:
         with _lock:
-            # Replace stale success even when the refresh reports a failure.
-            _cache[key] = (time.monotonic() + 60, result)
-    finally:
-        repository_lock.release()
+            del _pending[key]
+        raise
+    with _lock:
+        # Replace stale success even when the refresh reports a failure.
+        _cache[key] = (time.monotonic() + 60, result)
+        repos = _pending.pop(key)
+    project_ids = {
+        paths.to_host(layout.common_root)
+        for repo in repos if (layout := scanner.repo_layout(repo)) is not None
+    }
+    for project_id in project_ids:
+        bus.publish_threadsafe("project", {"id": project_id})
 
 
 def _read(name: str) -> dict[str, Any]:

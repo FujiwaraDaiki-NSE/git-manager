@@ -62,43 +62,66 @@ def test_failures_never_report_no_prs_as_success(monkeypatch, failure):
     ("merged", github.load, "_read"), ("open", github.load_open, "_read_open"),
 ])
 @pytest.mark.parametrize("refresh_status", ["available", "unavailable"])
-def test_expired_cache_refreshes_once_without_waiting(monkeypatch, kind, loader, reader_name, refresh_status):
+def test_empty_and_expired_cache_refresh_without_waiting(monkeypatch, kind, loader, reader_name, refresh_status):
     monkeypatch.setattr(github, "_cache", {})
-    monkeypatch.setattr(github, "_repository_locks", {})
+    monkeypatch.setattr(github, "_pending", {})
     monkeypatch.setattr(github, "repository", lambda _: "o/r")
+    monkeypatch.setattr(github.scanner, "repo_layout", lambda repo: SimpleNamespace(common_root=repo))
     clock = [0]
     monkeypatch.setattr(github.time, "monotonic", lambda: clock[0])
-    initial = {**github.unavailable(""), "status": "available", "checked_at": 100}
+    initial = {**github.unavailable(""), "status": "available", "reason": None, "checked_at": 100}
     refreshed = {**github.unavailable("offline"), "status": refresh_status, "checked_at": 200}
     started, release = threading.Event(), threading.Event()
+    notified = threading.Event()
+    notifications = set()
     calls = []
 
     def read(name):
         calls.append(name)
-        if len(calls) == 1:
-            return initial
         started.set()
         assert release.wait(timeout=5)
-        return refreshed
+        return initial if len(calls) == 1 else refreshed
+
+    def publish(event, data):
+        notifications.add((event, data["id"]))
+        if len(notifications) == 2:
+            notified.set()
 
     monkeypatch.setattr(github, reader_name, read)
-    assert loader("repo") is initial
-    assert loader("repo") is initial
+    monkeypatch.setattr(github.bus, "publish_threadsafe", publish)
+    try:
+        pending = loader("/repo")
+        assert pending["repository"] == "o/r"
+        assert pending["status"] == "unavailable"
+        assert pending["checked_at"] is None
+        assert pending["pulls"] == []
+        assert started.wait(timeout=2)
+        assert loader("/clone") == pending
+        assert loader("/repo") == pending
+        assert calls == ["o/r"]
+    finally:
+        release.set()
+        assert notified.wait(timeout=5)
+    assert notifications == {("project", "/clone"), ("project", "/repo")}
+    assert loader("/repo") is initial
     assert calls == ["o/r"]
+
+    started.clear()
+    release.clear()
+    notified.clear()
+    notifications.clear()
     clock[0] = 61
     try:
-        assert loader("repo") is initial
+        assert loader("/repo") is initial
         assert started.wait(timeout=2)
         # Return the original checked_at while the refresh remains blocked.
-        for _ in range(10):
-            assert loader("repo") is initial
+        assert loader("/repo") is initial
+        assert loader("/clone") is initial
         assert calls == ["o/r", "o/r"]
     finally:
         release.set()
-        lock = github._repository_locks[f"{kind}:o/r"]
-        assert lock.acquire(timeout=5)
-        lock.release()
-    assert loader("repo") is refreshed
+        assert notified.wait(timeout=5)
+    assert loader("/repo") is refreshed
     assert github._cache[f"{kind}:o/r"] == (121, refreshed)
     assert calls == ["o/r", "o/r"]
 
