@@ -70,9 +70,10 @@ function githubStatusMessage(status: string) {
 }
 
 function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["open"] }) {
+  const pulls = open?.status === "available" ? Array.from(new Map(open.pulls.map((pr) => [pr.number, pr])).values()) : [];
   const result = open?.status === "available" ? {
-    pulls: Array.from(new Map(open.pulls.map((pr) => [pr.number, pr])).values()),
-    matches: openPullRequestsNeedingAttention(open.pulls),
+    pulls,
+    matches: openPullRequestsNeedingAttention(pulls),
     checkedAt: open.checked_at === null ? null : new Date(open.checked_at * 1000).toISOString(),
   } : null;
   return (

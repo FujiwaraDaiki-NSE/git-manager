@@ -238,7 +238,7 @@ function ProjectCard({
       </div>
       {project.git_status_failed > 0 && <details className="project-card-extra">
         <summary><strong className="fact fact-danger">Git状態の取得失敗 {project.git_status_failed}件</strong>{project.git_status_available ? "（件数は取得できた範囲）" : ""}</summary>
-        <p role="status">ライブ明細 {gitStatusFailures === null ? 0 : gitStatusFailures.length}件</p>
+        <p role="status">{gitStatusFailures === null ? "ライブ明細は未取得です（ライブ更新の受信後に表示します）" : `ライブ明細 ${gitStatusFailures.length}件`}</p>
         {gitStatusFailures !== null && <dl>{gitStatusFailures.map(({ path, error }) => (
           <div key={path}><dt>作業パス</dt><dd><code>{path}</code><br />{error}</dd></div>
         ))}</dl>}
@@ -479,6 +479,10 @@ export default function Page() {
   };
   const resetView = () => applyView({ query: "", agentFilter: "all", gitFilter: "all", favoritesOnly: false, hideDormant: false, ...(invalidUrlParams.length ? defaultView : {}) });
   const homeQuery = homeSearch(view);
+  const reposWithOperations = useMemo(
+    () => [...repos.values()].flatMap((repo) => repo.operations?.length ? [{ repo, operations: repo.operations }] : []),
+    [repos],
+  );
   const gitProjectCounts = useMemo(() => Object.fromEntries(gitFilters.map(({ key }) => [key, projects.filter((project) => matchesGitFilter(project, key)).length])), [projects]);
   const toggleFavorite = (projectId: string) => {
     setFavorites((current) => {
@@ -514,6 +518,24 @@ export default function Page() {
       <header className="home-header"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">gd</span><div><p className="brand-kicker">Git リポジトリダッシュボード</p><h1>gitdash</h1></div></div><div className="home-header-tools"><ProjectSwitcher currentPath={null} homeQuery={homeQuery} /><ThemeControl /><ShortcutHelp /><RescanControl scanning={scanning} /><div className="connection-state" aria-live="polite"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{scanning && <span> · 走査中</span>}</div></div></header>
       {fetchProgressLabel(fetching) !== null && <p className="fetch-progress" role="status">{fetchProgressLabel(fetching)}</p>}
       <section className="home-intro" aria-labelledby="home-title"><div><p className="eyebrow">WORKSPACE OVERVIEW</p><h2 id="home-title">プロジェクト一覧<span className="project-total">{projectsUnavailable ? projectsUnavailableLabel : `${previousLabel}${projects.length}`}</span></h2><p className="intro-copy">変更を見つけて、次の作業へ。ブランチとworktreeをひとつの場所で。</p></div>{agentSummaryQuiet ? <details className="agent-summary-disclosure" open={view.agentFilter !== "all"}><summary>ブランチの作業状況{unknownProjectTotal > 0 && ` · ${unknownProjectTotal}プロジェクトでagent報告なし`}<span>件数の内訳・絞り込み</span></summary>{agentSummary}</details> : agentSummary}</section>
+      {reposWithOperations.length > 0 && <section aria-labelledby="home-git-operations-title">
+        <h2 id="home-git-operations-title">Git操作の途中</h2>
+        <ul>
+          {reposWithOperations.map(({ repo: { path, common_dir, branch, detached }, operations }) => {
+            const projectPath = common_dir.replace(/\/+$/, "");
+            const projectName = projectPath === "" ? "/" : projectPath.slice(projectPath.lastIndexOf("/") + 1);
+            const branchLabel = detached ? "detached HEAD" : branch == null ? "ブランチ未取得" : branch;
+            const lane = detached ? `worktree:${path}` : branch == null ? null : `branch:${branch}`;
+            const label = `${projectName} / ${branchLabel} · ${operations.map(({ kind }) => kind).join("、")}`;
+            const params = new URLSearchParams({ path, tab: "lanes", range: "current" });
+            if (homeQuery) params.set("home", homeQuery);
+            if (lane !== null) params.set("lane", lane);
+            return <li key={path} title={path}>
+              {lane === null ? label : <Link className="open-project" href={`/project?${params}`} prefetch={false}>{label}</Link>}
+            </li>;
+          })}
+        </ul>
+      </section>}
       {invalidUrlParams.length === 0 && <section className="home-toolbar" aria-label="プロジェクト検索と絞り込み">
         <label className="home-search"><span className="sr-only">プロジェクトを検索</span><span aria-hidden="true">⌕</span><input ref={searchRef} aria-keyshortcuts="/" value={view.query} onChange={(event) => applyView({ query: event.target.value }, "replace")} placeholder="プロジェクト、パス、リモートを検索" type="search" /><kbd aria-hidden="true">/</kbd></label>
         <label>並び順<select value={view.sort} onChange={(event) => applyView({ sort: event.target.value as ProjectSort })} aria-label="プロジェクトの並び順"><option value="priority">優先度</option><option value="name">名前</option><option value="latest">最新更新</option></select></label>

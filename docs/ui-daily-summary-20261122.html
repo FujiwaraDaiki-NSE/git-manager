@@ -1,0 +1,57 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-22</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>プロジェクト初回表示がGitHubを待たなくなり、応答は半分以下に。途中のGit操作・ロック理由・競合の読み解きを強化 — 2026-11-22</h1>
+<p>「再起動直後のfetch殺到」は前日に解消済みのため、通常の改善を行いました。開始時30点 + 検証済み加点68点 = <b>98点</b>（100点未達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+
+<h2>高速化の実測（稼働中のbackendに対するHTTP計測）</h2>
+<table><thead><tr><th>指標</th><th>改善前</th><th>改善後</th></tr></thead><tbody>
+<tr><td>再起動後、thinkplatform の最初の <code>/api/project</code></td><td>15.4秒</td><td>4.5秒</td></tr>
+<tr><td>再起動後、langchain の最初の <code>/api/project</code></td><td>9.5秒</td><td>1.4秒</td></tr>
+<tr><td>langchain の応答サイズ / warm応答</td><td>19.8MB / 1.26〜1.28秒</td><td>9.0MB / 0.84〜1.02秒</td></tr>
+<tr><td>thinkplatform の応答サイズ / warm応答</td><td>20.9MB / 1.35〜1.43秒</td><td>8.2MB / 1.11〜1.26秒</td></tr>
+<tr><td>design_db のwarm応答</td><td>0.49〜0.53秒</td><td>0.45〜0.49秒</td></tr>
+</tbody></table>
+<ul>
+<li><b>GitHubを待たない</b>: PRキャッシュが空のとき <code>/api/project</code> は gh の完了（マージ済みPRは15秒でタイムアウトする例あり）を待っていた。未取得は <code>status: "pending"</code> で即返し、裏の照会が終わるとSSEで再取得を促す。「照会中」と「取得失敗」は別表示。</li>
+<li><b>応答の重複排除</b>: <code>branch_rows[].commit_hashes</code> が同じコミットを行ごとに繰り返していた（langchain: 延べ26万参照 / 固有2.4万）。行は共有配列 <code>branch_commits</code> への位置 <code>commit_indices</code> を持つ形に変更。</li>
+<li><b>観測キャッシュの無駄を削減</b>（プロセス内計測）: 読み取り専用の <code>project.batch</code> のdeepcopyを省略（langchain 124.5→73.8ms）、履歴1ページ目と先端取得で同じ <code>git log</code> を共有（design_db cold構築 425→283回、9.2→7.8秒）。</li>
+</ul>
+
+<h2>機能追加（9件）</h2>
+<ul>
+<li>ホームに「Git操作の途中」: merge / rebase / cherry-pick 途中のworktreeを一覧し、該当レーン（継続・中止コマンド）へ直接移動。</li>
+<li>ホームの「Git状態の取得失敗 N件」を展開すると、失敗した作業パスとエラーを表示。</li>
+<li>worktree一覧にロック理由（<code>git worktree lock --reason</code>）を表示。</li>
+<li>サブモジュールで「親のindex」と「現在のチェックアウト」のSHAを並べて表示。</li>
+<li>競合の比較に <code>BASE → OURS</code> / <code>BASE → THEIRS</code> を追加。</li>
+<li>worktree間の変更パス重なりから、その worktree のGit詳細を開く。</li>
+<li>プロジェクト情報に「すべてのオープンPR」（タイトル・マージ元/先・Draft・レビュー・CI）。</li>
+<li>参照比較の「この参照のみ N件」を再現する <code>git log --left-right</code> コマンドを表示・コピー。</li>
+<li>agent履歴で、判断依頼が変わった行に「前回の報告と比較」。</li>
+</ul>
+
+<h2>バグ修正（4件）・UI改善（1件）・文言（2件）</h2>
+<ul>
+<li>修正: <code>sequencer/todo</code> だけが残るcherry-pick/revert途中を「進行中の操作なし」と表示していた（このリポジトリのmainで再現）。</li>
+<li>修正: 同じ追跡先を持つ複数ローカル（同期済み＋先行など）を「分岐」と誤表示 → ローカルごとに判定し、異なれば「ローカル混在」。</li>
+<li>修正: コミット検索の日付境界に今日のUTCオフセットを使っており、夏時間の異なる日でずれる → 指定日の開始・終了を絶対時刻で送る。</li>
+<li>修正: ホームの初回取得失敗を「0ブランチ・変更0件」と表示 → 取得失敗 / 確定した0件 / 前回取得を区別。</li>
+<li>UI: agent履歴に日付の区切り見出し。</li>
+<li>文言: 親0件のコミットを「未取得」ではなく「この履歴上の親なし」。CIの EXPECTED/PENDING を「実行中」と断定せず「報告待ち / 結果待ち」。</li>
+</ul>
+
+<h2>加点していないもの</h2>
+<ul>
+<li>デスクトップ通知本文への判断依頼の質問の追加: 実装とテストは済みだが、OS通知を実画面で確認できていないため加点なし。</li>
+<li>レビュー起因の自己修正: PR照会中を失敗と表示しない（pending状態）、PR番号重複時に全件一覧と要対応一覧が食い違わない、ライブ明細が未取得のとき「0件」と表示しない、背景更新のたびに「前回取得」と出る表示（今回の変更で混入）を修正。</li>
+</ul>
+
+<h2>確認</h2>
+<p>backend 451 passed、frontend 466 passed、<code>tsc --noEmit</code> OK。実画面（組み込みブラウザ）で実データと一時フィクスチャ（競合・ロック・サブモジュール・変更重なり。確認後に削除）を使って確認。Codexレビュー7件中3件を採用、4件は不採用（デプロイをまたぐ旧タブ向けの応答互換、assume-unchangedのサブモジュール、sequencer/todo の読み取り上限、秒付きUTCオフセット）。</p>
+<p><b>注意</b>: <code>/api/project</code> の応答形式が変わったため、デプロイ前から開いていたプロジェクト画面は再読み込みが必要です。</p>
+
+<h2>残課題</h2>
+<ul>
+<li>thinkplatform / langchain のマージ済みPR取得（<code>gh --paginate</code>）が毎回15秒でタイムアウトし、PR履歴が「取得不能」のまま。画面は待たなくなったが、情報は出ていない。</li>
+<li>大きいプロジェクトの <code>/api/project</code> はまだ約1秒・8〜9MB（<code>branch_commits</code> 本体が7MB）。</li>
+</ul>
+</html>

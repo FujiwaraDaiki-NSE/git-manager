@@ -939,6 +939,7 @@ export default function BranchTimeline({
         {project.branch_connections?.status === "partial" && <span>ブランチ関係情報は一部のみ取得されています。未解決の関係を確認してください。</span>}
         <span>Git最終成功fetch: {project.fetched_at === null ? "未取得" : exactDate(new Date(project.fetched_at * 1000).toISOString())}</span>
         {project.github.open?.status === "unavailable" && <span role="status">{project.github.open.reason}</span>}
+        {project.github.status === "pending" && <span role="status">PR情報: {project.github.reason}</span>}
         {project.github.status === "available" && <span>PR情報: GitHubから取得済み · {exactDate(project.github.checked_at === null ? null : new Date(project.github.checked_at * 1000).toISOString())}</span>}
         {project.github.status === "unavailable" && <span>PR情報は取得できませんでした。{project.github.reason ?? "GitHubの認証または接続を確認してください。"}</span>}
       </div>

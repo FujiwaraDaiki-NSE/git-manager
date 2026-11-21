@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentTask, ProjectResponse, ProjectSummary } from "./types";
+import type { AgentDecision, AgentEvent, AgentTask, ProjectResponse, ProjectSummary } from "./types";
 
 export const TIMELINE_STATUS_ALL: "all";
 export const TIMELINE_STATUS_UNKNOWN: "unknown";
@@ -41,6 +41,12 @@ export type TimelineHistoryDetails = {
   finiteRangeUnknownDatesExcluded: boolean;
 };
 
+export type TimelineDecisionChange = {
+  field: keyof AgentDecision;
+  before: string | string[] | null;
+  after: string | string[] | null;
+};
+
 export function parseTimelineCalendarDate(value: string | null | undefined): string | null;
 export function timelineDateRangeError(startDate: string | null, endDate: string | null): string | null;
 export function localTimelineCalendarDate(value: string | null | undefined): string | null;
@@ -48,6 +54,7 @@ export function timelineDateWindow(startDate: string | null, endDate: string | n
 export function filterTimelineCurrentRows(rows: TimelineCurrentRow[], options: TimelineFilterOptions): TimelineCurrentRow[];
 export function filterTimelineHistoryEvents(events: AgentEvent[], options: TimelineFilterOptions, projectById: Map<string, ProjectSummary>): AgentEvent[];
 export function sortTimelineHistory(events: AgentEvent[], sort: "newest" | "oldest"): AgentEvent[];
+export function timelineDecisionChanges(events: AgentEvent[]): Map<string, TimelineDecisionChange[]>;
 export function timelineHistoryDetails(events: AgentEvent[], options: TimelineFilterOptions, projectById: Map<string, ProjectSummary>): TimelineHistoryDetails;
 export function timelineHistoryCsv(events: AgentEvent[]): string;
 export function filterTimelineSnapshot(snapshot: { currentRows: TimelineCurrentRow[]; history: AgentEvent[] }, options: TimelineFilterOptions, projectById: Map<string, ProjectSummary>): { currentRows: TimelineCurrentRow[]; history: AgentEvent[]; dateWindow: TimelineDateWindow };

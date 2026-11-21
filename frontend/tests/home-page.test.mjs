@@ -5,6 +5,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { parseProjectUrl } from "../app/project-flow.mjs";
 
 const source = new URL("../app/page.tsx", import.meta.url);
 const require = createRequire(source);
@@ -12,7 +13,7 @@ const code = ts.transpileModule(readFileSync(source, "utf8"), {
   compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function home() {
+function home(search = "") {
   let stream;
   let cursor;
   let effects;
@@ -21,7 +22,7 @@ function home() {
   const localStorage = { getItem: () => null, setItem() {} };
   runInNewContext(code, {
     exports, URLSearchParams, localStorage, document: {},
-    window: { localStorage, location: { search: "" }, addEventListener() {}, removeEventListener() {} },
+    window: { localStorage, location: { search }, addEventListener() {}, removeEventListener() {} },
     require(name) {
       if (name === "./repo-stream") return { useRepoStream: () => stream, useProjectsLiveUpdates() {} };
       if (name === "react") return {
@@ -36,6 +37,7 @@ function home() {
         },
       };
       if (name.endsWith(".mjs") || name === "react/jsx-runtime") return require(name);
+      if (name === "next/link") return { default: ({ prefetch, ...props }) => require("react").createElement("a", props) };
       if (name === "./git-state-facts") return { FetchFacts: () => null };
       return { default: () => null };
     },
@@ -89,4 +91,37 @@ test("Home distinguishes failed initial, successful empty, and previous project 
 
   const cached = home()({ ...failed, projectsCachedAt: Date.now(), projectSummaries: [project("/alpha", 0)] });
   assert.match(cached, /class="project-total">前回取得 · 1<.*前回取得 · 3 ブランチ.*1 作業ディレクトリ.*前回取得した一覧を表示しています/);
+});
+
+test("Home lists observed operations per worktree and links to the current lane", () => {
+  const render = home("?q=main");
+  const snapshot = { projectSummaries: [], projectsLoading: false, projectsError: null };
+  const repos = new Map([
+    ["/projects/git-manager", { path: "/projects/git-manager", common_dir: "/projects/git-manager", branch: "main", operations: [{ kind: "cherry-pick" }, { kind: "merge" }] }],
+    ["/worktrees/beta", { path: "/worktrees/beta", common_dir: "/projects/beta", branch: "main", operations: [{ kind: "merge" }] }],
+    ["/worktrees/alpha detached", { path: "/worktrees/alpha detached", common_dir: "/projects/git-manager", branch: "(detached)", detached: true, operations: [{ kind: "rebase" }] }],
+    ["/unknown", { path: "/unknown", common_dir: "/unknown", operations: null }],
+    ["/pending", { path: "/pending", common_dir: "/pending" }],
+  ]);
+  const section = (rows) => render({ ...snapshot, repos: rows }).match(/<section aria-labelledby="home-git-operations-title">.*?<\/section>/)?.[0];
+  const items = (rows) => [...section(rows).matchAll(/<li[^>]*><a [^>]*href="([^"]+)">([^<]+)<\/a><\/li>/g)].map(([, href, label]) => {
+    const url = new URL(href.replaceAll("&amp;", "&"), "http://localhost");
+    const { path, lane, tab, range, invalidParams } = parseProjectUrl(url.search);
+    assert.equal(url.pathname, "/project");
+    assert.equal(tab, "lanes");
+    assert.equal(range, "current");
+    assert.deepEqual(invalidParams, []);
+    assert.equal(url.searchParams.get("home"), "q=main");
+    return { label, path, lane };
+  });
+  assert.deepEqual(items(repos), [
+    { label: "git-manager / main · cherry-pick、merge", path: "/projects/git-manager", lane: "branch:main" },
+    { label: "beta / main · merge", path: "/worktrees/beta", lane: "branch:main" },
+    { label: "git-manager / detached HEAD · rebase", path: "/worktrees/alpha detached", lane: "worktree:/worktrees/alpha detached" },
+  ]);
+  const updated = new Map(repos);
+  for (const [path, repo] of repos) {
+    if (repo.operations?.length) updated.set(path, { ...repo, operations: [] });
+  }
+  assert.equal(section(updated), undefined);
 });

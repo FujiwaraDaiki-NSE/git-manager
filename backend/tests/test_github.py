@@ -92,7 +92,7 @@ def test_empty_and_expired_cache_refresh_without_waiting(monkeypatch, kind, load
     try:
         pending = loader("/repo")
         assert pending["repository"] == "o/r"
-        assert pending["status"] == "unavailable"
+        assert pending["status"] == "pending"
         assert pending["checked_at"] is None
         assert pending["pulls"] == []
         assert started.wait(timeout=2)

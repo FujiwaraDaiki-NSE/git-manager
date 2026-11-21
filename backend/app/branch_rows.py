@@ -922,7 +922,7 @@ def connections(
         bool(unresolved)
         or ref_relations["ancestry_status"] != "complete"
         or recorded["reflog_status"] != "available"
-        or github_data.get("status") == "unavailable"
+        or github_data.get("status") in ("unavailable", "pending")
     )
     return {
         **ref_relations,

@@ -1,4 +1,5 @@
 import {
+  agentReportKey,
   agentStateLabel,
   agentTaskState,
   compareAgentEvents,
@@ -254,6 +255,32 @@ export function sortTimelineHistory(events, sort) {
   return [...events].sort((left, right) => sort === TIMELINE_SORT_NEWEST
     ? compareAgentEvents(right, left)
     : compareAgentEvents(left, right));
+}
+
+/** Compare consecutive status reports before applying any display filters. */
+export function timelineDecisionChanges(events) {
+  const previousByBranch = new Map();
+  const changesByEvent = new Map();
+  for (const event of sortTimelineHistory(events, TIMELINE_SORT_OLDEST)) {
+    if (event.kind !== "status") continue;
+    const key = agentReportKey(event);
+    if (key === null) continue;
+
+    const previous = previousByBranch.get(key);
+    const current = event.decision;
+    previousByBranch.set(key, current);
+    // Missing decision data does not establish either presence or clearance.
+    if (previous === undefined || current === undefined) continue;
+
+    const changes = [];
+    for (const field of ["question", "options", "links"]) {
+      const before = previous === null ? null : previous[field];
+      const after = current === null ? null : current[field];
+      if (JSON.stringify(before) !== JSON.stringify(after)) changes.push({ field, before, after });
+    }
+    if (changes.length > 0) changesByEvent.set(event.event_id, changes);
+  }
+  return changesByEvent;
 }
 
 export function timelineHistoryDetails(events, options, projectById) {

@@ -64,7 +64,7 @@ def _load(repo: str, kind: str, reader) -> dict[str, Any]:
                 raise
         if cached is not None:
             return cached[1]
-        return {**unavailable("PR情報は未取得です。GitHubに照会しています"), "repository": name}
+        return {**unavailable("GitHubに照会中です。完了すると自動で反映します"), "status": "pending", "repository": name}
 
 
 def _refresh(key: str, name: str, reader) -> None:

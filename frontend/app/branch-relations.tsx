@@ -1,7 +1,9 @@
 "use client";
 
+import CopyButton from "./copy-button";
 import ScrollShadow from "./scroll-shadow";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { shellQuote } from "./status-file-tools.mjs";
 import {
   connectionPairs,
   connectionRefs,
@@ -142,20 +144,32 @@ function RefName({ reference: ref }: { reference: ProjectBranchConnectionRef | u
 
 function RelationPairRow({
   item,
+  path,
   selectedRef,
   refsById,
 }: {
   item: ReturnType<typeof selectReferencePairs>[number];
+  path: string;
   selectedRef: ProjectBranchConnectionRef | undefined;
   refsById: Map<string, ProjectBranchConnectionRef>;
 }) {
   const other = refsById.get(item.otherRefId);
-  const counts = item.selectedOnly === null || item.otherOnly === null
-    ? "差分件数未取得"
-    : `この参照のみ ${item.selectedOnly} · 相手のみ ${item.otherOnly}`;
+  const hasCounts = typeof item.selectedOnly === "number" && typeof item.otherOnly === "number";
+  const counts = hasCounts
+    ? `この参照のみ ${item.selectedOnly} · 相手のみ ${item.otherOnly}`
+    : "差分件数未取得";
+  const command = hasCounts && selectedRef?.hash && other?.hash
+    ? `git -C ${shellQuote(path)} log --left-right --oneline ${selectedRef.hash}...${other.hash} --`
+    : null;
   return <li className={`branch-relation-pair is-${item.relation}`}>
     <div className="branch-relation-pair-main"><RefName reference={selectedRef} /><span aria-hidden="true">↔</span><RefName reference={other} /><RelationBadge relation={item.relation} /></div>
     <div className="branch-relation-pair-facts"><span>{counts}</span>{item.mergeBases === null ? <span>共通祖先未取得</span> : item.mergeBases.length ? <span>共通祖先 {item.mergeBases.map((hash: string) => hashText(hash))}</span> : <span>共通祖先なし</span>}{item.pair.reason && <span>{reasonLabel(item.pair.reason)}</span>}</div>
+    {command !== null && <details>
+      <summary>内訳をGitで確認</summary>
+      <div><code style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{command}</code></div>
+      <div><code>&lt;</code> はこの参照のみ、<code>&gt;</code> は相手のみ</div>
+      <CopyButton value={command} label="コマンドをコピー" />
+    </details>}
   </li>;
 }
 
@@ -376,7 +390,7 @@ export default function BranchRelations({
               <div className="branch-relations-export-actions"><button type="button" className="subtle-button" disabled={!filteredPairs.length} onClick={exportCurrentPairs} aria-label="表示中の関係をJSON保存">JSON保存</button><button type="button" className="subtle-button" disabled={!filteredPairs.length} onClick={copyCurrentPairs} aria-label="表示中の関係をMarkdownコピー">Markdownコピー</button></div>
             </div>
             {exportStatus && <p className="branch-relations-export-status" role="status" aria-live="polite">{exportStatus}</p>}
-            {pairs.length === 0 ? <p className="branch-relations-empty">現在の参照比較は未取得です。ペア情報が返るまでGitの意味を推測しません。</p> : filteredPairs.length === 0 ? <p className="branch-relations-empty">検索条件に一致する関係はありません。</p> : <ScrollShadow className="branch-relations-scroll" label="現在の比較結果（横スクロール可能）"><ul className="branch-relations-pairs">{pairPage.rows.map((item: ReturnType<typeof selectReferencePairs>[number]) => <RelationPairRow item={item} key={`${item.pair.left_ref_id}:${item.pair.right_ref_id}`} refsById={refsById} selectedRef={refsById.get(selectedRefId)} />)}</ul></ScrollShadow>}
+            {pairs.length === 0 ? <p className="branch-relations-empty">現在の参照比較は未取得です。ペア情報が返るまでGitの意味を推測しません。</p> : filteredPairs.length === 0 ? <p className="branch-relations-empty">検索条件に一致する関係はありません。</p> : <ScrollShadow className="branch-relations-scroll" label="現在の比較結果（横スクロール可能）"><ul className="branch-relations-pairs">{pairPage.rows.map((item: ReturnType<typeof selectReferencePairs>[number]) => <RelationPairRow item={item} key={`${item.pair.left_ref_id}:${item.pair.right_ref_id}`} path={project.main_path} refsById={refsById} selectedRef={selectedRef} />)}</ul></ScrollShadow>}
             <MoreRelations total={filteredPairs.length} shown={pairPage.rows.length} label="現在の関係" onMore={pairPage.showMore} />
           </div>}
 

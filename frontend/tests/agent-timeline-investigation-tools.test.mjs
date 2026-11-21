@@ -20,6 +20,7 @@ import {
   filterTimelineSnapshot,
   localTimelineCalendarDate,
   timelineDateRangeError,
+  timelineDecisionChanges,
   timelineHistoryCsv,
   timelineHistoryDetails,
   sortTimelineHistory,
@@ -58,7 +59,7 @@ const filters = (overrides = {}) => ({
   ...overrides,
 });
 
-test("displayed history groups local days across pages and preserves the exported order", () => {
+function loadHistoryList() {
   const source = new URL("../app/agent-timeline.tsx", import.meta.url);
   const require = createRequire(source);
   const code = ts.transpileModule(readFileSync(source, "utf8") + "\nexport { HistoryList };", {
@@ -67,8 +68,16 @@ test("displayed history groups local days across pages and preserves the exporte
   const exports = {};
   runInNewContext(code, {
     exports,
-    require: (name) => name.endsWith(".mjs") || !name.startsWith(".") ? require(name) : {},
+    require: (name) => {
+      if (name === "./agent-decision") return { AgentDecisionDetails: () => null };
+      return name.endsWith(".mjs") || !name.startsWith(".") ? require(name) : {};
+    },
   });
+  return exports.HistoryList;
+}
+
+test("displayed history groups local days across pages and preserves the exported order", () => {
+  const HistoryList = loadHistoryList();
   const projectById = new Map();
   const input = [
     event("morning", new Date(2026, 9, 2, 0, 5).toISOString(), { summary: "morning report" }),
@@ -78,7 +87,7 @@ test("displayed history groups local days across pages and preserves the exporte
   const olderPage = event("afternoon", new Date(2026, 9, 1, 17).toISOString(), { summary: "afternoon report" });
   const render = (events, sort) => {
     const { filtered } = timelineHistoryDetails(events, filters({ sort, query: "report" }), projectById);
-    const html = renderToStaticMarkup(createElement(exports.HistoryList, { events: filtered, projectById }));
+    const html = renderToStaticMarkup(createElement(HistoryList, { events: filtered, projectById, decisionChanges: timelineDecisionChanges(events) }));
     return {
       dates: Array.from(html.matchAll(/<h4[^>]*><time dateTime="([^"]+)"/g), ([, date]) => date),
       rows: Array.from(html.matchAll(/>(morning|evening|afternoon) report</g), ([, id]) => id),
@@ -96,6 +105,46 @@ test("displayed history groups local days across pages and preserves the exporte
   assert.deepEqual(oldest.dates, newest.dates.toReversed());
   assert.deepEqual(oldest.rows, newest.rows.toReversed());
   assert.deepEqual(oldest.csv, oldest.rows);
+});
+
+test("decision comparison uses the previous loaded status of the same project and branch", () => {
+  const timestamp = "2026-10-01T10:00:00+09:00";
+  const before = { question: "続けますか？", options: ["保留"], links: ["https://example.com/decision"] };
+  const after = { ...before, options: ["続行", "中断"] };
+  const report = (id, sequence, decision, extra = {}) => ({ ...event(id, timestamp, { branch: "main", sequence, ...extra }), decision });
+  const first = report("first", 1, before);
+  const start = report("start", 2, null, { kind: "lifecycle", action: "session_start" });
+  const otherProject = report("other-project", 3, null, { project_id: projectB.id });
+  const otherBranch = report("other-branch", 4, null, { branch: "feature/one" });
+  const end = report("end", 5, null, { kind: "lifecycle", action: "session_end" });
+  const updated = report("updated", 6, after, { summary: "更新後の報告" });
+  const unchanged = report("unchanged", 7, { ...after, options: [...after.options], links: [...after.links] });
+  const cleared = report("cleared", 8, null, { summary: "解除の報告" });
+  const clearedAgain = report("cleared-again", 9, null);
+  const missing = report("missing", 10, undefined);
+  const afterMissing = report("after-missing", 11, before);
+  const events = [cleared, updated, otherBranch, end, otherProject, start, first, unchanged, clearedAgain, missing, afterMissing];
+  const decisionChanges = timelineDecisionChanges(events);
+
+  assert.deepEqual([...decisionChanges], [
+    ["updated", [{ field: "options", before: before.options, after: after.options }]],
+    ["cleared", [
+      { field: "question", before: after.question, after: null },
+      { field: "options", before: after.options, after: null },
+      { field: "links", before: after.links, after: null },
+    ]],
+  ]);
+
+  const HistoryList = loadHistoryList();
+  const projectById = new Map();
+  for (const sort of [TIMELINE_SORT_NEWEST, TIMELINE_SORT_OLDEST]) {
+    const { filtered } = timelineHistoryDetails(events, filters({ query: "の報告", sort }), projectById);
+    assert.deepEqual(filtered, sort === TIMELINE_SORT_NEWEST ? [cleared, updated] : [updated, cleared]);
+    const html = renderToStaticMarkup(createElement(HistoryList, { events: filtered, projectById, decisionChanges }));
+    assert.equal((html.match(/前回の報告と比較/g) ?? []).length, 2);
+    assert.match(html, /<strong>選択肢<\/strong><dl><dt>前回<\/dt><dd><ul><li>保留<\/li><\/ul><\/dd><dt>今回<\/dt><dd><ul><li>続行<\/li><li>中断<\/li>/);
+    assert.match(html, /<dt>今回<\/dt><dd>判断依頼なし<\/dd>/);
+  }
 });
 
 test("search covers project, branch, summary, and worktree while project selection stays exact", () => {
