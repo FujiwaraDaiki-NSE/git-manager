@@ -323,6 +323,7 @@ const TIMELINE_CSV_COLUMNS = [
   "run_state",
   "action",
   "summary",
+  "decision",
 ];
 
 function timelineCsvRow(event) {
@@ -337,6 +338,7 @@ function timelineCsvRow(event) {
     event?.run_state,
     event?.action,
     event?.summary,
+    JSON.stringify(event?.decision),
   ];
 }
 

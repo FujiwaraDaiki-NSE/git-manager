@@ -226,6 +226,25 @@ test("CSV exports only supplied filtered history and protects spreadsheet formul
   assert.equal(timelineHistoryCsv([]).endsWith("\r\n"), true);
 });
 
+test("CSV appends each event's decision as JSON and preserves an explicit clear", () => {
+  const decision = {
+    question: '「案A,B」で進めますか？\n確認事項は "対象範囲" です。',
+    options: ["案A", "案B"],
+    links: ["https://example.com/review"],
+  };
+  const rows = [
+    { ...event("requested", "2026-10-01T10:00:00+09:00"), decision },
+    { ...event("cleared", "2026-10-01T11:00:00+09:00"), decision: null },
+    event("legacy", "2026-10-01T12:00:00+09:00"),
+  ];
+  const [header, request, clear, legacy] = timelineHistoryCsv(rows).split("\r\n");
+  assert.equal(header, '\uFEFF"event_id","occurred_at","project_id","branch","worktree","kind","status","run_state","action","summary","decision"');
+  const decisionCell = request.match(/,"((?:""|[^"])*)"$/u)[1];
+  assert.deepEqual(JSON.parse(decisionCell.replaceAll('""', '"')), decision);
+  assert.ok(clear.endsWith(',"null"'));
+  assert.ok(legacy.endsWith(',""'));
+});
+
 test("filter parameters and project map are explicit, while invalid values never broaden the result", () => {
   assert.throws(() => filterTimelineCurrentRows([], { query: "" }), /provided explicitly/);
   assert.throws(() => filterTimelineHistoryEvents([], filters()), /projectById/);

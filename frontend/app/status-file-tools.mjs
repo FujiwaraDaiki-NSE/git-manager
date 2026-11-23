@@ -158,6 +158,27 @@ function literalPathspec(path) {
   return shellQuote(`:(literal)${path}`);
 }
 
+export function statusStagePaths(entry) {
+  const kind = entryKind(entry);
+  if (kind !== "tracked" && kind !== "untracked") return [];
+  if (entry.path.includes("\uFFFD") || (typeof entry.original_path === "string" && entry.original_path.includes("\uFFFD"))) return [];
+  // Porcelain can report an entire untracked directory as one row.
+  if (kind === "untracked") return entry.path.endsWith("/") ? [] : [entry.path];
+  if (!fileStatusGroups(entry.xy).unstaged) return [];
+  return entry.xy[1] === "R" ? [entry.original_path, entry.path] : [entry.path];
+}
+
+export function buildStatusStageCommands(repoPath, entries) {
+  if (typeof repoPath !== "string" || repoPath.length === 0) {
+    throw new TypeError("Repository path must be a non-empty string");
+  }
+  const paths = [...new Set(entries.flatMap(statusStagePaths))];
+  if (paths.length === 0) return null;
+  const command = `git -C ${shellQuote(repoPath)} add`;
+  const pathspecs = paths.map(literalPathspec).join(" ");
+  return { dryRun: `${command} --dry-run -- ${pathspecs}`, add: `${command} -- ${pathspecs}` };
+}
+
 function diffCommand(repoPath, mode, paths) {
   if (paths.length === 0) return null;
   const cached = mode === "staged" ? " --cached" : "";

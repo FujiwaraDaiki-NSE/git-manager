@@ -5,6 +5,7 @@
 .repository-investigation .tag-explorer-select { gap: 5px; }
 .repository-investigation code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .repository-investigation .repository-investigation-xy { white-space: pre; }
+.repository-investigation-agent-report { flex-basis: 100%; }
 .repository-investigation .tag-explorer-select[aria-pressed="true"] {
   border-color: var(--control-blue);
   background: var(--control-blue-soft);

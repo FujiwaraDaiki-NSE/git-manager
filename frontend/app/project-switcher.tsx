@@ -4,7 +4,7 @@ import "./project-switcher.css";
 import { useRepoStream } from "./repo-stream";
 import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { FAVORITES_STORAGE_KEY, parseFavoriteIds } from "./home-overview.mjs";
 import {
   PROJECT_SWITCHER_ORDERS,
@@ -47,31 +47,28 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
   const [order, setOrder] = useState<ProjectSwitcherOrder>("recent");
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const wasOpen = useRef(false);
+  const previousFocus = useRef<HTMLElement | null>(null);
   const recentPathsRef = useRef<string[]>([]);
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k" && !event.isComposing) {
         event.preventDefault();
-        setOpen((value) => !value);
+        if (!open) previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        setOpen(!open);
       }
     };
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
       dialog.current?.close();
-      if (wasOpen.current) {
-        wasOpen.current = false;
-        trigger.current?.focus();
-      }
+      if (previousFocus.current?.isConnected) previousFocus.current.focus({ preventScroll: true });
+      previousFocus.current = null;
       return;
     }
-    wasOpen.current = true;
     if (!dialog.current?.open) dialog.current?.showModal();
     input.current?.focus();
     setQuery("");
@@ -184,6 +181,13 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
   };
 
   const closeSwitcher = () => setOpen(false);
+  const handleResultClick = (event: ReactMouseEvent<HTMLAnchorElement>, path: string | null) => {
+    if (!event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+      previousFocus.current = null;
+    }
+    rememberRecentPath(path);
+    closeSwitcher();
+  };
   const emptyMessage = query.trim()
     ? "一致するプロジェクトや作業ディレクトリがありません。"
     : recentOnly
@@ -193,7 +197,7 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
       : "一致するプロジェクトがありません。";
 
   return <>
-    <button ref={trigger} className="project-switch-trigger" type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>プロジェクトを切り替え <kbd>Ctrl K</kbd></button>
+    <button className="project-switch-trigger" type="button" aria-haspopup="dialog" aria-expanded={open} onClick={(event) => { previousFocus.current = event.currentTarget; setOpen(true); }}>プロジェクトを切り替え <kbd>Ctrl K</kbd></button>
     <dialog className="project-switch-dialog" ref={dialog} aria-labelledby="project-switch-title" onCancel={(event) => { event.preventDefault(); closeSwitcher(); }} onClick={(event) => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeSwitcher(); } }}>
       <div className="project-switch-heading"><div><span className="eyebrow">QUICK SWITCH</span><h2 id="project-switch-title">プロジェクトを切り替え</h2></div><button className="icon-close" type="button" aria-label="プロジェクトの切り替えを閉じる" onClick={closeSwitcher}>×</button></div>
       <div className="project-switch-search">
@@ -211,9 +215,9 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
       {recentStorageIssue && <div className="project-switch-storage-issue" role="alert">最近見た履歴を保存できないため、この画面では一時的に表示しています。</div>}
       <div className="project-switch-count" role="status">{initialLoading ? "プロジェクトを読み込み中…" : error ? "" : `${matches.length} プロジェクト${query.trim() ? ` · ${worktreeMatches.length} 作業ディレクトリ` : ""}${loading ? " · 更新中" : ""}`}</div>
       {error ? <div className="project-switch-empty" role="alert">プロジェクト一覧を取得できませんでした。<button className="subtle-button" type="button" onClick={refreshProjects}>再試行</button></div> : !initialLoading && <div className="project-switch-results">
-        {matches.map((project) => project.main_path === null ? <div className="project-switch-unavailable" key={project.id} aria-disabled="true">{project.name}<span>作業パス未取得</span></div> : <Link prefetch={false} href={`/project?path=${encodeURIComponent(project.main_path)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`} key={project.id} data-project-switch-result="true" aria-current={project.main_path === currentPath ? "page" : undefined} onClick={() => { rememberRecentPath(project.main_path); closeSwitcher(); }} onKeyDown={handleResultKeyDown}><span><strong>{project.name}</strong><code>{project.main_path}</code></span><span>{project.main_path === currentPath ? "表示中" : "→"}</span></Link>)}
+        {matches.map((project) => project.main_path === null ? <div className="project-switch-unavailable" key={project.id} aria-disabled="true">{project.name}<span>作業パス未取得</span></div> : <Link prefetch={false} href={`/project?path=${encodeURIComponent(project.main_path)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`} key={project.id} data-project-switch-result="true" aria-current={project.main_path === currentPath ? "page" : undefined} onClick={(event) => handleResultClick(event, project.main_path)} onKeyDown={handleResultKeyDown}><span><strong>{project.name}</strong><code>{project.main_path}</code></span><span>{project.main_path === currentPath ? "表示中" : "→"}</span></Link>)}
         {worktreeMatches.map(({ project, path, branch, href }) => (
-          <Link prefetch={false} href={href} key={path} className="project-switch-worktree" data-project-switch-result="true" onClick={() => { rememberRecentPath(project.main_path); closeSwitcher(); }} onKeyDown={handleResultKeyDown}>
+          <Link prefetch={false} href={href} key={path} className="project-switch-worktree" data-project-switch-result="true" onClick={(event) => handleResultClick(event, project.main_path)} onKeyDown={handleResultKeyDown}>
             <span><strong>{branch === null ? "HEAD切り離し（ブランチなし）" : branch}</strong><span>{project.name}</span><code>{path}</code></span>
             <span aria-hidden="true">→</span>
           </Link>

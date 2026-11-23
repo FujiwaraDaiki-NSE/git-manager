@@ -14,7 +14,7 @@ const CopyButton = ({ value, label }) => React.createElement('button', { 'data-v
 new Function('require', 'module', 'exports', compiled.outputText)(
   (name) => name.endsWith('.css') ? {} : name === './copy-button' ? { default: CopyButton } : require(name), module, module.exports,
 );
-const render = (decision, compact = false) => renderToStaticMarkup(React.createElement(module.exports.AgentDecisionDetails, { decision, compact }));
+const render = (decision, compact = false, replyBranch) => renderToStaticMarkup(React.createElement(module.exports.AgentDecisionDetails, { decision, compact, replyBranch }));
 
 test('decision renders question first, choices and only HTTP(S) links; null renders nothing', () => {
   assert.equal(render(null), '');
@@ -43,4 +43,14 @@ test('decision copy includes question, optional choices and links on separate li
   assert.ok(html.includes('data-value="どう進める？\n進める\n見送る\nhttps://example.com/pr\nhttps://example.com/docs"'));
   assert.match(html, />判断依頼をコピー<\/button>/);
   assert.ok(render({ question: '自由回答', options: [], links: [] }).includes('data-value="自由回答"'));
+});
+
+test('current decisions allow selecting an option or writing an answer, including without choices', () => {
+  const decision = { question: 'どう進める？', options: ['進める', '見送る'], links: [] };
+  const current = render(decision, false, 'feature/reply');
+  assert.match(current, /<button[^>]*>見送る<\/button>/);
+  assert.match(current, /<label>回答<textarea/);
+  assert.doesNotMatch(current, /返答文をコピー/);
+  assert.match(render({ ...decision, options: [] }, false, 'feature/reply'), /<label>回答<textarea/);
+  assert.doesNotMatch(render(decision), /<textarea|返答文をコピー/);
 });

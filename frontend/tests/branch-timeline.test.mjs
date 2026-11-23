@@ -41,6 +41,7 @@ import {
   aggregateTimelineConnectionChipLabel,
   aggregateTimelineConnectionChips,
   groupTimelineEventsByRow,
+  isDefaultRow,
   isTimelineConnectionStub,
   routeTimelineConnections,
   selectDefaultTimelineConnectionEdges,
@@ -51,11 +52,25 @@ import {
 } from '../app/timeline-layout.mjs';
 
 test('recent branch limit keeps the default branch and sorts by tip date, with unknown dates last', () => {
-  const row = (id, date, historical = false) => ({id, name: id, historical, tip_commits: [{date}]});
+  const row = (id, date, historical = false) => ({id, name: id, remote_ref: id === 'main' ? 'origin/main' : null, historical, tip_commits: [{date}]});
   const rows = [row('main', '2020-01-01'), row('old', '2024-01-01'), row('unknown', null), row('new', '2026-01-01'), row('deleted', '2027-01-01', true)];
   assert.deepEqual(selectTimelineRows(rows, 'main', 1, false, 'parent', []).rows.map(r => r.id), ['main', 'new']);
   assert.deepEqual(selectTimelineRows(rows, 'main', null, false, 'parent', []).rows.map(r => r.id), ['main', 'new', 'old', 'unknown']);
   assert.deepEqual(selectTimelineRows(rows, 'main', 1, true, 'parent', []).rows.map(r => r.id), ['main', 'deleted']);
+});
+
+test('only the origin/HEAD target receives default treatment', () => {
+  const rows = [
+    { id: 'origin', name: 'main', remote_ref: 'origin/main', historical: false, tip_commits: [{ date: '2020-01-01' }] },
+    { id: 'upstream', name: 'main', remote_ref: 'upstream/main', historical: false, tip_commits: [{ date: '2021-01-01' }] },
+    { id: 'local', name: 'main', remote_ref: null, historical: false, tip_commits: [{ date: '2022-01-01' }] },
+    { id: 'history', name: 'main', remote_ref: null, historical: true, tip_commits: [{ date: '2023-01-01' }] },
+    { id: 'recent', name: 'topic', remote_ref: 'origin/topic', historical: false, tip_commits: [{ date: '2024-01-01' }] },
+  ];
+  assert.deepEqual(rows.filter((row) => isDefaultRow(row, 'main')).map((row) => row.id), ['origin']);
+  assert.deepEqual(selectTimelineRows(rows, 'main', 1, true, 'parent', []).rows.map((row) => row.id), ['origin', 'recent']);
+  assert.deepEqual(sortTimelineRows(rows, 'main', [], 'updated').map((row) => row.id), ['origin', 'recent', 'history', 'local', 'upstream']);
+  assert.deepEqual(selectTimelineRows(rows, null, 1, true, 'updated', []).rows.map((row) => row.id), ['recent']);
 });
 
 function pathXCoordinates(path) {
@@ -210,7 +225,7 @@ test('default relation selection keeps one branch origin and one merge destinati
 });
 
 test('parent order is depth-first, prefers recorded parents, and survives cycles', () => {
-  const row = (id, date) => ({ id, name: id, historical: false, tip_commits: [{ date }] });
+  const row = (id, date) => ({ id, name: id, remote_ref: id === 'main' ? 'origin/main' : null, historical: false, tip_commits: [{ date }] });
   const rows = [
     row('unknown', '2026-06-01'),
     row('old-child', '2025-01-01'),
@@ -239,7 +254,7 @@ test('parent order is depth-first, prefers recorded parents, and survives cycles
 });
 
 test('parent selection ignores candidate parents outside the rendered row set', () => {
-  const row = (id, date) => ({ id, name: id, historical: false, tip_commits: [{ date }] });
+  const row = (id, date) => ({ id, name: id, remote_ref: id === 'main' ? 'origin/main' : null, historical: false, tip_commits: [{ date }] });
   const rows = [
     row('main', '2020-01-01'),
     row('visible-parent', '2026-01-01'),

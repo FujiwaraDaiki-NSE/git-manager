@@ -20,7 +20,6 @@ export const COMMON_ANCESTOR_MARKER = Object.freeze({
 
 const LANE_WIDTH = 14;
 const NODE_X_OFFSET = 8;
-const MAX_VISIBLE_LANES = 8;
 
 /** @typedef {{hash: string, x: number, y: number}} SummaryPoint */
 
@@ -50,13 +49,13 @@ const MAX_VISIBLE_LANES = 8;
  */
 
 /** @param {number} maxLane */
-function graphWidth(maxLane) {
-  return Math.min(maxLane + 1, MAX_VISIBLE_LANES) * LANE_WIDTH + 16;
+export function graphWidth(maxLane) {
+  return (maxLane + 1) * LANE_WIDTH + 16;
 }
 
 /** @param {number} lane */
-function laneX(lane) {
-  return Math.min(lane, MAX_VISIBLE_LANES - 1) * LANE_WIDTH + NODE_X_OFFSET;
+export function laneX(lane) {
+  return lane * LANE_WIDTH + NODE_X_OFFSET;
 }
 
 /**

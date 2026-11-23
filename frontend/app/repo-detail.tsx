@@ -6,6 +6,7 @@ import PatchView from "./patch-view";
 import CommitFiles from "./commit-files";
 import ConflictInspector from "./conflict-inspector";
 import CopyButton from "./copy-button";
+import { buildInvestigationShareUrl } from "./investigation-presets-tools.mjs";
 import { commandTarget, worktreeCommand } from "./next-command-tools.mjs";
 import Submodules from "./submodules";
 import { fileStatusDescription, fileStatusGroups } from "./file-status.mjs";
@@ -22,6 +23,7 @@ import {
   STATUS_FILE_EXTENSION_NONE,
   shellQuote,
   buildStatusDiffCommands,
+  buildStatusStageCommands,
   filterStatusFilesByDirectory,
   filterStatusFilesByExtension,
   listStatusFileDirectories,
@@ -29,6 +31,7 @@ import {
   searchStatusFiles,
   sortStatusFiles,
   statusFilesCsv,
+  statusStagePaths,
 } from "./status-file-tools.mjs";
 import WorktreeDiff, { type WorktreeDiffStage } from "./worktree-diff";
 import "./repo-tools.css";
@@ -149,6 +152,7 @@ function StatusPane({ repo }: { repo: Repo }) {
   const [order, setOrder] = useState<StatusFileOrder>("asc");
   const [diffStage, setDiffStage] = useState<WorktreeDiffStage>("unstaged");
   const [selectedDiffFile, setSelectedDiffFile] = useState<string | null>(null);
+  const [selectedStageFiles, setSelectedStageFiles] = useState<Set<string>>(() => new Set());
   const [downloadStatus, setDownloadStatus] = useState<"idle" | "success" | "error">("idle");
   const filters: { key: StatusFileFilter; label: string }[] = [
     { key: "all", label: "すべて" }, { key: "staged", label: "ステージ済み" },
@@ -175,6 +179,10 @@ function StatusPane({ repo }: { repo: Repo }) {
     () => entries === undefined ? null : buildStatusDiffCommands(repo.path, visible),
     [entries, repo.path, visible],
   );
+  const stageFileKey = (entry: NonNullable<Repo["entries"]>[number]) =>
+    JSON.stringify([entry.path, entry.original_path, entry.xy]);
+  const stageFiles = visible.filter((entry) => statusStagePaths(entry).length > 0 && selectedStageFiles.has(stageFileKey(entry)));
+  const stageCommands = buildStatusStageCommands(repo.path, stageFiles);
   const excluded = diffCommands?.excluded;
   const hasMissingOriginalPath = visible.some((entry) => /[RC]/.test(entry.xy) && entry.original_path === null);
   const exclusionParts = excluded === undefined ? [] : [
@@ -231,9 +239,27 @@ function StatusPane({ repo }: { repo: Repo }) {
         <div className="status-file-list">
           {visible.map((entry) => {
             const rowStages = statusDiffStages(entry.xy, filter);
+            const stageKey = stageFileKey(entry);
+            const canSelectStage = statusStagePaths(entry).length > 0;
             return <div className="status-file-row" key={entry.xy + entry.path}>
               <code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code>
-              <code className="status-file-path">{entry.original_path !== null && <>{entry.original_path} → </>}{entry.path}</code>
+              <label className="status-file-path">
+                {canSelectStage && <input
+                  type="checkbox"
+                  aria-label={`${entry.path} をステージ対象に選択`}
+                  checked={selectedStageFiles.has(stageKey)}
+                  onChange={(event) => {
+                    const checked = event.currentTarget.checked;
+                    setSelectedStageFiles((previous) => {
+                      const next = new Set(previous);
+                      if (checked) next.add(stageKey);
+                      else next.delete(stageKey);
+                      return next;
+                    });
+                  }}
+                />}
+                <code>{entry.original_path !== null && <>{entry.original_path} → </>}{entry.path}</code>
+              </label>
               <span className="status-file-description">{fileStatusDescription(entry.xy)}</span>
               <span className="status-file-copy"><CopyButton value={entry.path} label={`${entry.path} のパスをコピー`} /></span>
               {rowStages.length > 0
@@ -243,6 +269,19 @@ function StatusPane({ repo }: { repo: Repo }) {
           })}
           {visible.length === 0 && <div className="status-file-empty">{hasNoUncommittedChanges(repo) ? "未コミットの変更なし" : "条件に一致する変更ファイルはありません。"}{hasFilters && <button className="subtle-button" type="button" onClick={clearFilters}>絞り込みを解除</button>}</div>}
         </div>
+        {entries.some((entry) => statusStagePaths(entry).length > 0 || (entry.xy === "??" && entry.path.endsWith("/"))) && (
+          <div className="status-file-command-copy" aria-label="ステージするコマンド">
+            <h4>選んだファイルをステージ</h4>
+            <p role="status">表示中の選択 {stageFiles.length} 件</p>
+            {visible.some((entry) => entry.xy === "??" && entry.path.endsWith("/")) && (
+              <p className="status-file-diff-note">未追跡ディレクトリの行は、中のファイルを個別に選べないため対象外です。</p>
+            )}
+            {stageCommands !== null && <>
+              <div className="status-file-diff-command"><code>{stageCommands.dryRun}</code><CopyButton value={stageCommands.dryRun} label="ステージの dry-run コマンドをコピー" /></div>
+              <div className="status-file-diff-command"><code>{stageCommands.add}</code><CopyButton value={stageCommands.add} label="ステージするコマンドをコピー" /></div>
+            </>}
+          </div>
+        )}
         {entries.some((entry) => fileStatusGroups(entry.xy).conflict) && <ConflictInspector path={repo.path} />}
         {entries.length > 0 && <div className="status-file-diff-tools" aria-labelledby="status-file-diff-title">
           <div className="status-file-diff-heading">
@@ -276,12 +315,14 @@ function StatusPane({ repo }: { repo: Repo }) {
 
 function CommitPane({
   detail,
+  repoPath,
   state,
   error,
   onRetry,
   onCopy,
 }: {
   detail: CommitDetail | null;
+  repoPath: string;
   state: LoadState;
   error: string | null;
   onRetry: () => void;
@@ -330,6 +371,23 @@ function CommitPane({
             <span>{detail.author}</span>
             <span>{detail.date}</span>
           </div>
+          {detail.parents.length > 1 && (
+            <div className="commit-meta">
+              {detail.parents.map((parent, index) => (
+                <a
+                  key={`${index}:${parent}`}
+                  className="copy"
+                  href={buildInvestigationShareUrl(`/project?${apiQuery(repoPath, { tab: "info" })}`, "compare", {
+                    base: parent,
+                    target: detail.hash,
+                    mode: "direct",
+                  })}
+                >
+                  第{index + 1}親との差分（{parent.slice(0, 7)}）
+                </a>
+              ))}
+            </div>
+          )}
           <CommitFiles key={detail.hash} files={detail.files} downloadName={`${detail.hash}-files.tsv`} />
           <PatchView key={detail.hash} patch={detail.patch} />
           {detail.patch_truncated && (
@@ -357,7 +415,7 @@ function BranchRow({
   onCopy: (command: string) => void;
 }) {
   const collapsedMerged = branch.merged && !branch.current;
-  const abandonedCandidate = collapsedMerged && !branch.worktree;
+  const abandonedCandidate = collapsedMerged && !branch.worktree && !branch.is_default;
   return (
     <div
       className={`branch-row${collapsedMerged ? " merged" : ""}${abandonedCandidate ? " abandoned" : ""}`}
@@ -881,6 +939,7 @@ export default function RepoDetail({
       {activeTab === "graph" && (
         <CommitPane
           detail={commit}
+          repoPath={repo.path}
           state={commitState}
           error={commitError}
           onRetry={() => setCommitRetry((value) => value + 1)}

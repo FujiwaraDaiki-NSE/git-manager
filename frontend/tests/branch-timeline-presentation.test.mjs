@@ -16,11 +16,21 @@ test('freshness has explicit unknown and boundary states', () => {
   assert.equal(agentFreshness(null, now), 'unknown');
   assert.equal(agentFreshness('invalid', now), 'unknown');
 });
-test('only explicit reports for exact row or local branches appear', () => {
-  const row = {name:'main', locals:[{branch:'feature'}]};
-  const tasks = [{branch:'feature',kind:'status',status:'testing'}, {branch:'main',kind:'lifecycle',status:'completed'}, {branch:'other',kind:'status',status:'implementing'}];
-  assert.deepEqual(rowAgentReports(row,tasks), [tasks[0]]);
-  assert.deepEqual(rowAgentReports(row,null), []);
+test('only explicit reports for branches present in the row locals appear', () => {
+  const localRow = { name: 'topic', locals: [{ branch: 'topic' }, { branch: 'local-alias' }, { branch: null }] };
+  const remoteRow = { name: 'topic', remote_ref: 'upstream/topic', locals: [] };
+  const historicalRow = { name: 'topic', historical: true, locals: [] };
+  const tasks = [
+    { branch: 'topic', kind: 'status', status: 'waiting_for_user' },
+    { branch: 'local-alias', kind: 'status', status: 'testing' },
+    { branch: 'topic', kind: 'lifecycle', status: 'completed' },
+    { branch: 'other', kind: 'status', status: 'implementing' },
+    { branch: null, kind: 'status', status: 'testing' },
+  ];
+  assert.deepEqual(rowAgentReports(localRow, tasks), tasks.slice(0, 2));
+  assert.deepEqual(rowAgentReports(remoteRow, tasks), []);
+  assert.deepEqual(rowAgentReports(historicalRow, tasks), []);
+  assert.deepEqual(rowAgentReports(localRow, null), []);
 });
 
 import { isUnpushedCommit } from '../app/branch-timeline-presentation.mjs';

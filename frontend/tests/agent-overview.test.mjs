@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AGENT_STATE_LABELS,
+  agentDecisionReportTimes,
   agentSnapshotAt,
   agentStateLabel,
   agentTaskState,
@@ -31,6 +32,23 @@ const task = (task_id, run_state, occurred_at, extra = {}) => ({
   summary: null,
   occurred_at,
   ...extra,
+});
+
+test("decision report times follow the same branch's explicit reports across sessions", () => {
+  const first = task("feature", "waiting_for_user", "2026-09-01T00:00:00Z", { event_id: "first", sequence: 1 });
+  const end = { ...first, event_id: "end", sequence: 2, kind: "lifecycle", status: null, occurred_at: "2026-09-01T01:00:00Z" };
+  const latest = { ...first, event_id: "latest", sequence: 4, worktree: "/work/new", occurred_at: "2026-09-01T02:00:00Z" };
+  const resumed = { ...latest, event_id: "resumed", sequence: 3, status: "implementing" };
+  const reports = [latest, end, first,
+    { ...resumed, project_id: "other" },
+    { ...resumed, branch: "other" },
+    { ...resumed, sequence: 5 },
+  ];
+
+  assert.deepEqual(agentDecisionReportTimes(latest, reports), { first: first.occurred_at, latest: latest.occurred_at });
+  assert.deepEqual(agentDecisionReportTimes(latest, [...reports, resumed]), { first: latest.occurred_at, latest: latest.occurred_at });
+  assert.deepEqual(agentDecisionReportTimes(latest, [first]), { first: null, latest: latest.occurred_at });
+  assert.equal(agentDecisionReportTimes(resumed, reports), null);
 });
 
 test("reports received during a project fetch preserve the latest decision and deduplicate history", () => {

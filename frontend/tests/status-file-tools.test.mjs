@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { execFileSync, execSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
   STATUS_FILE_DIRECTORY_ROOT,
   STATUS_FILE_EXTENSION_NONE,
   buildStatusDiffCommands,
+  buildStatusStageCommands,
   filterStatusFilesByDirectory,
   filterStatusFilesByExtension,
   listStatusFileDirectories,
@@ -13,6 +18,7 @@ import {
   statusFileDirectory,
   statusFileExtension,
   statusFilesCsv,
+  statusStagePaths,
 } from "../app/status-file-tools.mjs";
 
 const entries = [
@@ -23,6 +29,45 @@ const entries = [
   { xy: "UU", path: "src/conflict.js" },
   { xy: "M.", path: "docs/read me.md" },
 ].map((entry) => ({ ...entry, original_path: null }));
+
+test("stage commands target exactly the selected literal paths", (t) => {
+  const repo = mkdtempSync(join(tmpdir(), "status stage '"));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  git("init", "-q");
+  for (const path of ["space 'file", "literal[ab].txt", "literala.txt"]) writeFileSync(join(repo, path), "test\n");
+  const selected = ["space 'file", "literal[ab].txt"].map((path) => ({ xy: "??", path, original_path: null }));
+  const commands = buildStatusStageCommands(repo, selected);
+  const dryRun = execSync(commands.dryRun, { encoding: "utf8" });
+  assert.match(dryRun, /literal\[ab\]\.txt/);
+  assert.match(dryRun, /space 'file/);
+  assert.doesNotMatch(dryRun, /literala\.txt/);
+  assert.equal(git("diff", "--cached", "--name-only"), "");
+  execSync(commands.add);
+  assert.deepEqual(git("diff", "--cached", "--name-only", "-z").split("\0"), ["literal[ab].txt", "space 'file", ""]);
+});
+
+test("only a worktree rename with both paths adds its source to the stage command", () => {
+  const unsupported = [
+    { xy: ".R", path: "unknown", original_path: null },
+    { xy: "UU", path: "conflict", original_path: null },
+    { xy: "R.", path: "already staged", original_path: "previous" },
+    { xy: "??", path: "directory/", original_path: null },
+  ];
+  assert.equal(buildStatusStageCommands("/repo", unsupported), null);
+  const commands = buildStatusStageCommands("/repo", [
+    ...unsupported,
+    { xy: ".R", path: "new", original_path: "old" },
+    { xy: ".C", path: "copy", original_path: "other" },
+    { xy: "RM", path: "edited after rename", original_path: "previous name" },
+  ]);
+  assert.equal(commands.add, "git -C '/repo' add -- ':(literal)old' ':(literal)new' ':(literal)copy' ':(literal)edited after rename'");
+});
+
+test("stage paths exclude rows with a replacement character in either path", () => {
+  assert.deepEqual(statusStagePaths({ xy: "??", path: "new\uFFFD.txt", original_path: null }), []);
+  assert.deepEqual(statusStagePaths({ xy: ".R", path: "new.txt", original_path: "old\uFFFD.txt" }), []);
+});
 
 test("directory options use exact parent directories and keep root explicit", () => {
   assert.equal(statusFileDirectory("README"), STATUS_FILE_DIRECTORY_ROOT);

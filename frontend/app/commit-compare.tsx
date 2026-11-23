@@ -45,11 +45,8 @@ type ComparisonResponse = {
   command: string;
 };
 
-type CommitCompareProps = { path: string; laneComparison: { base: string; target: string; baseLabel: string; supportsMergeBase: boolean } | null };
-const laneComparisonLabels: Record<ComparisonMode, string> = {
-  direct: "追跡先 → ローカル先端の差分",
-  "merge-base": "共通祖先 → ローカル先端の差分",
-};
+type CommitCompareProps = { path: string; laneComparison: { base: string; target: string; baseLabel: string; directLabel: string; supportsMergeBase: boolean } | null };
+const mergeBaseLabel = "共通祖先 → ローカル先端の差分";
 
 function apiQuery(path: string, request: ComparisonRequest) {
   return buildComparisonQuery(path, request.base, request.target, request.mode);
@@ -225,8 +222,8 @@ export default function CommitCompare({ path, laneComparison }: CommitComparePro
       <div className="commit-compare-body">
         {laneComparison !== null ? (
           <div className="commit-compare-lane-controls">
-            <button type="button" className="commit-compare-run" disabled={state === "loading"} onClick={() => setRequest({ base: laneComparison.base, target: laneComparison.target, mode: "direct" })}>{laneComparisonLabels.direct}</button>
-            {laneComparison.supportsMergeBase && <button type="button" className="commit-compare-run" disabled={state === "loading"} onClick={() => setRequest({ base: laneComparison.base, target: laneComparison.target, mode: "merge-base" })}>{laneComparisonLabels["merge-base"]}</button>}
+            <button type="button" className="commit-compare-run" disabled={state === "loading"} onClick={() => setRequest({ base: laneComparison.base, target: laneComparison.target, mode: "direct" })}>{laneComparison.directLabel}</button>
+            {laneComparison.supportsMergeBase && <button type="button" className="commit-compare-run" disabled={state === "loading"} onClick={() => setRequest({ base: laneComparison.base, target: laneComparison.target, mode: "merge-base" })}>{mergeBaseLabel}</button>}
             <code>{laneComparison.baseLabel}</code>
           </div>
         ) : <>
@@ -291,7 +288,7 @@ export default function CommitCompare({ path, laneComparison }: CommitComparePro
           <section className={`commit-compare-result${resultIsCurrent ? "" : " is-stale"}`} aria-labelledby={`${titleId}-result`}>
             <div className="commit-compare-result-head">
               <div>
-                <h3 id={`${titleId}-result`}>{laneComparison === null ? "比較結果" : laneComparisonLabels[data.mode]}</h3>
+                <h3 id={`${titleId}-result`}>{laneComparison === null ? "比較結果" : data.mode === "direct" ? laneComparison.directLabel : mergeBaseLabel}</h3>
                 <p className="commit-compare-label"><span>{comparisonModeLabel(data.mode)}</span> <code>{data.comparison_label}</code></p>
                 {!resultIsCurrent && <p className="commit-compare-stale" role="status">{laneComparison === null ? "入力値が変更されています。表示中の結果は前回の比較です。「この2地点を比較」で更新してください。" : "表示中の結果は前回の比較です。"}</p>}
               </div>

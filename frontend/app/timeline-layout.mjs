@@ -33,6 +33,14 @@ function sortUpdatedRows(rows) {
 }
 
 /**
+ * @param {{historical: boolean, remote_ref: string|null}} row
+ * @param {string|null} defaultBranch
+ */
+export function isDefaultRow(row, defaultBranch) {
+  return defaultBranch !== null && !row.historical && row.remote_ref === `origin/${defaultBranch}`;
+}
+
+/**
  * Order a selected set of rows without changing which rows were selected.
  * Branch edges point from the parent row (`source`) to the child row
  * (`target`). An edge with operation evidence wins over merge-base evidence;
@@ -45,7 +53,7 @@ function sortUpdatedRows(rows) {
  */
 export function sortTimelineRows(rows, defaultBranch, connections, order) {
   const updated = sortUpdatedRows(rows);
-  const defaults = updated.filter((row) => !row.historical && row.name === defaultBranch);
+  const defaults = updated.filter((row) => isDefaultRow(row, defaultBranch));
   const defaultIds = new Set(defaults.map((row) => row.id));
   const others = updated.filter((row) => !defaultIds.has(row.id));
   if (order === "updated") return [...defaults, ...others];
@@ -106,7 +114,7 @@ export function sortTimelineRows(rows, defaultBranch, connections, order) {
 export function selectTimelineRows(rows, defaultBranch, limit, showMerged, order, connections) {
   const eligible = rows.filter((row) => showMerged || !row.historical);
   const updated = sortUpdatedRows(eligible);
-  const defaults = updated.filter((row) => !row.historical && row.name === defaultBranch);
+  const defaults = updated.filter((row) => isDefaultRow(row, defaultBranch));
   const defaultIds = new Set(defaults.map((row) => row.id));
   const others = updated.filter((row) => !defaultIds.has(row.id));
   const selected = [...defaults, ...(limit === null ? others : others.slice(0, limit))];

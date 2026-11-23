@@ -5,9 +5,12 @@ import ScrollShadow from "./scroll-shadow";
 import CopyButton from "./copy-button";
 import {
   buildPullRequestExplorerData,
+  filterOpenPullRequests,
+  limitedMergedPullRequestCoverage,
   localCalendarDate,
   openPullRequestLabels,
   openPullRequestsNeedingAttention,
+  openPullRequestSource,
   pullRequestsToCsv,
   targetBranchName,
   validHttpUrl,
@@ -70,7 +73,9 @@ function githubStatusMessage(status: string) {
 }
 
 function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["open"] }) {
+  const [query, setQuery] = useState("");
   const pulls = open?.status === "available" ? Array.from(new Map(open.pulls.map((pr) => [pr.number, pr])).values()) : [];
+  const filtered = filterOpenPullRequests(pulls, query);
   const result = open?.status === "available" ? {
     pulls,
     matches: openPullRequestsNeedingAttention(pulls),
@@ -110,19 +115,30 @@ function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["o
             {result.pulls.length === 0 ? (
               <p className="pr-explorer-inline-note">オープンPRはありません</p>
             ) : (
-              <ul className="pr-explorer-open-list">
-                {result.pulls.map((pr) => {
-                  const href = validHttpUrl(pr.url);
-                  return (
-                    <li key={pr.number}>
-                      {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(pr.number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(pr.number)}</strong>}
-                      <strong>{pr.title}</strong>
-                      <span><code>{pr.headRefName}</code> → <code>{pr.baseRefName}</code></span>
-                      <span>{openPullRequestLabels(pr).join(" · ")}</span>
-                    </li>
-                  );
-                })}
-              </ul>
+              <>
+                <div className="pr-explorer-toolbar" role="search" aria-label="オープンPRを絞り込む">
+                  <label className="pr-explorer-search">
+                    <span>オープンPRを検索</span>
+                    <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="番号・題名・作成元" />
+                  </label>
+                  {query !== "" && <button type="button" className="pr-explorer-clear-toolbar" onClick={() => setQuery("")}>検索を解除</button>}
+                </div>
+                <p className="pr-explorer-inline-note" role="status">{filtered.length} / {result.pulls.length} 件表示</p>
+                {filtered.length === 0 ? <p className="pr-explorer-inline-note">検索条件に一致するオープンPRはありません</p> : <ul className="pr-explorer-open-list">
+                  {filtered.map((pr) => {
+                    const href = validHttpUrl(pr.url);
+                    const source = openPullRequestSource(pr);
+                    return (
+                      <li key={pr.number}>
+                        {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(pr.number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(pr.number)}</strong>}
+                        <strong>{pr.title}</strong>
+                        <span>{source === null ? <>作成元リポジトリ未取得 · <code>{pr.headRefName}</code></> : <code>{source}</code>} → <code>{pr.baseRefName}</code></span>
+                        <span>{openPullRequestLabels(pr).join(" · ")}</span>
+                      </li>
+                    );
+                  })}
+                </ul>}
+              </>
             )}
           </details>
         </>
@@ -224,7 +240,7 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
   const branchRowsAvailable = project.branch_rows !== null;
   const githubStatus = project.github.status;
   const unavailableMessage = githubStatusMessage(githubStatus);
-  const canClaimEmpty = branchRowsAvailable && githubStatus === "available";
+  const limitedCoverage = limitedMergedPullRequestCoverage(project.github);
   const hasActiveFilters = query.trim() !== "" || target !== "all" || source !== "all" || range !== "all" || startDate !== "" || endDate !== "" || sort !== "newest";
 
   const chooseRange = (nextRange: PrRange) => {
@@ -277,6 +293,12 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
           <strong>{!branchRowsAvailable ? "ブランチ行のPR履歴を確認できません" : githubStatus === "not_applicable" ? "PR情報は対象外です" : "GitHubのPR履歴を確認できません"}</strong>
           <span>{!branchRowsAvailable ? "ブランチ行の取得に失敗したため、PRがないとは判断できません。再走査してから再試行してください。" : unavailableMessage}</span>
           {project.github.reason && <small>{project.github.reason}</small>}
+        </div>
+      )}
+      {limitedCoverage !== null && (
+        <div className="pr-explorer-coverage" role="status">
+          <strong>GitHubのPR履歴は一部取得</strong>
+          <span>{limitedCoverage}</span>
         </div>
       )}
 
@@ -342,7 +364,7 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
         </div>
       ) : (
         <div className="pr-explorer-empty" role="status">
-          {canClaimEmpty && model.all.length === 0 ? <><strong>マージ済みPRはありません</strong><span>取得済みのブランチ行に紐づく記録はありません。</span></> : <><strong>条件に一致するPRはありません</strong><span>検索・マージ先・期間の条件を解除すると、別の記録を確認できます。</span></>}
+          {model.all.length === 0 ? <><strong>{limitedCoverage === null ? "マージ済みPRはありません" : "照会範囲内にマージ済みPRの記録はありません"}</strong><span>取得済みのブランチ行に紐づく記録はありません。</span></> : <><strong>条件に一致するPRはありません</strong><span>検索・マージ先・期間の条件を解除すると、別の記録を確認できます。</span></>}
         </div>
       )}
     </section>

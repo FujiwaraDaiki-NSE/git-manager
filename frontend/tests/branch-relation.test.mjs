@@ -138,6 +138,28 @@ test("geometry keeps row distance and local default-branch paths", () => {
   assert.notEqual(main.branchPoints.at(-1).y, main.defaultPoints.at(-1).y);
 });
 
+test("geometry keeps the eighth and ninth lanes separate inside the SVG", () => {
+  const summary = buildBranchRelationSummary(
+    graph(
+      [
+        row("main-head", ["base"], 7, [{ name: "origin/main", kind: "remote" }]),
+        row("feature-head", ["base"], 8),
+        row("base"),
+      ],
+      [head("main", "main-head"), head("feature", "feature-head")],
+      "main",
+      7,
+    ),
+  );
+
+  assert.ok(summary);
+  const geometry = buildBranchRelationGeometry(summary);
+  const feature = geometry.relations[1];
+  assert.equal(feature.defaultPoints.at(-1).x, 106);
+  assert.equal(feature.branchHead.x, 120);
+  assert.ok(geometry.width >= feature.branchHead.x + 4);
+});
+
 test("a branch at the default HEAD is represented as a zero-length path", () => {
   const summary = buildBranchRelationSummary(
     graph(

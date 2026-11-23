@@ -159,12 +159,13 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
   const command = agentWorktreeCommand(task.worktree);
   const freshness = agentReportFreshness(task.occurred_at, now);
   const reportKey = agentReportKey(task);
-  const canAcknowledge = reportKey !== null && reportIdentity(task) !== null;
+  const identity = reportIdentity(task);
+  const canAcknowledge = reportKey !== null && identity !== null;
   const reportProjectId = task.project_id;
   const branch = task.branch;
   return (
     <li className={`agent-timeline-current-row status-${statusClass(agentTaskState(task))}${decision ? ` report-age-${freshness}` : ""}`}>
-      <AgentDecisionDetails decision={task.decision} />
+      <AgentDecisionDetails key={JSON.stringify(identity)} decision={task.decision} replyBranch={branch} />
       <ProjectBranch project={project} projectId={projectId} branch={task.branch}>
         <span className="agent-timeline-row-head"><strong>{projectLabel(project, projectId)}</strong><span>{branchLabel(task.branch)}</span></span>
         <span className="agent-timeline-status-line"><span title={agentTaskState(task) === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{currentStatus(task)}</span>{task.attention && <span className="agent-timeline-attention">注意: {agentStateLabel(task.attention)}</span>}</span>
@@ -295,7 +296,7 @@ export default function AgentTimelineSidebar({
   loading = false,
   error = null,
 }: AgentTimelineProps) {
-  const { loadOlderEvents, historyHasMore, historyLoading, historyError } = useRepoStream();
+  const { subscribeAgentEvents, loadOlderEvents, historyHasMore, historyLoading, historyError } = useRepoStream();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -308,6 +309,22 @@ export default function AgentTimelineSidebar({
     loading,
     error,
   });
+  const [newDecisionCount, setNewDecisionCount] = useState(0);
+  useEffect(() => {
+    if (!isPaused) return;
+    const seenIds = new Set(frozenSnapshot.events.map((event) => event.event_id));
+    const latestSequence = frozenSnapshot.events.reduce((latest, event) =>
+      typeof event.sequence === "number" ? Math.max(latest, event.sequence) : latest, 0);
+    return subscribeAgentEvents((event) => {
+      if (seenIds.has(event.event_id)) return;
+      // An idempotent resend can refer to an older event outside the loaded pages.
+      if (typeof event.sequence === "number" && event.sequence <= latestSequence) return;
+      seenIds.add(event.event_id);
+      if (AGENT_DECISION_STATUSES.includes(agentTaskState(event))) {
+        setNewDecisionCount((count) => count + 1);
+      }
+    });
+  }, [isPaused, frozenSnapshot, subscribeAgentEvents]);
   const [acknowledgements, setAcknowledgements] = useState<Acknowledgements>({});
   const [acknowledgementsIssue, setAcknowledgementsIssue] = useState(false);
   const [onlyCurrentProject, setOnlyCurrentProject] = useState(false);
@@ -442,6 +459,7 @@ export default function AgentTimelineSidebar({
       setIsPaused(false);
       return;
     }
+    setNewDecisionCount(0);
     setFrozenSnapshot({ events: agentEvents, projects: projectSummaries, loading, error });
     setIsPaused(true);
   };
@@ -473,7 +491,7 @@ export default function AgentTimelineSidebar({
       {isProjectPage && <div className="agent-timeline-scope"><button type="button" className="agent-timeline-pause" aria-pressed={onlyCurrentProject} onClick={toggleProjectScope}>このプロジェクトのみ</button>{scoped && <span>{routeProject === undefined ? "現在のプロジェクト情報は未取得です" : routeProject.name}</span>}</div>}
       {scopeStorageIssue && <p role="status" className="agent-timeline-caption">プロジェクト絞り込みの設定を保存・復元できません。この画面でのみ適用します。</p>}
       {acknowledgementsIssue && <p role="status" className="agent-timeline-caption">確認済みの設定を保存・復元できません。この画面でのみ適用します。</p>}
-      {isPaused && <p className="agent-timeline-paused" role="status" aria-live="polite"><span aria-hidden="true">Ⅱ</span> 表示を固定中。新しい報告は表示していません。</p>}
+      {isPaused && <p className="agent-timeline-paused" role="status" aria-live="polite"><span aria-hidden="true">Ⅱ</span> 表示を固定中。固定後に届いた判断待ち {newDecisionCount}件（全プロジェクト）。新しい報告は表示していません。</p>}
       {displaySnapshot.error && <p className="agent-timeline-empty agent-timeline-error" role="alert">報告を再取得できませんでした。表示中の情報は最新ではない可能性があります。</p>}
 
       <div className="agent-timeline-scroll">

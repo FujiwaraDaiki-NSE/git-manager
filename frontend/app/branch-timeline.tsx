@@ -6,6 +6,7 @@ import type { CSSProperties, Dispatch, MutableRefObject, SetStateAction, ReactNo
 import {
   aggregateTimelineConnectionChips,
   groupTimelineEventsByRow,
+  isDefaultRow,
   routeTimelineConnections,
   selectDefaultTimelineConnectionEdges,
   selectTimelineConnectionEdges,
@@ -26,7 +27,7 @@ import {
 } from "./project-flow.mjs";
 import { agentStateLabel, agentTaskState } from "./agent-overview.mjs";
 import { uniqueLocalForCommit } from "./project-flow.mjs";
-import { openPullRequestLabels, validHttpUrl } from "./pr-tools.mjs";
+import { limitedMergedPullRequestCoverage, openPullRequestLabels, validHttpUrl } from "./pr-tools.mjs";
 import CopyButton from "./copy-button";
 import { timelineRowGeometry, agentFreshness, rowAgentReports, isUnpushedCommit } from "./branch-timeline-presentation.mjs";
 import { connectionEventTime, edgeDisplayLabel, evidenceLabel, operationLabel, referenceDisplayName } from "./branch-relations-tools.mjs";
@@ -136,7 +137,7 @@ function rowLocal(row: TimelineRow) {
   return row.locals.length === 1 ? row.locals[0] : null;
 }
 
-function rowStatus(row: TimelineRow, defaultBranch: string | null) {
+function rowStatus(row: TimelineRow) {
   const labels: Record<string, [string, string]> = {
     synchronized: ["同期済み", "lane-state-ok"],
     local_ahead: ["ローカル先行（未push）", "lane-state-warn"],
@@ -150,7 +151,7 @@ function rowStatus(row: TimelineRow, defaultBranch: string | null) {
     local_only: ["ローカルのみ", "lane-state-muted"],
     upstream_deleted: ["追跡先削除済み", "lane-state-danger"],
     detached: ["detached HEAD", "lane-state-muted"],
-    historical_deleted: ["削除済み・PR履歴", "lane-state-muted"],
+    historical_deleted: ["マージ済みPRの履歴", "lane-state-muted"],
   };
   if (labels[row.status]) return labels[row.status];
   if (row.historical) return ["履歴", "lane-state-muted"];
@@ -160,13 +161,9 @@ function rowStatus(row: TimelineRow, defaultBranch: string | null) {
 
 function statusExplanation(status: string) {
   const descriptions: Record<string, string> = {
-    synchronized: "ローカルと追跡先の先端が一致しています。", local_ahead: "追跡先にないローカルのコミットがあります。", remote_ahead: "ローカルにない追跡先のコミットがあります。", diverged: "ローカルと追跡先の両方に固有のコミットがあります。", remote_only: "リモート参照のみ存在します。", local_only: "追跡先のないローカルブランチです。", upstream_deleted: "設定された追跡先が削除されています。", mixed: "複数のローカルで追跡状態が異なります。", detached: "ブランチに属さないHEADです。", historical_deleted: "削除済みブランチのPR履歴です。", remote_unavailable: "リモート参照を取得できませんでした。", tracking_unavailable: "追跡状態を取得できませんでした。", tracking_inconsistent: "追跡情報に不整合があります。",
+    synchronized: "ローカルと追跡先の先端が一致しています。", local_ahead: "追跡先にないローカルのコミットがあります。", remote_ahead: "ローカルにない追跡先のコミットがあります。", diverged: "ローカルと追跡先の両方に固有のコミットがあります。", remote_only: "リモート参照のみ存在します。", local_only: "追跡先のないローカルブランチです。", upstream_deleted: "設定された追跡先が削除されています。", mixed: "複数のローカルで追跡状態が異なります。", detached: "ブランチに属さないHEADです。", historical_deleted: "このチェックアウトに対応する参照がありません。", remote_unavailable: "リモート参照を取得できませんでした。", tracking_unavailable: "追跡状態を取得できませんでした。", tracking_inconsistent: "追跡情報に不整合があります。",
   };
   return Object.hasOwn(descriptions, status) ? descriptions[status] : "状態の意味を取得できませんでした。";
-}
-
-function isDefaultRow(row: TimelineRow, defaultBranch: string | null) {
-  return Boolean(defaultBranch) && row.name === defaultBranch;
 }
 
 function commitEvent(project: ProjectResponse, row: TimelineRow, commit: ProjectBranchCommit): ProjectEvent {
@@ -833,7 +830,7 @@ export default function BranchTimeline({
         <div className="flow-rows" style={{ "--flow-total-height": `${geometry.height}px`, "--flow-track-min-width": `${trackWidth}px`, "--flow-track-width": `${trackWidth}px` } as CSSProperties}>
           <svg aria-hidden="true" className="flow-connections" preserveAspectRatio="none" viewBox={`0 0 ${trackWidth} ${geometry.height}`}>
             {ticks.map((tick) => <line key={tick.time} className="flow-time-grid" x1={tick.position * trackWidth / 100} x2={tick.position * trackWidth / 100} y1="0" y2={geometry.height} />)}<line className="flow-now-line" x1={observationX * trackWidth / 100} x2={observationX * trackWidth / 100} y1="0" y2={geometry.height} />
-            {rows.map((row, index) => <line key={`guide:${row.id}`} className={`flow-row-guide${row.name === project.default_branch ? " is-default" : ""}`} x1="0" x2={trackWidth} y1={geometry.rows[index].center} y2={geometry.rows[index].center}><title>{row.name} · ブランチ行のガイド（コミットの親子関係ではありません）</title></line>)}
+            {rows.map((row, index) => <line key={`guide:${row.id}`} className={`flow-row-guide${isDefaultRow(row, project.default_branch) ? " is-default" : ""}`} x1="0" x2={trackWidth} y1={geometry.rows[index].center} y2={geometry.rows[index].center}><title>{row.name} · ブランチ行のガイド（コミットの親子関係ではありません）</title></line>)}
             {routeLinks.links.map((link, index) => <path key={index} className="flow-lane-line" d={link.path}><title>{link.label}</title></path>)}
             {[...routeLinks.routes]
               .filter((route) => isRoutePresented(route))
@@ -888,7 +885,7 @@ export default function BranchTimeline({
             const laneEvents = eventsByRow.get(row.id) ?? [];
             const reports = rowAgentReports(row, project.agent_tasks);
             const commands = row.locals.filter((lane) => lane.next_command !== null);
-            const [status, statusClass] = rowStatus(row, project.default_branch);
+            const [status, statusClass] = rowStatus(row);
             const defaultRow = isDefaultRow(row, project.default_branch);
             const local = rowLocal(row);
             const visibleCommits = rowCommits.get(row.id) ?? [];
@@ -940,7 +937,7 @@ export default function BranchTimeline({
         <span>Git最終成功fetch: {project.fetched_at === null ? "未取得" : exactDate(new Date(project.fetched_at * 1000).toISOString())}</span>
         {project.github.open?.status === "unavailable" && <span role="status">{project.github.open.reason}</span>}
         {project.github.status === "pending" && <span role="status">PR情報: {project.github.reason}</span>}
-        {project.github.status === "available" && <span>PR情報: GitHubから取得済み · {exactDate(project.github.checked_at === null ? null : new Date(project.github.checked_at * 1000).toISOString())}</span>}
+        {project.github.status === "available" && <span>PR情報: {limitedMergedPullRequestCoverage(project.github) ?? "GitHubから取得済み"} · {exactDate(project.github.checked_at === null ? null : new Date(project.github.checked_at * 1000).toISOString())}</span>}
         {project.github.status === "unavailable" && <span>PR情報は取得できませんでした。{project.github.reason ?? "GitHubの認証または接続を確認してください。"}</span>}
       </div>
     </>)}

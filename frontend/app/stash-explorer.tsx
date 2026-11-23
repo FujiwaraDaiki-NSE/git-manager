@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
+import CommitCompare from "./commit-compare";
 import PatchView from "./patch-view";
 import type { Numstat } from "./types";
 import {
@@ -39,6 +40,8 @@ type StashPart = {
 };
 
 type StashDetail = StashSummary & {
+  head_parent: string;
+  index_parent: string;
   tracked: StashPart;
   untracked: StashPart;
   command: string;
@@ -362,6 +365,20 @@ export default function StashExplorer({ path }: { path: string }) {
               </div>
             )}
             <StashPartView hash={detail.hash} path={path} part={detail.tracked} kind="tracked" />
+            <CommitCompare key={`${detail.hash}:staged`} path={path} laneComparison={{
+              base: detail.head_parent,
+              target: detail.index_parent,
+              baseLabel: detail.head_parent,
+              directLabel: "HEAD → index（ステージ済み）",
+              supportsMergeBase: false,
+            }} />
+            <CommitCompare key={`${detail.hash}:unstaged`} path={path} laneComparison={{
+              base: detail.index_parent,
+              target: detail.hash,
+              baseLabel: detail.index_parent,
+              directLabel: "index → 作業ツリー（未ステージ）",
+              supportsMergeBase: false,
+            }} />
             <StashPartView hash={detail.hash} path={path} part={detail.untracked} kind="untracked" />
           </section>
         )}

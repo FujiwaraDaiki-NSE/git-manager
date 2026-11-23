@@ -43,8 +43,12 @@ test("operation progress and copyable commands render separately from unknown an
 });
 
 test("branch destinations show both push URLs and explain rejected push", () => {
-  const html = render(DestinationFacts, { destinations: { fetch_remote: "origin", fetch_urls: ["https://example.test/read"], upstream: null, upstream_ref: "refs/heads/renamed", upstream_state: "configured", push_remote: "publish", push_urls: ["ssh://one", "ssh://two"], push_ref: null, push_ref_reason: "simple: 名前が異なるためpushは拒否", push_refspecs: [], push_default: "simple" } });
+  const html = render(DestinationFacts, { destinations: { fetch_remote: "origin", fetch_urls: ["https://example.test/read"], upstream: null, upstream_ref: "refs/heads/renamed", upstream_state: "configured", push_remote: "publish", push_remote_config: { selected_key: "branch.main.pushRemote", keys: [{ key: "branch.main.pushRemote", command: "git config --show-origin --show-scope --get-all branch.main.pushRemote", values: [{ value: "publish", scope: "local", origin: "file:.git/config" }] }] }, push_urls: ["ssh://one", "ssh://two"], push_ref: null, push_ref_reason: "simple: 名前が異なるためpushは拒否", push_refspecs: [], push_default: "simple" } });
   assert.match(html, /追跡参照なし/);
+  assert.match(html, /<details><summary>push先の設定を調べる<\/summary>/);
+  assert.match(html, /publish<\/code><strong> 採用<\/strong>/);
+  assert.match(html, /local · <code>file:\.git\/config/);
+  assert.match(html, /--show-origin --show-scope --get-all/);
   assert.match(html, /ssh:\/\/one \/ ssh:\/\/two/);
   assert.match(html, /名前が異なるためpushは拒否/);
   assert.match(render(DestinationFacts, { destinations: null }), /未取得/);

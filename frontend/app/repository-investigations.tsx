@@ -1,15 +1,16 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { agentStateLabel, agentTaskState } from "./agent-overview.mjs";
 import { fileStatusDescription } from "./file-status.mjs";
 import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
 import PatchView from "./patch-view";
-import type { CommitDetail } from "./types";
+import type { AgentTask, CommitDetail } from "./types";
 import "./tag-explorer.css";
 import "./repository-investigations.css";
 
 type Commit = { hash: string; subject: string; date: string; author: string; mark?: string; sources?: { selector: string; message: string }[]; command?: string };
-type Result = { commits?: Commit[]; scope?: string; fixed_shas?: string[]; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string[] }[] }[] };
+type Result = { commits?: Commit[]; scope?: string; fixed_shas?: string[]; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string | null; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string[] }[] }[] };
 async function read<T,>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, cache: "no-store", signal });
   if (!response.ok) {
@@ -29,7 +30,7 @@ function Detail({ path, hash }: { path: string; hash: string }) {
   return <section className="tag-explorer-detail"><div className="tag-explorer-detail-heading"><h3>コミット詳細</h3><code>{hash}</code></div>{error && <p className="tag-explorer-error" role="alert">{error}</p>}{!data && !error && <p className="tag-explorer-state" role="status">取得中…</p>}{data && <><p className="tag-explorer-note">{data.subject}</p><CommitFiles files={data.files} downloadName={`${hash}.tsv`} /><PatchView patch={data.patch} />{data.patch_truncated && <p className="tag-explorer-note">パッチは一部省略されています。</p>}</>}</section>;
 }
 type InvestigationProps = { path: string } & (
-  | { kind: "overlaps"; onOpenWorktree: (path: string) => void }
+  | { kind: "overlaps"; agentTasks: AgentTask[] | null; onOpenWorktree: (path: string) => void }
   | { kind: "search" | "recovery" | "cherry" }
 );
 function searchDateBounds(since: string, until: string) {
@@ -43,14 +44,14 @@ function searchDateBounds(since: string, until: string) {
 }
 const settings = {
   overlaps: ["worktree間の変更パス重なり", "worktree-overlaps", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"],
-  search: ["リポジトリ全体のコミット検索", "commit-search", "件名・本文と作成者はGitの正規表現、変更パスはGitのpathspecで検索します。検索対象の参照SHAはページ間で固定します。"],
+  search: ["リポジトリ全体のコミット検索", "commit-search", "件名・本文と作成者はGitの正規表現、変更パスはGitのpathspecで検索します。変更内容では、文字列の出現数がファイル内で変わったコミットを検索します。検索対象の参照SHAはページ間で固定します。"],
   recovery: ["到達不能コミットの復旧候補", "recovery-candidates", "現在のref・HEADから到達できない、reflogに残る履歴を表示します。reflog保存期間外は検出できません。復旧コマンドは対象リポジトリで実行してください。"],
   cherry: ["パッチ同等コミットの判定", "patch-equivalence", "パッチ同等＝安全な重複とは限りません。= はパッチ同等、< はAのみ、> はBのみです。共通コミットは表示しません。"],
 };
 function Investigation(props: InvestigationProps) {
   const { path, kind } = props;
   const inputId = useId();
-  const [fields, setFields] = useState<Record<string, string>>({ scope: "--all", grep: "", author: "", since: "", until: "", file: "", left: "", right: "" });
+  const [fields, setFields] = useState<Record<string, string>>({ scope: "--all", mode: "message", grep: "", author: "", since: "", until: "", file: "", left: "", right: "" });
   const [data, setData] = useState<Result | null>(null);
   const [request, setRequest] = useState<Record<string, string> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +63,7 @@ function Investigation(props: InvestigationProps) {
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   const [title, endpoint, note] = settings[kind];
-  const inputs = kind === "search" ? [["scope", "検索範囲（--all または ref）"], ["grep", "件名・本文"], ["author", "作成者"], ["since", "開始日"], ["until", "終了日"], ["file", "変更パス"]] : kind === "cherry" ? [["left", "A ブランチ / ref"], ["right", "B ブランチ / ref"]] : [];
+  const inputs = kind === "search" ? [["scope", "検索範囲（--all または ref）"], ["mode", "検索対象"], ["grep", "検索文字列"], ["author", "作成者"], ["since", "開始日"], ["until", "終了日"], ["file", "変更パス"]] : kind === "cherry" ? [["left", "A ブランチ / ref"], ["right", "B ブランチ / ref"]] : [];
   async function run(values: Record<string, string>, offset: number, fixedShas: string[] | null = null) {
     if (kind === "search" && values.since !== "" && values.until !== "" && values.since > values.until) return;
     controller.current?.abort();
@@ -104,7 +105,10 @@ function Investigation(props: InvestigationProps) {
           {inputs.map(([key, label]) => (
             <label key={key} htmlFor={`${inputId}-${key}`}>
               <span>{label}</span>
-              <input id={`${inputId}-${key}`} type={key === "since" || key === "until" ? "date" : "text"} required={key === "scope" || key === "left" || key === "right"} value={fields[key]} aria-invalid={(key === "since" || key === "until") && invalidDates ? true : undefined} aria-describedby={(key === "since" || key === "until") && invalidDates ? dateErrorId : undefined} onChange={e => setFields({ ...fields, [key]: e.target.value })} />
+              {key === "mode" ? <select id={`${inputId}-${key}`} value={fields.mode} onChange={e => setFields({ ...fields, mode: e.target.value })}>
+                <option value="message">件名・本文</option>
+                <option value="content">変更内容の文字列（git log -S）</option>
+              </select> : <input id={`${inputId}-${key}`} type={key === "since" || key === "until" ? "date" : "text"} required={key === "scope" || key === "left" || key === "right"} value={fields[key]} aria-invalid={(key === "since" || key === "until") && invalidDates ? true : undefined} aria-describedby={(key === "since" || key === "until") && invalidDates ? dateErrorId : undefined} onChange={e => setFields({ ...fields, [key]: e.target.value })} />}
             </label>
           ))}
           {invalidDates && <p id={dateErrorId} className="tag-explorer-error repository-investigation-date-error" role="alert">開始日は終了日以前の日付にしてください</p>}
@@ -113,24 +117,34 @@ function Investigation(props: InvestigationProps) {
         {error && <p className="tag-explorer-error" role="alert">取得できませんでした。{error}</p>}
         {data && <div aria-live="polite" aria-busy={loading}>
           {pageLoading && <p className="tag-explorer-state" role="status">{pageLoading}</p>}
-          {kind === "search" && request && <p className="tag-explorer-note">適用した条件: 件名・本文「{request.grep}」、作成者「{request.author}」、期間「{request.since} ～ {request.until}」、変更パス「{request.file}」（空欄は条件なし）</p>}
+          {kind === "search" && request && <p className="tag-explorer-note">適用した条件: {request.mode === "content" ? "変更内容の文字列" : "件名・本文"}「{request.grep}」、作成者「{request.author}」、期間「{request.since} ～ {request.until}」、変更パス「{request.file}」（空欄は条件なし）</p>}
           {kind === "search" && request && <p className="tag-explorer-note">検索開始時点の参照で固定中 <button className="tag-explorer-export" type="button" disabled={loading} onClick={() => void run(request, 0)}>最新状態で検索し直す</button></p>}
           {data.scope && <p className="tag-explorer-note">検索範囲: <code>{data.scope}</code></p>}
           {kind === "search" && data.commits && data.commits.length > 0 && <p className="tag-explorer-note">{data.offset! + 1}〜{data.offset! + data.commits.length}件目を表示</p>}
           {data.left && <p className="tag-explorer-note">A: {data.left} @ {data.left_sha?.slice(0, 12)} ／ B: {data.right} @ {data.right_sha?.slice(0, 12)}</p>}
-          {data.command && <p className="tag-explorer-note"><code>{data.command}</code></p>}
+          {data.command && <p className="tag-explorer-note">{kind === "search" && "再現用コマンド（対象リポジトリで実行） "}<code>{data.command}</code>{kind === "search" && <> <CopyButton value={data.command} label="再現用コマンドをコピー" /></>}</p>}
           {data.unavailable && data.unavailable.length > 0 && <p className="tag-explorer-error" role="alert">一部worktreeを取得できませんでした。重なりの一覧は不完全です: {data.unavailable.join("、")}</p>}
           {kind === "overlaps" && data.overlaps && (data.overlaps.length ? (
             <ul className="repository-investigation-list">
               {data.overlaps.map(item => <li className="tag-explorer-commit" key={item.path}>
                 <div className="tag-explorer-commit-heading"><strong><code>{item.path}</code></strong></div>
                 <ul className="repository-investigation-list">
-                  {item.worktrees.map(w => <li className="tag-explorer-commit-meta" key={w.worktree}>
-                    <span>{w.worktree}</span>
-                    <span>{w.branch === null ? "detached HEAD（ブランチなし）" : w.branch.replace(/^refs\/heads\//, "")}</span>
-                    {w.xy.map((xy) => <span key={xy}><code className="repository-investigation-xy">{xy}</code> {fileStatusDescription(xy)}</span>)}
-                    <button className="tag-explorer-export" type="button" onClick={() => props.onOpenWorktree(w.worktree)}>このworktreeの状態を開く</button>
-                  </li>)}
+                  {item.worktrees.map(w => {
+                    const branch = w.branch === null ? null : w.branch.replace(/^refs\/heads\//, "");
+                    const task = branch === null ? undefined : props.agentTasks?.find(task => task.branch === branch && agentTaskState(task) !== null);
+                    return <li className="tag-explorer-commit-meta" key={w.worktree}>
+                      <span>{w.worktree}</span>
+                      <span>{branch === null ? "detached HEAD（ブランチなし）" : branch}</span>
+                      {w.xy.map((xy) => <span key={xy}><code className="repository-investigation-xy">{xy}</code> {fileStatusDescription(xy)}</span>)}
+                      {task && <div className="repository-investigation-agent-report">
+                        <strong>ブランチのagent報告</strong> <span>{agentStateLabel(agentTaskState(task))}</span>
+                        {task.summary !== null && <div>{task.summary}</div>}
+                        {task.decision && <div>質問 {task.decision.question}</div>}
+                        {task.occurred_at !== null && <div>報告時刻 <time dateTime={task.occurred_at}>{new Date(task.occurred_at).toLocaleString("ja-JP")}</time></div>}
+                      </div>}
+                      <button className="tag-explorer-export" type="button" onClick={() => props.onOpenWorktree(w.worktree)}>このworktreeの状態を開く</button>
+                    </li>;
+                  })}
                 </ul>
               </li>)}
             </ul>
@@ -166,7 +180,7 @@ function Investigation(props: InvestigationProps) {
     </details>
   );
 }
-export function WorktreeOverlaps({ path, onOpenWorktree }: { path: string; onOpenWorktree: (path: string) => void }) { return <Investigation key={path} path={path} kind="overlaps" onOpenWorktree={onOpenWorktree} />; }
+export function WorktreeOverlaps({ path, agentTasks, onOpenWorktree }: Omit<Extract<InvestigationProps, { kind: "overlaps" }>, "kind">) { return <Investigation key={path} path={path} kind="overlaps" agentTasks={agentTasks} onOpenWorktree={onOpenWorktree} />; }
 export function CommitSearch({ path }: { path: string }) { return <Investigation key={path} path={path} kind="search" />; }
 export function RecoveryCandidates({ path }: { path: string }) { return <Investigation key={path} path={path} kind="recovery" />; }
 export function PatchEquivalence({ path }: { path: string }) { return <Investigation key={path} path={path} kind="cherry" />; }

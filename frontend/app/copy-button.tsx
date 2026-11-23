@@ -26,5 +26,6 @@ export default function CopyButton({ value, label }: { value: string; label: str
   return <span className="copy-control">
     <button className="copy-button" type="button" disabled={status === "copying"} onClick={() => void copy()} aria-label={label} title={label}><span aria-hidden="true">{status === "success" ? "✓" : "⧉"}</span><span>{label}</span></button>
     <span className={`copy-feedback${status === "error" ? " is-error" : ""}`} role={status === "error" ? "alert" : "status"}>{status === "success" ? "コピーしました" : status === "error" ? "コピーできません。表示された文字列を選択してコピーしてください。" : ""}</span>
+    {status === "error" && <textarea aria-label={`手動コピー用（${label}）`} value={value} readOnly rows={3} style={{ flexBasis: "100%", minWidth: 0, maxWidth: "100%", resize: "vertical" }} />}
   </span>;
 }

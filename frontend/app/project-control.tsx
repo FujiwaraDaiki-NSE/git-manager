@@ -21,6 +21,7 @@ import CommitCompare from "./commit-compare";
 import FileHistoryExplorer from "./file-history-explorer";
 import WorktreeExplorer from "./worktree-explorer";
 import PrExplorer from "./pr-explorer";
+import { openPullRequestLabels, validHttpUrl } from "./pr-tools.mjs";
 import BranchFlowSections from "./branch-flow-sections";
 import { commitHeader } from "./branch-history-tools.mjs";
 import CommitFiles from "./commit-files";
@@ -44,7 +45,7 @@ import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
-import { agentReportKey, agentStateLabel, agentTaskState, mergeProjectAgentEvent } from "./agent-overview.mjs";
+import { agentDecisionReportTimes, agentReportKey, agentStateLabel, agentTaskState, mergeProjectAgentEvent } from "./agent-overview.mjs";
 import { parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import {
@@ -679,6 +680,14 @@ function InfoField({ label, value, code = false }: { label: string; value: strin
 }
 
 function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: ProjectLane; project: ProjectResponse; defaultBranch: string | null; onOpenGit: (lane: ProjectLane) => void }) {
+  const agent = currentLaneAgent(lane);
+  const agentState = agentStateLabel(agentTaskState(agent));
+  const reportTimes = agentDecisionReportTimes(agent, project.agent_events);
+  const open = project.github.open;
+  const row = project.branch_rows?.find((item) => item.locals.some((local) => local.id === lane.id));
+  const openPulls = open?.status === "available" ? row?.open_pull_requests : null;
+  const fullSha = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+  const checkedAt = open && open.checked_at !== null ? new Date(open.checked_at * 1000).toISOString() : null;
   const nextCommand = lane.next_command === null ? null : worktreeCommand(lane.next_command.command, lane.path, project.main_path);
   const nextTarget = lane.next_command === null ? null : commandTarget(lane.next_command.command, lane.path, project.main_path);
   const destinations = lane.destinations;
@@ -698,20 +707,53 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
     <div className="selection-content">
       <div className="selection-kicker">作業レーン</div>
       <h3>{laneLabel(lane)}</h3>
-      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact branch={lane.branch} task={currentLaneAgent(lane)} /></div>
+      <div className="selection-badges"><span className={`lane-state ${laneStateClass(lane, defaultBranch)}`}>{laneState(lane, defaultBranch)}</span><AgentFact branch={lane.branch} task={agent} /></div>
       <dl className="selection-list">
         <div><dt>作業パス</dt><dd><code>{lane.path ?? "未取得"}</code>{lane.path && <CopyButton value={lane.path} label="作業パスをコピー" />}</dd></div>
         <div><dt>作業先端</dt><dd><code>{lane.unborn ? "初回コミット前" : lane.head ?? "未取得"}</code></dd></div>
         <div><dt>既定ブランチとの共通祖先</dt><dd><code>{lane.merge_base ?? "未取得"}</code></dd></div>
         <div><dt>最終イベント</dt><dd>{lane.unborn ? "まだコミットがありません" : lane.last_commit?.subject ?? "未取得"}{!lane.unborn && <small>{exactDate(lane.last_commit?.date)}</small>}</dd></div>
         <div><dt>既定ブランチとの差</dt><dd>{lane.default_ahead === null || lane.default_behind === null ? "未取得" : `ahead ${lane.default_ahead} · behind ${lane.default_behind}`}</dd></div>
-        <div><dt>ブランチの作業状況</dt><dd>{agentStateLabel(agentTaskState(currentLaneAgent(lane)))}</dd></div>
+        <div><dt>ブランチの作業状況</dt><dd>{agentState}</dd></div>
+        {reportTimes !== null && <>
+          <div><dt>{agentState}の最初の連続報告</dt><dd><time dateTime={reportTimes.first ?? undefined}>{exactDate(reportTimes.first)}</time></dd></div>
+          <div><dt>最終報告</dt><dd><time dateTime={reportTimes.latest ?? undefined}>{exactDate(reportTimes.latest)}</time></dd></div>
+        </>}
+        {lane.branch !== null && <>
+          <div>
+            <dt>オープンPR{row && `（${row.remote_ref ?? row.name} に対応）`}</dt>
+            <dd>
+              {open?.status === "unavailable" ? "オープンPRの照会に失敗しました"
+                : open?.status === "pending" ? "オープンPRを照会中"
+                : open?.status === "not_applicable" ? "オープンPRの照会対象外"
+                : openPulls ? `${openPulls.length} 件` : "オープンPRの対応付け未取得"}
+              {open?.reason && <small>{open.reason}</small>}
+              <small>照会時刻 <time dateTime={checkedAt ?? undefined}>{exactDate(checkedAt)}</time></small>
+            </dd>
+          </div>
+          {openPulls?.map((pr) => {
+            const href = validHttpUrl(pr.url);
+            const label = `PR #${pr.number}`;
+            const comparison = lane.head && pr.headRefOid && fullSha.test(lane.head) && fullSha.test(pr.headRefOid)
+              ? lane.head.toLowerCase() === pr.headRefOid.toLowerCase() ? "先端一致" : "先端が異なる"
+              : "先端を比較できません";
+            return <div key={pr.number}>
+              <dt>{href ? <a href={href} target="_blank" rel="noreferrer">{label}</a> : label}</dt>
+              <dd>
+                <strong>{comparison}</strong>
+                <small>{openPullRequestLabels(pr).join(" · ")}</small>
+                <small>ローカル先端 <code>{valueOrUnknown(lane.head)}</code></small>
+                <small>PRのCI対象 <code>{valueOrUnknown(pr.headRefOid)}</code></small>
+              </dd>
+            </div>;
+          })}
+        </>}
         <div><dt>このローカルブランチからの取り込み記録</dt><dd>{relationText(outgoing)}</dd></div>
         <div><dt>このローカルブランチへの取り込み記録</dt><dd>{relationText(incoming)}</dd></div>
         <div><dt>次の工程 / 注意</dt><dd>{laneNextPhaseOrAttention(lane)}</dd></div>
         <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}{laneComparison === null && <small>{comparisonUnavailable}</small>}</dd></div>
       </dl>
-      {laneComparison !== null && <CommitCompare key={JSON.stringify([project.main_path, lane.id])} path={project.main_path} laneComparison={laneComparison} />}
+      {laneComparison !== null && <CommitCompare key={JSON.stringify([project.main_path, lane.id])} path={project.main_path} laneComparison={{ ...laneComparison, directLabel: "追跡先 → ローカル先端の差分" }} />}
       <OperationFacts operations={lane.operations} />
       {lane.branch !== null && <DestinationFacts destinations={lane.destinations} />}
       <p>記録がない場合も、取り込まれていないとは限りません。<Link href={`${relationHref.split("#")[0]}#branch-relations-title`}>現在の包含関係・未解決の記録を確認</Link></p>
@@ -1188,7 +1230,7 @@ export default function ProjectControl() {
       <div style={paneStyle("--detail-width", detailWidth)} className={`control-layout${selectedEvent || selectedLane ? " has-selection" : ""}`}>
         <section className="control-main" role="tabpanel" id={`project-panel-${urlState.tab}`} aria-labelledby={`project-tab-${urlState.tab}`} tabIndex={0}>
           {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} renderSections={(notes) => <BranchFlowSections key={project.main_path} project={project} section={urlState.flowSection} onSectionChange={(flowSection) => updateUrl({ flowSection })} relationRef={urlState.relationRef} selectedLane={selectedLane} selectedRowId={urlState.branchRow} onSelect={selectEvent}>{notes}</BranchFlowSections>} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /></>}
-          {urlState.tab === "lanes" && <><WorktreeOverlaps path={project.main_path} onOpenWorktree={openWorktreeGit} /><WorkLanes authorFilter={laneAuthorFilter} onAuthorFilter={(value) => updateUrl({ laneAuthorFilter: value })} upstreamFilter={laneUpstreamFilter} onUpstreamFilter={(value) => updateUrl({ laneUpstreamFilter: value === "all" ? null : value })} agentFilter={laneAgentFilter} onAgentFilter={(value) => updateUrl({ laneAgentFilter: value === "all" ? null : value })} onResetFilters={() => updateUrl({ laneQuery: null, laneFilter: null, laneAuthorFilter: null, laneUpstreamFilter: null, laneAgentFilter: null })} searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} /></>}
+          {urlState.tab === "lanes" && <><WorktreeOverlaps path={project.main_path} agentTasks={project.agent_tasks} onOpenWorktree={openWorktreeGit} /><WorkLanes authorFilter={laneAuthorFilter} onAuthorFilter={(value) => updateUrl({ laneAuthorFilter: value })} upstreamFilter={laneUpstreamFilter} onUpstreamFilter={(value) => updateUrl({ laneUpstreamFilter: value === "all" ? null : value })} agentFilter={laneAgentFilter} onAgentFilter={(value) => updateUrl({ laneAgentFilter: value === "all" ? null : value })} onResetFilters={() => updateUrl({ laneQuery: null, laneFilter: null, laneAuthorFilter: null, laneUpstreamFilter: null, laneAgentFilter: null })} searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} /></>}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
           {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルを調べる</h3><p className="section-copy">指定した版の内容や変更元を確認し、無視ルール・改行・Git属性の扱いを調べられます。</p></div></div><ConflictInspector key={`conflicts:${project.main_path}`} path={project.main_path} /><TreeSizes key={`sizes:${project.main_path}`} path={project.main_path} /><ContentSearch key={`content:${project.main_path}`} path={project.main_path} /><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /><IgnoreInspector key={`ignore:${project.main_path}`} path={project.main_path} /><FileAttributes key={`attributes:${project.main_path}`} path={project.main_path} /></section>}
           {urlState.tab === "info" && <ProjectInfo project={project} onOpenGit={openGit} onSelectLane={selectLane} />}

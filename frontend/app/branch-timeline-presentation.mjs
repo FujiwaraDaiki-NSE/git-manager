@@ -23,7 +23,7 @@ export function agentFreshness(occurredAt, now) {
 
 export function rowAgentReports(row, tasks) {
   if (tasks === null) return [];
-  const branches = new Set([row.name, ...row.locals.map((lane) => lane.branch).filter((branch) => branch !== null)]);
+  const branches = new Set(row.locals.map((lane) => lane.branch).filter((branch) => branch !== null));
   return tasks.filter((task) => branches.has(task.branch) && agentTaskState(task) !== null);
 }
 

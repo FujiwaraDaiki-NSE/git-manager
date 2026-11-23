@@ -3,6 +3,7 @@
 import CopyButton from "./copy-button";
 import ScrollShadow from "./scroll-shadow";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { limitedMergedPullRequestCoverage } from "./pr-tools.mjs";
 import { shellQuote } from "./status-file-tools.mjs";
 import {
   connectionPairs,
@@ -321,6 +322,7 @@ export default function BranchRelations({
     unknown: 0,
   }), [oriented]);
   const coverage = coverageLabels(connection);
+  const limitedPrCoverage = limitedMergedPullRequestCoverage(project.github);
   const unknownHistoryEdges = selectedRefId ? edges.filter((edge) => {
     const ids = edgeReferenceIds(edge, refs);
     return !ids.source && !ids.target;
@@ -371,6 +373,7 @@ export default function BranchRelations({
           <span className={coverage.ancestryClass}>{coverage.ancestry}</span>
           <span className={coverage.reflogClass}>{coverage.reflog}</span>
           <span>PR・共通祖先・reflog の明示的な根拠を使います。</span>
+          {limitedPrCoverage !== null && <span>{limitedPrCoverage}</span>}
         </div>
 
         {!connection && <p className="branch-relations-empty" role="status">ブランチ関係情報は未取得です。再走査してから確認してください。</p>}

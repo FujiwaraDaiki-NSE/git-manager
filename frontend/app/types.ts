@@ -1,6 +1,14 @@
 export type FetchStatus = { attempted_at: number; result: "success" | "failure"; category: "authentication" | "connection" | "timeout" | "other" | null; reason: string | null };
 export type GitOperation = { kind: string; marker: string; step: number | null; total: number | null; commands: NextCommand[] };
-export type BranchDestinations = { upstream_state: "unset" | "configured"; upstream_gone: boolean; upstream_head: string | null; push_ref_reason: string | null; push_refspecs: string[] | null; fetch_remote: string | null; fetch_urls: string[] | null; upstream: string | null; upstream_ref: string | null; push_remote: string | null; push_urls: string[] | null; push_ref: string | null; push_default: string | null };
+export type PushRemoteConfig = {
+  selected_key: string | null;
+  keys: {
+    key: string;
+    command: string;
+    values: { value: string | null; origin: string; scope: string }[];
+  }[];
+};
+export type BranchDestinations = { upstream_state: "unset" | "configured"; upstream_gone: boolean; upstream_head: string | null; push_ref_reason: string | null; push_refspecs: string[] | null; fetch_remote: string | null; fetch_urls: string[] | null; upstream: string | null; upstream_ref: string | null; push_remote: string | null; push_remote_config: PushRemoteConfig; push_urls: string[] | null; push_ref: string | null; push_default: string | null };
 export type Entry = { xy: string; path: string; original_path: string | null };
 export type Count = { xy: string; count: number };
 export type Commit = { hash: string; subject: string; author: string; date: string };
@@ -91,6 +99,7 @@ export type Branch = {
   date: string;
   current: boolean;
   merged: boolean | null;
+  is_default: boolean;
   worktree: string | null;
 };
 export type BranchesResponse = {
@@ -441,7 +450,13 @@ export type ProjectSummary = {
 export type ProjectResponse = {
   fetch_status?: FetchStatus | null;
   snapshot?: { observed_at: number; status: "ready" | "refreshing" | "failed"; error: string | null };
-  github: { open?: { status: "available" | "unavailable" | "pending" | "not_applicable"; reason: string | null; checked_at: number | null; pulls: OpenPullRequest[] }; status: "available" | "unavailable" | "pending" | "not_applicable"; reason: string | null; repository: string | null; checked_at: number | null };
+  github: {
+    open?: { status: "available" | "unavailable" | "pending" | "not_applicable"; reason: string | null; checked_at: number | null; pulls: OpenPullRequest[] };
+    status: "available" | "unavailable" | "pending" | "not_applicable";
+    reason: string | null;
+    repository: string | null;
+    checked_at: number | null;
+  } & ({ complete: boolean; merged_count: number } | { complete?: never; merged_count?: never });
   branch_rows: ProjectBranchRow[] | null;
   branch_commits: ProjectBranchCommit[] | null;
   branch_connections: ProjectBranchConnections | null;

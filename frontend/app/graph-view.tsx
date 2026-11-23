@@ -6,6 +6,8 @@ import {
   COMMON_ANCESTOR_MARKER,
   MAX_BRANCH_NAMES_PER_GROUP,
   buildBranchRelationGeometry,
+  graphWidth,
+  laneX,
 } from "./branch-relation.mjs";
 import type {
   BranchRelationSummary,
@@ -32,17 +34,9 @@ export type GraphViewProps = {
   className?: string;
 };
 
-const LANE_WIDTH = 14;
 const ROW_HEIGHT = 30;
 const NODE_RADIUS = 4;
-const NODE_X_OFFSET = 8;
-const MAX_VISIBLE_LANES = 8;
-
-const graphWidth = (maxLane: number) =>
-  Math.min(maxLane + 1, MAX_VISIBLE_LANES) * LANE_WIDTH + 16;
-
-const laneX = (lane: number) =>
-  Math.min(lane, MAX_VISIBLE_LANES - 1) * LANE_WIDTH + NODE_X_OFFSET;
+const ROW_CONTENT_MIN_WIDTH = 160;
 
 function isGraphRow(item: GraphItem): item is GraphRow {
   return "hash" in item;
@@ -285,7 +279,7 @@ function GraphRowView({
       onClick={onClick ? () => onClick(item) : undefined}
       onKeyDown={handleKeyDown}
       role={interactive ? "button" : "group"}
-      style={rowStyle}
+      style={{ ...rowStyle, minWidth: width + ROW_CONTENT_MIN_WIDTH }}
       tabIndex={interactive ? (active ? 0 : -1) : undefined}
     >
       <GraphSvg
@@ -327,6 +321,11 @@ function BranchRelationDiagram({ summary }: BranchRelationSummaryProps) {
       aria-hidden="true"
       className="branch-relation-svg"
       height={geometry.height}
+      style={{
+        width: `max(100%, ${geometry.width}px)`,
+        minWidth: 0,
+        maxWidth: "none",
+      }}
       viewBox={`0 0 ${geometry.width} ${geometry.height}`}
       width={geometry.width}
     >
@@ -485,9 +484,15 @@ export function BranchRelationSummary({
           {summary.omittedGroups} 組（{summary.omittedBranches} ブランチ）を省略しています。
         </div>
       )}
-      <div className="branch-relation-diagram" aria-hidden="true">
-        <BranchRelationDiagram summary={summary} />
-        <div className="branch-relation-diagram-key">
+      <div className="branch-relation-diagram">
+        <div
+          aria-label="ブランチ関係図"
+          role="group"
+          style={{ flex: "0 1 300px", minWidth: 0, overflowX: "auto" }}
+        >
+          <BranchRelationDiagram summary={summary} />
+        </div>
+        <div className="branch-relation-diagram-key" aria-hidden="true">
           <span>● ベースライン</span>
           <span>● 各 HEAD</span>
           <span>○ 共通祖先</span>
@@ -510,9 +515,25 @@ export function BranchRelationSummary({
                   <span className="branch-relation-default">既定</span>
                 )}
                 {omittedNames > 0 && (
-                  <span className="branch-relation-group-count">
-                    他 {omittedNames} ブランチ
-                  </span>
+                  <details
+                    className="branch-relation-group-count"
+                    style={{ minWidth: 0 }}
+                  >
+                    <summary style={{ cursor: "pointer" }}>
+                      他 {omittedNames} ブランチ
+                    </summary>
+                    <ul
+                      style={{
+                        margin: "4px 0 0",
+                        overflowWrap: "anywhere",
+                        paddingInlineStart: "1.5em",
+                      }}
+                    >
+                      {relation.names.slice(MAX_BRANCH_NAMES_PER_GROUP).map((name) => (
+                        <li key={name}>{name}</li>
+                      ))}
+                    </ul>
+                  </details>
                 )}
                 <code>{relation.headRow.short} HEAD</code>
               </div>

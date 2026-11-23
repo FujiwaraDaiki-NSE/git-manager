@@ -30,7 +30,8 @@ test("patch equivalence displays the compared refs and short SHAs with the repro
 
 test("commit search pages send large SHA arrays in POST bodies and refresh with GET", async () => {
   const shas = Array.from({ length: 1800 }, (_, i) => i.toString(16).padStart(40, "0"));
-  const fields = { scope: "--all", grep: "needle", author: "", since: "", until: "", file: "" };
+  const fields = { scope: "--all", mode: "message", grep: "needle", author: "", since: "", until: "", file: "" };
+  const submitted = { ...fields, mode: "content", since_at: "", until_at: "" };
   const result = { commits: [], offset: 0, has_more: true, fixed_shas: shas };
   const source = readFileSync(new URL("../app/repository-investigations.tsx", import.meta.url), "utf8").replace(/^import .*\.css";$/gm, "");
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
@@ -42,7 +43,7 @@ test("commit search pages send large SHA arrays in POST bodies and refresh with 
     exports: module.exports, URLSearchParams, AbortController,
     fetch: async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => result }; },
     require: id => id === "react" ? { ...React, useId: () => "test", useEffect: () => {}, useRef: () => ({ current: null }),
-      useState: initial => [[fields, result, { ...fields, since_at: "", until_at: "" }, null, false, null][state++], () => {}] }
+      useState: initial => [[fields, result, submitted, null, false, null][state++], () => {}] }
       : id.startsWith("./") ? { __esModule: true, default: () => null } : baseRequire(id),
   });
   const outer = module.exports.CommitSearch({ path: "/repo" });
@@ -63,16 +64,20 @@ test("commit search pages send large SHA arrays in POST bodies and refresh with 
   assert.deepEqual(body.fixed_shas, shas);
   assert.equal(body.offset, 50);
   assert.equal(body.grep, "needle");
+  assert.equal(body.mode, "content");
   buttons.find(button => button.props.children === "最新状態で検索し直す").props.onClick();
   await Promise.resolve();
   assert.match(calls[1].url, /^\/api\/repo\/commit-search\?/);
   assert.ok(!calls[1].url.includes("fixed_shas"));
-  assert.equal(new URLSearchParams(calls[1].url.split("?")[1]).get("offset"), "0");
+  const params = new URLSearchParams(calls[1].url.split("?")[1]);
+  assert.equal(params.get("offset"), "0");
+  assert.equal(params.get("mode"), "content");
   assert.equal(calls[1].init.method, undefined);
 });
 
 async function investigationHarness(kind, initial, fetchResult, props = {}) {
   const { fileStatusDescription } = await import("../app/file-status.mjs");
+  const agentOverview = await import("../app/agent-overview.mjs");
   const source = readFileSync(new URL("../app/repository-investigations.tsx", import.meta.url), "utf8").replace(/^import .*\.css";$/gm, "");
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
   const module = { exports: {} };
@@ -86,6 +91,7 @@ async function investigationHarness(kind, initial, fetchResult, props = {}) {
     require: id => id === "react" ? { ...React, useId: () => "test", useEffect: () => {}, useRef: () => ({ current: null }),
       useState: value => { const index = cursor++; if (!(index in states)) states[index] = value; return [states[index], next => { states[index] = next; }]; } }
       : id === "./file-status.mjs" ? { fileStatusDescription }
+      : id === "./agent-overview.mjs" ? agentOverview
       : id.startsWith("./") ? { __esModule: true, default: () => null } : baseRequire(id),
   });
   function render() {
@@ -105,7 +111,7 @@ async function investigationHarness(kind, initial, fetchResult, props = {}) {
   }
   return { render, nodes, calls, states, html: () => renderToStaticMarkup(render()) };
 }
-const searchFields = { scope: "--all", grep: "", author: "", since: "", until: "", file: "" };
+const searchFields = { scope: "--all", mode: "message", grep: "", author: "", since: "", until: "", file: "" };
 
 test("date validation describes both date inputs and blocks only reversed ranges", async () => {
   for (const [since, until, invalid] of [["2026-02-02", "2026-02-01", true], ["2026-02-01", "2026-02-01", false], ["2026-02-01", "", false], ["", "2026-02-01", false], ["", "", false]]) {
@@ -185,7 +191,7 @@ test("overlaps retain XY codes and caution alongside shared Japanese status desc
     { worktree: "/repo1", branch: "refs/heads/topic", xy: ["UU"] },
   ];
   const opened = [];
-  const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees }] }], undefined, { onOpenWorktree: path => opened.push(path) });
+  const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees }] }], undefined, { agentTasks: null, onOpenWorktree: path => opened.push(path) });
   const html = h.html();
   for (const text of ["M ", " M", "??", "UU", "ステージ: 変更", "作業: 変更", "未追跡", "競合を解消してください", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"]) assert.ok(html.includes(text));
   const rows = h.nodes(h.render(), "li").filter(node => node.props.className === "tag-explorer-commit-meta");
@@ -196,4 +202,27 @@ test("overlaps retain XY codes and caution alongside shared Japanese status desc
     openButton.props.onClick();
   }
   assert.deepEqual(opened, ["/repo0", "/repo1"]);
+});
+
+test("overlaps show each explicit report by exact branch name, including its own question and time", async () => {
+  const worktrees = [
+    { worktree: "/repo", branch: "refs/heads/main", xy: [" M"] },
+    { worktree: "/topic", branch: "refs/heads/feature/topic", xy: [" M"] },
+    { worktree: "/no-report", branch: "refs/heads/feature", xy: [" M"] },
+    { worktree: "/detached", branch: null, xy: [" M"] },
+  ];
+  const agentTasks = [
+    { branch: "main", worktree: "/old-checkout", kind: "status", status: "implementing", summary: "実装作業", decision: null, occurred_at: "2026-01-01T01:00:00Z" },
+    { branch: "feature/topic", kind: "status", status: "waiting_for_user", summary: "確認作業", decision: { question: "仕様を確定しますか？" }, occurred_at: "2026-01-01T02:00:00Z" },
+    { branch: "feature", kind: "lifecycle", summary: "ライフサイクル" },
+    { branch: null, kind: "status", status: "testing", summary: "紐付けなし" },
+  ];
+  const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees }] }], undefined, { agentTasks, onOpenWorktree() {} });
+  const rows = h.nodes(h.render(), "li").filter(node => node.props.className === "tag-explorer-commit-meta").map(renderToStaticMarkup);
+  assert.match(rows[0], /実装中.*実装作業.*dateTime="2026-01-01T01:00:00Z"/);
+  assert.doesNotMatch(rows[0], /仕様を確定しますか/);
+  assert.match(rows[1], /feature\/topic.*入力待ち.*確認作業.*仕様を確定しますか.*dateTime="2026-01-01T02:00:00Z"/);
+  assert.doesNotMatch(rows[2], /agent報告|ライフサイクル/);
+  assert.match(rows[3], /detached HEAD/);
+  assert.doesNotMatch(rows[3], /agent報告|紐付けなし/);
 });

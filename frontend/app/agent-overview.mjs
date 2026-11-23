@@ -210,6 +210,27 @@ export function laneAgentTasks(lane, tasks) {
   return laneBranch ? (tasks || []).filter((task) => task?.branch === laneBranch) : [];
 }
 
+/** Find the contiguous run ending at the branch's current explicit report. */
+export function agentDecisionReportTimes(current, events) {
+  const status = agentTaskState(current);
+  if (status !== "waiting_for_user" && status !== "blocked" && status !== "review_required" && status !== "merge_ready") return null;
+  const key = agentReportKey(current);
+  if (key === null) return null;
+
+  const reports = events.filter((event) => isExplicitAgentStatus(event)
+    && agentReportKey(event) === key && compareAgentEvents(event, current) <= 0)
+    .sort((left, right) => compareAgentEvents(right, left));
+  const latest = reports[0];
+  let first = null;
+  if (latest && compareAgentEvents(latest, current) === 0) {
+    for (const report of reports) {
+      if (report.status !== status) break;
+      first = report.occurred_at;
+    }
+  }
+  return { first, latest: current.occurred_at };
+}
+
 function historicalKey(event) {
   const key = agentReportKey(event);
   if (key) return key;

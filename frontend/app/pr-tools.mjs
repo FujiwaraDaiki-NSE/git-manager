@@ -314,6 +314,31 @@ export function buildPullRequestExplorerData(project, options) {
 const changesRequestedLabel = "変更要求";
 const ciFailureLabel = "CI 失敗";
 
+/** @param {import("./types").ProjectResponse["github"]} github */
+export function limitedMergedPullRequestCoverage(github) {
+  return github.status === "available" && github.complete === false
+    ? `新しい順（PR作成日時）にマージ済みPR ${github.merged_count}件までを照会しました。`
+    : null;
+}
+
+/** @param {import("./types").OpenPullRequest} pr */
+export function openPullRequestSource(pr) {
+  return pr.headRepository === null ? null : `${pr.headRepository}:${pr.headRefName}`;
+}
+
+/** @param {import("./types").OpenPullRequest[]} pulls @param {string} query */
+export function filterOpenPullRequests(pulls, query) {
+  const term = query.trim().toLowerCase();
+  if (term === "") return pulls;
+  return pulls.filter((pr) => {
+    const source = openPullRequestSource(pr);
+    return `#${pr.number}`.includes(term)
+      || pr.title.toLowerCase().includes(term)
+      || pr.headRefName.toLowerCase().includes(term)
+      || (source !== null && source.toLowerCase().includes(term));
+  });
+}
+
 /** GitHubの明示値を表示し、nullを待機状態と混同しない。 */
 export function openPullRequestLabels(pr) {
   const review = { APPROVED: "レビュー承認", CHANGES_REQUESTED: changesRequestedLabel, REVIEW_REQUIRED: "レビュー待ち" };
