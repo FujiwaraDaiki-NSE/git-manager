@@ -17,6 +17,12 @@ REF_FORMAT = (
     "%1f%(upstream:track)%1f%(committerdate:iso-strict)%1f%(HEAD)"
     "%1f%(refname)%1f%(worktreepath)"
 )
+# Keep the same row layout for parsing. Object type preserves Git's error
+# on missing ref targets without reading commit metadata for the count.
+COUNT_REF_FORMAT = (
+    "%(refname)%1f%(objecttype)%1f%(upstream:short)"
+    "%1f%1f%1f%1f%(refname)%1f%(worktreepath)"
+)
 
 
 def valid_hash(value: str) -> bool:
@@ -145,7 +151,7 @@ def _parse_ref_line(line: str) -> dict[str, Any] | None:
 
 def count_local_branches(repo: str) -> int | None:
     """Count the same local rows as get_branches without merge-status reads."""
-    refs = gitinfo._run(repo, ["for-each-ref", f"--format={REF_FORMAT}", "refs/heads", "refs/remotes"])
+    refs = gitinfo._run(repo, ["for-each-ref", f"--format={COUNT_REF_FORMAT}", "refs/heads", "refs/remotes"])
     if refs is None:
         return None
     # Retain the exact parser, including malformed-row and remote exclusions.

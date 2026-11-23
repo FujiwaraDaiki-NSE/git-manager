@@ -924,12 +924,18 @@ def test_summary_branch_count_matches_full_reader_after_ref_changes(tmp_path: Pa
     commit(repo, "base")
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-    git(repo, "branch", "topic")
+    git(repo, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+    git(repo, "branch", "--track", "topic", "origin/main")
     assert compare() == 2
     git(repo, "pack-refs", "--all", "--prune")
     assert compare() == 2
     git(repo, "branch", "-D", "topic")
     assert compare() == 1
+    missing_ref = repo / ".git/refs/remotes/origin/missing-object"
+    missing_ref.parent.mkdir(parents=True, exist_ok=True)
+    missing_ref.write_text("1" * len(git(repo, "rev-parse", "HEAD").strip()) + "\n")
+    assert detail.get_branches(str(repo)) is None
+    assert project.summary_rows(state)[0]["lane_count"] is None
     assert detail.count_local_branches(str(tmp_path / "missing")) is None
 
 
