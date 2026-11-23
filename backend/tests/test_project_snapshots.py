@@ -1,5 +1,6 @@
 import threading
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -256,6 +257,78 @@ def test_all_is_computed_lazily_and_missing_stats_are_saved(snapshot_repo, monke
     assert project_snapshots.load(str(repo)) == saved
 
 
+def test_cached_facts_reload_after_an_observation_changes_on_another_thread(snapshot_repo):
+    repo, state = snapshot_repo
+    project_id = str(repo)
+    read(repo, state)
+    before = project_snapshots.load(project_id)
+    assert project_snapshots.load(project_id)["facts"] is before["facts"]
+
+    # Extending the graph changes the observation without changing Git refs.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(read, repo, state, "all").result()
+
+    after = project_snapshots.load(project_id)
+    assert after["fingerprint"] == before["fingerprint"]
+    assert after["observed_at"] > before["observed_at"]
+    assert after["facts"] is not before["facts"]
+    assert json.dumps(["project.graph", [project_id, None]], ensure_ascii=False) in after["facts"]
+    assert project_snapshots.load(project_id)["facts"] is after["facts"]
+
+
+def test_additional_git_results_are_shared_only_within_one_observation(snapshot_repo, monkeypatch):
+    from app import gitinfo, project_facts
+
+    repo, state = snapshot_repo
+    project_id = str(repo)
+    read(repo, state)
+    heads = [git(repo, "rev-parse", ref).strip() for ref in ("HEAD~1", "HEAD")]
+    missing = "f" * 40
+    calls = []
+    original_run = gitinfo.subprocess.run
+
+    def run(args, **kwargs):
+        if args[3:6] == ["log", "--date-order", "-1"]:
+            calls.append(args[-1])
+        return original_run(args, **kwargs)
+
+    barrier = threading.Barrier(2)
+
+    def build(repo, *args, github_data, **kwargs):
+        pulls = project_facts.observe("test.prs", [], lambda: github_data["pulls"])
+        commits = [
+            gitinfo._run(repo, ["log", "--date-order", "-1", "--format=%H", head])
+            for head in [*pulls, missing]
+        ]
+        if github_data["concurrent"]:
+            barrier.wait(timeout=5)
+        return {"pulls": pulls, "commits": commits}
+
+    def request(pulls, concurrent):
+        return project_snapshots.get(
+            project_id, project_id, state, threading.Lock(), "current", None,
+            lambda: {"pulls": pulls, "concurrent": concurrent},
+        )
+
+    monkeypatch.setattr(gitinfo.subprocess, "run", run)
+    monkeypatch.setattr(project, "build", build)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        pending = [executor.submit(request, [head], True) for head in heads]
+        assert [future.result()["pulls"] for future in pending] == [[head] for head in heads]
+
+    calls.clear()
+    result = request(heads, False)
+    assert result["pulls"] == heads
+    assert result["commits"] == [head + "\n" for head in heads] + [None]
+    assert calls == [missing]
+
+    with project_snapshots._connection() as connection:
+        connection.execute("UPDATE project_snapshots SET observed_at = observed_at + 1 WHERE project_id = ?", (project_id,))
+    calls.clear()
+    assert request(heads, False)["commits"] == result["commits"]
+    assert calls == [*heads, missing]
+
+
 @pytest.mark.parametrize("range_name", ["current", "24h", "7d", "all"])
 def test_composition_does_not_mutate_recorded_history(snapshot_repo, range_name):
     from app import project_facts
@@ -268,3 +341,16 @@ def test_composition_does_not_mutate_recorded_history(snapshot_repo, range_name)
         project.build(str(repo), str(repo), state, range_name=range_name)
         project.build(str(repo), str(repo), state, range_name="current")
     assert json.dumps(facts, sort_keys=True) == before
+
+
+def test_parsed_facts_keep_only_recently_read_projects(tmp_path, monkeypatch):
+    monkeypatch.setattr(project_snapshots.config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(project_snapshots, "_parsed_facts", {})
+    count = project_snapshots._PARSED_FACTS_LIMIT + 1
+    for index in range(count):
+        with project_snapshots._connection() as connection:
+            connection.execute("INSERT INTO project_snapshots VALUES (?, 'fp', 1.0, ?, NULL, NULL)", (f"p{index}", json.dumps({"value": index})))
+        assert project_snapshots.load(f"p{index}")["facts"] == {"value": index}
+    kept = [project_id for _, project_id in project_snapshots._parsed_facts]
+    assert kept == [f"p{index}" for index in range(1, count)]
+    assert project_snapshots.load("p0")["facts"] == {"value": 0}

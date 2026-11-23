@@ -30,6 +30,8 @@ FETCH_ENABLED = _bool("GITDASH_FETCH", True)
 FETCH_WORKERS = _int("GITDASH_FETCH_WORKERS", 4)
 # 画面要求のPR取得はバックグラウンドfetchの待ち行列から分離する。
 GITHUB_PR_WORKERS = 4
+# 1回の照会で読むマージ済みPRのページ数上限（100件/ページ）。GitHub APIのレート制限を守るため全件は読まない。
+GITHUB_MERGED_PR_MAX_PAGES = 20
 FETCH_INTERVAL_SEC = _int("GITDASH_FETCH_INTERVAL_SEC", 300)
 FETCH_TIMEOUT_SEC = _int("GITDASH_FETCH_TIMEOUT_SEC", 30)
 

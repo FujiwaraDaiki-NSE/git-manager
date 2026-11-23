@@ -1,13 +1,18 @@
 """Routes wired to the application's repository validation and lock."""
 import asyncio
+from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from app import investigation, compare
 from pydantic import BaseModel, Field
 
 
+CommitSearchMode = Literal["message", "content"]
+
+
 class CommitSearchPage(BaseModel):
     path: str
     scope: str
+    mode: CommitSearchMode
     grep: str
     author: str
     since_at: str
@@ -43,15 +48,15 @@ def create_router(known_repo, repo_lock, pool):
 
     @router.get("/commit-search")
     async def search(
-        path: str, scope: str, grep: str, author: str, since_at: str, until_at: str, file: str,
+        path: str, scope: str, mode: CommitSearchMode, grep: str, author: str, since_at: str, until_at: str, file: str,
         offset: int = Query(..., ge=0), fixed_shas: str | None = None,
     ):
-        return await execute(path, investigation.search, scope, grep, author, since_at, until_at, file, offset, fixed_shas)
+        return await execute(path, investigation.search, scope, grep, author, since_at, until_at, file, offset, mode, fixed_shas)
 
     @router.post("/commit-search")
     async def search_page(body: CommitSearchPage):
         return await execute(body.path, investigation.search, body.scope, body.grep, body.author,
-                             body.since_at, body.until_at, body.file, body.offset, body.fixed_shas)
+                             body.since_at, body.until_at, body.file, body.offset, body.mode, body.fixed_shas)
 
     @router.get("/recovery-candidates")
     async def recovery(path: str):

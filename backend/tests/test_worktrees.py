@@ -104,6 +104,25 @@ def test_branches_include_worktree_path(
     assert next(branch for branch in result["local"] if branch["name"] == "main")["worktree"] == str(repo)
 
 
+def test_branch_details_identify_default_without_changing_merged_status(repo_with_worktree):
+    repo, _ = repo_with_worktree
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    git(repo, "branch", "topic")
+    git(repo, "tag", "main")
+    git(repo, "switch", "-qc", "active")
+
+    result = detail.get_branches(str(repo))
+    assert result is not None
+    default, = [branch for branch in result["local"] if branch["is_default"]]
+    assert default["name"] == "heads/main"
+    assert default["merged"] is True
+    assert default["worktree"] is None
+    topic = next(branch for branch in result["local"] if branch["name"] == "topic")
+    assert topic["merged"] is True
+    assert not topic["is_default"]
+
+
 def test_worktree_list_z_preserves_newline_path(
     repo_with_worktree: tuple[Path, Path],
 ) -> None:

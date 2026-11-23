@@ -48,6 +48,8 @@ def test_worktree_operation_markers(tmp_path: Path, marker, kind):
     directory = Path(git(linked, 'rev-parse', '--absolute-git-dir').strip())
     if kind == 'rebase':
         (directory / marker).mkdir()
+        if marker == 'rebase-apply':
+            (directory / marker / 'rebasing').touch()
         step, total = ('msgnum', 'end') if marker == 'rebase-merge' else ('next', 'last')
         (directory / marker / step).write_text('3')
         (directory / marker / total).write_text('7')
@@ -61,6 +63,24 @@ def test_worktree_operation_markers(tmp_path: Path, marker, kind):
     assert f'git {kind} --abort' in commands if kind != 'bisect' else 'git bisect reset' in commands
     if kind == 'rebase':
         assert (operation['step'], operation['total']) == (3, 7)
+
+
+@pytest.mark.parametrize(("markers", "kind", "commands"), [
+    (["applying"], "am", ["git status", "git am --continue", "git am --abort"]),
+    ([], "unknown", ["git status"]),
+    (["applying", "rebasing"], "unknown", ["git status"]),
+])
+def test_apply_operation_markers(tmp_path, markers, kind, commands):
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    directory = repo / ".git" / "rebase-apply"
+    directory.mkdir()
+    for marker in markers:
+        (directory / marker).touch()
+
+    operation, = gitinfo.operations(str(repo))
+    assert operation["kind"] == kind
+    assert [command["command"] for command in operation["commands"]] == commands
 
 
 def test_unavailable_git_facts(tmp_path):
@@ -143,6 +163,17 @@ def test_destinations_precedence_urls_and_push_modes(tmp_path):
     git(repo, 'config', '--add', 'remote.personal.pushurl', 'ssh://example.test/two')
     facts = gitinfo.branch_destinations(str(repo), 'main')
     assert facts['push_remote'] == 'personal'
+    push_config = facts['push_remote_config']
+    assert push_config['selected_key'] == 'branch.main.pushRemote'
+    assert [(item['key'], item['values'][-1]['value']) for item in push_config['keys']] == [
+        ('branch.main.pushRemote', 'personal'),
+        ('remote.pushDefault', 'publish'),
+        ('branch.main.remote', 'origin'),
+    ]
+    for item in push_config['keys']:
+        assert item['values'][-1]['scope'] == 'local'
+        assert item['values'][-1]['origin'].endswith('.git/config')
+        assert '--show-origin --show-scope --get-all' in item['command']
     assert facts['push_urls'] == ['ssh://example.test/one', 'ssh://example.test/two']
     assert facts['push_ref'] == 'refs/heads/main'  # triangular simple
     git(repo, 'config', 'push.default', 'upstream')
@@ -177,7 +208,7 @@ def test_destination_batch_reads_config_and_refs_once_and_does_not_cache_across_
     facts = gitinfo.branch_destinations_many(str(repo), ['main', 'topic'])
     assert set(facts) == {'main', 'topic'}
     batch_calls = [
-        ['config', '-z', '--list'],
+        ['config', '-z', '--show-origin', '--show-scope', '--list'],
         ['for-each-ref', '--format=%(refname)%00%(upstream)%00%(objectname)', 'refs/'],
     ]
     assert calls == batch_calls
@@ -234,7 +265,8 @@ def test_destination_config_preserves_multivalues_and_subsection_case(tmp_path):
     assert upper['push_ref'] == 'refs/heads/Main'
     assert lower['push_ref'] == 'refs/heads/review/main'
     assert lower['push_default'] == 'current'
-    settings = gitinfo._branch_config(str(repo))
+    assert [entry['value'] for entry in lower['push_remote_config']['keys'][1]['values']] == ['origin', 'Origin']
+    settings, _ = gitinfo._branch_config_sources(str(repo))
     assert settings['remote.Origin.pushurl'] == ['ssh://example.test/one', 'ssh://example.test/two']
     assert 'remote.origin.pushurl' not in settings
     assert settings['push.default'] == ['nothing', 'current']
@@ -245,7 +277,7 @@ def test_destination_config_preserves_empty_bare_and_multiline_values(tmp_path):
     init_repo(repo)
     with (repo / '.git' / 'config').open('a') as handle:
         handle.write('\n[push]\n autoSetupRemote\n[branch "main"]\n remote = ""\n[remote "origin"]\n push = "line1\\nline2"\n push = ""\n')
-    settings = gitinfo._branch_config(str(repo))
+    settings, _ = gitinfo._branch_config_sources(str(repo))
     assert settings['push.autosetupremote'] == [None]
     assert settings['branch.main.remote'] == ['']
     assert settings['remote.origin.push'] == ['line1\nline2', '']
@@ -272,7 +304,7 @@ def test_destination_batch_config_failure_is_null_without_key_queries(tmp_path, 
 
     monkeypatch.setattr(gitinfo.subprocess, 'run', fail)
     assert gitinfo.branch_destinations_many(str(tmp_path), ['main', 'topic']) == {'main': None, 'topic': None}
-    assert calls == [['config', '-z', '--list']]
+    assert calls == [['config', '-z', '--show-origin', '--show-scope', '--list']]
 
 
 def test_destination_batch_shares_config_in_snapshot_observation(tmp_path, monkeypatch):
@@ -292,10 +324,10 @@ def test_destination_batch_shares_config_in_snapshot_observation(tmp_path, monke
     with project_facts.using({}):
         first = gitinfo.branch_destinations_many(str(repo), ['main'])
         assert gitinfo.branch_destinations_many(str(repo), ['main']) == first
-    assert calls == [['config', '-z', '--list']]
+    assert calls == [['config', '-z', '--show-origin', '--show-scope', '--list']]
     with project_facts.using({}):
         assert gitinfo.branch_destinations_many(str(repo), ['main']) == first
-    assert calls == [['config', '-z', '--list'], ['config', '-z', '--list']]
+    assert calls == [['config', '-z', '--show-origin', '--show-scope', '--list'], ['config', '-z', '--show-origin', '--show-scope', '--list']]
 
 
 def test_project_build_uses_one_destination_config_for_all_lanes(tmp_path, monkeypatch):
@@ -306,7 +338,7 @@ def test_project_build_uses_one_destination_config_for_all_lanes(tmp_path, monke
     calls = []
 
     def record(command, **kwargs):
-        if command[3:] == ['config', '-z', '--list']:
+        if command[3:] == ['config', '-z', '--show-origin', '--show-scope', '--list']:
             calls.append(command)
         return original_run(command, **kwargs)
 

@@ -13,6 +13,9 @@ from typing import Any
 from app import config, gitinfo, paths, scanner
 from app.bus import bus
 
+_PR_PAGE_TIMEOUT_SEC = 15
+_PR_PAGINATION_TIMEOUT_SEC = 45
+
 # Response cache only: discard on restart, never retain old success after failure.
 _cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _lock = threading.Lock()
@@ -90,32 +93,77 @@ def _read(name: str) -> dict[str, Any]:
     result = {**unavailable("PR情報を取得できません。ghの認証・接続を確認してください"),
               "repository": name, "checked_at": time.time()}
     # Explicit host and repo prevent a repository from redirecting credentials.
-    query = 'map(select(.merged_at != null) | {number, url: .html_url, merged_at, merge: .merge_commit_sha, base: .base.ref, head: .head.ref, head_sha: .head.sha, head_repo: .head.repo.full_name, base_repo: .base.repo.full_name})'
+    owner, repo_name = name.split("/")
+    query = """query($owner: String!, $name: String!, $endCursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequests(states: MERGED, first: 100, after: $endCursor,
+          orderBy: {field: CREATED_AT, direction: DESC}) {
+          nodes { number url mergedAt mergeCommit { oid } baseRefName headRefName headRefOid
+            headRepository { nameWithOwner } baseRepository { nameWithOwner }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }"""
+    command = ["gh", "api", "--hostname", "github.com", "graphql",
+               "-f", f"query={query}", "-f", f"owner={owner}", "-f", f"name={repo_name}"]
+    cursor = None
+    complete = False
+    pulls = []
+    deadline = time.monotonic() + _PR_PAGINATION_TIMEOUT_SEC
     try:
-        proc = subprocess.run(
-            ["gh", "api", "--hostname", "github.com", "--paginate", "--method", "GET",
-             f"repos/{name}/pulls?state=closed&per_page=100", "--jq", query],
-            capture_output=True, text=True, timeout=15,
-            env={**os.environ, "GH_PROMPT_DISABLED": "1", "GH_PAGER": "cat"},
-        )
-        if proc.returncode != 0:
+        for _ in range(config.GITHUB_MERGED_PR_MAX_PAGES):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return result
+            proc = subprocess.run(
+                command if cursor is None else [*command, "-f", f"endCursor={cursor}"],
+                capture_output=True, text=True, timeout=min(_PR_PAGE_TIMEOUT_SEC, remaining),
+                env={**os.environ, "GH_PROMPT_DISABLED": "1", "GH_PAGER": "cat"},
+            )
+            if proc.returncode != 0:
+                return result
+            page = json.loads(proc.stdout)
+            if not isinstance(page, dict) or page.get("errors"):
+                raise ValueError("Invalid GraphQL page")
+            connection = page["data"]["repository"]["pullRequests"]
+            nodes = connection["nodes"]
+            page_info = connection["pageInfo"]
+            has_next = page_info["hasNextPage"]
+            next_cursor = page_info["endCursor"]
+            if not isinstance(nodes, list) or not isinstance(has_next, bool):
+                raise ValueError("Invalid PR connection")
+            if has_next and (not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor):
+                raise ValueError("Invalid PR cursor")
+            for item in nodes:
+                merge_commit = item["mergeCommit"]
+                head_repository = item["headRepository"]
+                pull = {
+                    "number": item["number"],
+                    "url": item["url"],
+                    "merged_at": item["mergedAt"],
+                    "merge": None if merge_commit is None else merge_commit["oid"],
+                    "base": item["baseRefName"],
+                    "head": item["headRefName"],
+                    "head_sha": item["headRefOid"],
+                    "head_repo": None if head_repository is None else head_repository["nameWithOwner"],
+                    "base_repo": item["baseRepository"]["nameWithOwner"],
+                }
+                if (type(pull["number"]) is not int
+                    or not all(isinstance(pull[key], str) for key in ("url", "merged_at", "base", "head", "head_sha", "base_repo"))
+                    or (merge_commit is not None and not isinstance(pull["merge"], str))
+                    or (head_repository is not None and not isinstance(pull["head_repo"], str))):
+                    raise ValueError("Invalid merged PR")
+                pulls.append(pull)
+            if not has_next:
+                complete = True
+                break
+            cursor = next_cursor
+        if time.monotonic() >= deadline:
             return result
-        pages = proc.stdout.strip()
-        if not pages:
-            return result
-        decoder = json.JSONDecoder()
-        pulls = []
-        while pages:
-            page, end = decoder.raw_decode(pages)
-            if not isinstance(page, list):
-                raise ValueError("Invalid PR page")
-            for item in page:
-                if not isinstance(item, dict) or not all(isinstance(item.get(key), str) for key in ("merge", "base", "head", "head_sha", "base_repo", "url", "merged_at")) or (item.get("head_repo") is not None and not isinstance(item.get("head_repo"), str)) or not isinstance(item.get("number"), int):
-                    raise ValueError("Invalid PR")
-                pulls.append(item)
-            pages = pages[end:].lstrip()
-        return {**result, "status": "available", "reason": None, "pulls": pulls}
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return {**result, "status": "available", "reason": None, "pulls": pulls,
+                "complete": complete, "merged_count": len(pulls)}
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
         return result
 
 

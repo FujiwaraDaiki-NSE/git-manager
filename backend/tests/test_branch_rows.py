@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app import branch_rows, detail
+from app import branch_history, branch_rows, detail
 
 
 def git(repo: Path, *args: str) -> str:
@@ -213,6 +213,51 @@ def test_merged_deleted_pr_gets_named_history_row_and_fork_stays_explicit(tmp_pa
     assert fork_history["pull_requests"][0]["source"] == "fork/repo:completed"
     assert unknown_history["pull_requests"][0]["source"] == "元リポジトリ不明:completed"
     assert unknown_history["pull_requests"][0]["source_repository_available"] is False
+
+
+def test_historical_pages_skip_only_confirmed_missing_objects(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    commit_hash = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "tag", "-am", "annotated", "tagged")
+    tag_hash = git(repo, "rev-parse", "tagged").strip()
+    missing_hash = "f" * 40
+    github_data = {
+        "status": "available",
+        "repository": "owner/repo",
+        "pulls": [
+            {
+                "number": number,
+                "url": f"https://github.com/owner/repo/pull/{number}",
+                "merged_at": "2026-09-30T00:00:00Z",
+                "head": f"topic-{number}",
+                "head_sha": head,
+                "head_repo": "fork/repo",
+                "base": "main",
+                "base_repo": "owner/repo",
+            }
+            for number, head in enumerate((missing_hash, tag_hash), 1)
+        ],
+    }
+    page_heads = []
+    read_page = branch_history.read_page
+
+    def record_page(repo, heads, offset):
+        page_heads.append(heads)
+        return read_page(repo, heads, offset)
+
+    monkeypatch.setattr(branch_history, "read_page", record_page)
+    branch_data = {"local": [], "remotes": []}
+    rows = branch_rows.build(str(repo), branch_data, [], github_data)
+    assert page_heads == [[tag_hash]]
+    assert rows[0]["history_heads"] == [missing_hash]
+    assert rows[0]["history_available"] is False
+    assert rows[1]["commit_hashes"] == [commit_hash]
+
+    monkeypatch.setattr(branch_history, "missing_heads", lambda *_: set())
+    page_heads.clear()
+    assert branch_rows.build(str(repo), branch_data, [], github_data) == rows
+    assert page_heads == [[missing_hash], [tag_hash]]
 
 
 def test_branch_row_metadata_keeps_an_older_tip_outside_global_graph_window(tmp_path: Path) -> None:

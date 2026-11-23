@@ -18,6 +18,9 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="project-snapsh
 _guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}
 _running: set[str] = set()
+# 解析済み観測は大規模プロジェクトで1件数百MBになるため、最近読んだ分だけ保持する。
+_PARSED_FACTS_LIMIT = 4
+_parsed_facts: dict[tuple[Path, str], tuple[str, float, dict, dict]] = {}
 
 
 @contextmanager
@@ -38,12 +41,44 @@ def _connection():
 def load(project_id, *, metadata_only=False):
     if not (config.DATA_DIR / "project-snapshots.sqlite3").exists():
         return None
+    cache_key = (config.DATA_DIR, project_id)
+    cached = None
+    parameters = (project_id,)
+    facts_column = "NULL"
+    if not metadata_only:
+        with _guard:
+            cached = _parsed_facts.get(cache_key)
+        if cached is None:
+            facts_column = "facts"
+        else:
+            # Read metadata and choose whether to return facts from the same SQLite row.
+            facts_column = "CASE WHEN fingerprint = ? AND observed_at = ? THEN NULL ELSE facts END"
+            parameters = (cached[0], cached[1], project_id)
     with _connection() as connection:
-        columns = "fingerprint, observed_at, NULL, failed_fingerprint, error" if metadata_only else "fingerprint, observed_at, facts, failed_fingerprint, error"
-        row = connection.execute(f"SELECT {columns} FROM project_snapshots WHERE project_id = ?", (project_id,)).fetchone()
+        row = connection.execute(
+            f"SELECT fingerprint, observed_at, {facts_column}, failed_fingerprint, error FROM project_snapshots WHERE project_id = ?",
+            parameters,
+        ).fetchone()
     if row is None:
         return None
-    return {"fingerprint": row[0], "observed_at": row[1], "facts": None if metadata_only else json.loads(row[2]), "failed_fingerprint": row[3], "error": row[4]}
+    fingerprint, observed_at, raw_facts, failed_fingerprint, error = row
+    facts = None
+    if cached is not None and raw_facts is None:
+        facts = cached[2]
+        with _guard:
+            # Keep recently read projects at the end; the oldest entry is dropped first.
+            if _parsed_facts.get(cache_key) is cached:
+                _parsed_facts[cache_key] = _parsed_facts.pop(cache_key)
+    elif not metadata_only:
+        facts = json.loads(raw_facts)
+        with _guard:
+            # A slow reader must not replace an entry published while it was parsing.
+            if _parsed_facts.get(cache_key) is cached:
+                _parsed_facts.pop(cache_key, None)
+                _parsed_facts[cache_key] = (fingerprint, observed_at, facts, {})
+                while len(_parsed_facts) > _PARSED_FACTS_LIMIT:
+                    del _parsed_facts[next(iter(_parsed_facts))]
+    return {"fingerprint": fingerprint, "observed_at": observed_at, "facts": facts, "failed_fingerprint": failed_fingerprint, "error": error}
 
 
 def fingerprint(repo):
@@ -141,6 +176,18 @@ def refresh_existing(repo, project_id, state_rows, repo_lock):
     _executor.submit(_refresh, repo, project_id, deepcopy(state_rows), repo_lock)
 
 
+def _shareable_git_result(key, value):
+    # Keep raw command results only. Failed commands and walks that silently
+    # omit missing objects must be retried if objects arrive without ref changes.
+    if '"--ignore-missing"' in key:
+        return False
+    if key.startswith('["app.gitinfo._run", '):
+        return isinstance(value, str)
+    if key.startswith('["app.gitinfo._run_with_status", '):
+        return value[1] == 0
+    return False
+
+
 def get(repo, project_id, state_rows, repo_lock, range_name, as_of, load_github):
     saved = load(project_id)
     graph_key = json.dumps(["project.graph", [repo, None if range_name == "all" else project.MAX_PROJECT_COMMITS]], sort_keys=True, ensure_ascii=False)
@@ -154,9 +201,28 @@ def get(repo, project_id, state_rows, repo_lock, range_name, as_of, load_github)
     failed = stale and saved["failed_fingerprint"] == current
     if stale and not failed:
         refresh_existing(repo, project_id, state_rows, repo_lock)
-    with project_facts.using(saved["facts"]):
+    base_facts = saved["facts"]
+    request_facts = base_facts.copy()
+    cache_key = (config.DATA_DIR, project_id)
+    cached = None
+    if not stale:
+        with _guard:
+            entry = _parsed_facts.get(cache_key)
+            if entry is not None and entry[2] is base_facts:
+                cached = entry
+                request_facts.update(entry[3])
+    with project_facts.using(request_facts):
         result = project.build(repo, project_id, state_rows, range_name=range_name, as_of=as_of, github_data=load_github())
     if result is None:
         raise RuntimeError("プロジェクト情報の合成に失敗しました")
+    if cached is not None:
+        additional = {
+            key: value for key, value in request_facts.items()
+            if key not in base_facts and _shareable_git_result(key, value)
+        }
+        with _guard:
+            if _parsed_facts.get(cache_key) is cached:
+                for key, value in additional.items():
+                    cached[3].setdefault(key, value)
     result["snapshot"] = {"observed_at": saved["observed_at"], "status": "failed" if failed else "refreshing" if stale else "ready", "error": saved["error"] if failed else None}
     return result

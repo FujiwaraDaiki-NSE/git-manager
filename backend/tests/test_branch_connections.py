@@ -56,6 +56,17 @@ def rows_for(repo: Path, github_data: dict | None = None) -> list[dict]:
     return branch_rows.build(str(repo), branches, lanes, github_data, "main") or []
 
 
+def test_capped_pr_history_makes_relationship_coverage_partial(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    rows = rows_for(repo)
+    github_data = {"status": "available", "merged_count": 2000}
+
+    for complete, expected in [(True, "available"), (False, "partial")]:
+        result = branch_rows.connections(str(repo), rows, github_data={**github_data, "complete": complete})
+        assert result["status"] == expected
+
+
 def test_local_fast_forward_and_lagging_remote_are_distinct(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     init_repo(repo)

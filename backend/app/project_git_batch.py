@@ -91,7 +91,7 @@ class Batch:
         index = graph.indexes.get(ancestor)
         if index is None:
             return None
-        return bool(graph.reach[head] & (1 << index))
+        return bool(graph.tip_masks[index] & (1 << graph.tip_indexes[head]))
 
     def resolve(self, ref):
         if self.refs is None:

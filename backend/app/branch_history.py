@@ -1,12 +1,37 @@
 """Read one bounded page of a branch's history at immutable Git heads."""
 from __future__ import annotations
 
+import os
+import subprocess
+from collections.abc import Iterable
 from typing import Any
 
 from app import gitinfo, project_git_batch, project_facts
 
 PAGE_SIZE = 200
 FORMAT = "%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P"
+
+
+def missing_heads(repo: str, heads: Iterable[str]) -> set[str]:
+    """Return only full object IDs explicitly reported missing by Git."""
+    unique_heads = list(dict.fromkeys(heads))
+    if not unique_heads:
+        return set()
+    requested = [head.encode("ascii") for head in unique_heads]
+    try:
+        result = subprocess.run(
+            [gitinfo.GIT, "-C", repo, "cat-file", "--batch-check=%(objecttype)"],
+            input=b"\n".join(requested) + b"\n",
+            capture_output=True,
+            timeout=gitinfo.config.GIT_TIMEOUT_SEC,
+            env={**os.environ, **gitinfo.NON_INTERACTIVE_ENV},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    lines = result.stdout.splitlines()
+    if result.returncode != 0 or len(lines) != len(requested):
+        return set()
+    return {head for head, line in zip(unique_heads, lines) if line == head.encode("ascii") + b" missing"}
 
 
 def _parse(raw: str) -> list[dict[str, Any]] | None:

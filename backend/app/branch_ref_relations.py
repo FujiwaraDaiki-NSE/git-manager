@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from collections import deque
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -47,10 +48,23 @@ class _Graph:
     parents: dict[str, tuple[str, ...]]
     indexes: dict[str, int]
     hashes: tuple[str, ...]
-    reach: dict[str, int]
+    tip_indexes: dict[str, int]
+    tip_masks: list[int]
     children: tuple[tuple[int, ...], ...]
     incomplete: dict[str, bool]
     malformed: bool
+
+    @cached_property
+    def reach(self) -> dict[str, int]:
+        """Transpose the masks only for pair comparisons that need full sets."""
+        reach_by_tip = [0] * len(self.tip_indexes)
+        for commit_index, mask in enumerate(self.tip_masks):
+            commit_bit = 1 << commit_index
+            while mask:
+                tip_bit = mask & -mask
+                reach_by_tip[tip_bit.bit_length() - 1] |= commit_bit
+                mask ^= tip_bit
+        return {tip: reach_by_tip[index] for tip, index in self.tip_indexes.items()}
 
 
 def _snapshot_hash(value: Any) -> tuple[str | None, str | None, str | None]:
@@ -271,7 +285,8 @@ def _parse_graph(raw: str, tips: Sequence[str]) -> _Graph | None:
             parents=parents,
             indexes=indexes,
             hashes=hashes,
-            reach={},
+            tip_indexes={},
+            tip_masks=[],
             children=tuple(() for _ in hashes),
             incomplete={},
             malformed=True,
@@ -281,18 +296,19 @@ def _parse_graph(raw: str, tips: Sequence[str]) -> _Graph | None:
     # made for requested tips, not for every commit in the repository.
     parent_indexes: list[tuple[int, ...]] = []
     children_lists: list[list[int]] = [[] for _ in hashes]
-    incomplete_bits = 0
+    incomplete_indexes: list[int] = []
     for commit, commit_parents in parents.items():
         commit_index = indexes[commit]
         current_parents: list[int] = []
         for parent in commit_parents:
             parent_index = indexes.get(parent)
             if parent_index is None:
-                incomplete_bits |= 1 << commit_index
                 continue
             current_parents.append(parent_index)
             children_lists[parent_index].append(commit_index)
         parent_indexes.append(tuple(current_parents))
+        if len(current_parents) != len(commit_parents):
+            incomplete_indexes.append(commit_index)
 
     # Propagate a mask from every requested tip to its parents. A mask has one
     # bit per tip, so shared history is traversed once and no commit stores its
@@ -321,31 +337,20 @@ def _parse_graph(raw: str, tips: Sequence[str]) -> _Graph | None:
     if processed != len(hashes):
         malformed = True
 
-    reach_by_tip = [0] * len(tip_indexes)
-    for commit_index, mask in enumerate(tip_masks):
-        commit_bit = 1 << commit_index
-        while mask:
-            tip_bit = mask & -mask
-            tip_index = tip_bit.bit_length() - 1
-            if tip_index < len(reach_by_tip):
-                reach_by_tip[tip_index] |= commit_bit
-            mask ^= tip_bit
-
-    reach = {
-        tip: reach_by_tip[index]
-        for tip, index in tip_indexes.items()
-        if index < len(reach_by_tip)
-    }
+    incomplete_tips = 0
+    for commit_index in incomplete_indexes:
+        incomplete_tips |= tip_masks[commit_index]
     incomplete = {
-        tip: bool(reach.get(tip, 0) & incomplete_bits)
-        for tip in tip_indexes
+        tip: bool(incomplete_tips & (1 << index))
+        for tip, index in tip_indexes.items()
     }
 
     return _Graph(
         parents=parents,
         indexes=indexes,
         hashes=hashes,
-        reach=reach,
+        tip_indexes=tip_indexes,
+        tip_masks=tip_masks,
         children=tuple(tuple(children) for children in children_lists),
         incomplete=incomplete,
         malformed=malformed,

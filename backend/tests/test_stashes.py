@@ -87,6 +87,12 @@ def test_stash_inventory_and_detail_keep_tracked_and_untracked_parts_separate(tm
     result = stashes.get_stash(str(repo), entry["hash"])
     assert result is not None
     assert result["hash"] == entry["hash"]
+    head, index = (result["head_parent"], result["index_parent"])
+    assert (head, index) == tuple(git(repo, "rev-parse", "stash@{0}^1", "stash@{0}^2").splitlines())
+    staged = git(repo, "diff", head, index)
+    unstaged = git(repo, "diff", index, result["hash"])
+    assert "\n+staged\n" in staged and "\n+unstaged\n" not in staged
+    assert "\n+unstaged\n" in unstaged and "\n+staged\n" not in unstaged
     assert result["tracked"]["available"] is True
     assert [file["path"] for file in result["tracked"]["files"]] == ["tracked.txt"]
     assert result["tracked"]["files"][0]["additions"] == 2

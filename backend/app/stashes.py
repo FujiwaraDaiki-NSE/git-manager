@@ -287,6 +287,8 @@ def get_stash(repo: str, fullhash: str) -> dict[str, Any] | None:
         "selector": entry["selector"],
         "subject": entry["subject"],
         "date": entry["date"],
+        "head_parent": parents[0],
+        "index_parent": parents[1],
         "tracked": tracked,
         "untracked": untracked,
         # This is retained as a convenient top-level copy target for clients

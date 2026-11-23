@@ -229,7 +229,7 @@ def _origin_repository(github_data: Mapping[str, Any]) -> str | None:
 
 def _find_current_pr_row(
     repo: str,
-    rows: list[dict[str, Any]],
+    rows_by_source: Mapping[tuple[str | None, str], list[dict[str, Any]]],
     pull: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     """Join a PR only to a same-repository current source ref.
@@ -245,31 +245,22 @@ def _find_current_pr_row(
     source_hash = pull.get("source_hash")
     if not isinstance(source_hash, str) or not _COMMIT_HASH_RE.fullmatch(source_hash):
         return None
+    source_repo = source_repo.lower()
+    rows = rows_by_source.get((source_repo, source_branch), [])
     candidates = [
         row
         for row in rows
-        if not row.get("historical")
-        and row.get("name") == source_branch
-        and row.get("remote_repository") == source_repo.lower()
-        and any(
+        if any(
             isinstance(lane, Mapping) and _lane_branch(lane) == source_branch
             for lane in row.get("locals", [])
             if isinstance(row.get("locals"), list)
         )
     ]
     # A remote branch can remain current without a local checkout.
-    if not candidates:
-        candidates = [
-            row
-            for row in rows
-            if not row.get("historical")
-            and row.get("name") == source_branch
-            and row.get("remote_repository") == source_repo.lower()
-        ]
-    if source_repo.lower() != str(pull.get("target_repository") or "").lower():
+    if source_repo != str(pull.get("target_repository") or "").lower():
         return None
     containing = []
-    for row in candidates:
+    for row in candidates or rows:
         refs: list[str] = []
         remote_ref = row.get("remote_ref")
         if isinstance(remote_ref, str) and remote_ref:
@@ -448,9 +439,12 @@ def build(
         )
 
     pulls = _pr_rows(github_data)
+    rows_by_source: dict[tuple[str | None, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        rows_by_source.setdefault((row["remote_repository"], row["name"]), []).append(row)
     historical_by_source: dict[tuple[str | None, str], dict[str, Any]] = {}
     for pull in pulls:
-        current = _find_current_pr_row(repo, rows, pull)
+        current = _find_current_pr_row(repo, rows_by_source, pull)
         if current is not None:
             current["pull_requests"].append(pull)
             continue
@@ -527,6 +521,11 @@ def build(
         for item in tip_rows or []
         if isinstance(item, Mapping) and isinstance(item.get("hash"), str)
     }
+    missing_history_heads = branch_history.missing_heads(
+        repo,
+        (head for row in rows if row["historical"]
+         for head in row["history_heads"] if head not in tips_by_hash),
+    )
     for row in rows:
         heads = row.get("history_heads")
         expected_heads = heads if isinstance(heads, list) else []
@@ -536,8 +535,10 @@ def build(
         )
 
     for row in rows:
-        heads = row.get("history_heads")
-        page = branch_history.read_page(repo, heads if isinstance(heads, list) else [], 0)
+        heads = row["history_heads"]
+        page = None
+        if not row["historical"] or missing_history_heads.isdisjoint(heads):
+            page = branch_history.read_page(repo, heads, 0)
         if page is None:
             row["commits"] = []
             row["commit_hashes"] = []
@@ -727,21 +728,14 @@ def _attach_connection_commit_metadata(
 
 
 def _pr_target_candidates(
-    rows: list[Mapping[str, Any]],
+    rows_by_target: Mapping[tuple[str | None, str], list[Mapping[str, Any]]],
     pull: Mapping[str, Any],
-    project_repository: str | None,
 ) -> list[Mapping[str, Any]]:
     target_repository = pull.get("target_repository")
     target_branch = pull.get("target_branch")
     if not isinstance(target_repository, str) or not isinstance(target_branch, str):
         return []
-    target_repository = target_repository.lower()
-    return [
-        row
-        for row in rows
-        if row.get("name") == target_branch
-        and _connection_repository(row, project_repository) == target_repository
-    ]
+    return rows_by_target.get((target_repository.lower(), target_branch), [])
 
 
 def _ancestor_status(repo: str, ancestor: str, descendant: str) -> bool | None:
@@ -792,6 +786,9 @@ def connections(
     current_rows = _connection_rows(rows)
     github_data = github_data or {}
     project_repository = _origin_repository(github_data)
+    rows_by_target: dict[tuple[str | None, str], list[Mapping[str, Any]]] = {}
+    for row in current_rows:
+        rows_by_target.setdefault((_connection_repository(row, project_repository), row["name"]), []).append(row)
     edges: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     edge_ids: set[str] = set()
@@ -821,7 +818,7 @@ def connections(
             if not isinstance(number, int):
                 continue
             identifier = f"merge:pr:{number}"
-            candidates = _pr_target_candidates(current_rows, pull, project_repository)
+            candidates = _pr_target_candidates(rows_by_target, pull)
             merge_hash = pull.get("commit_hash")
             target_row: Mapping[str, Any] | None = None
             reason: str | None = None
@@ -923,6 +920,7 @@ def connections(
         or ref_relations["ancestry_status"] != "complete"
         or recorded["reflog_status"] != "available"
         or github_data.get("status") in ("unavailable", "pending")
+        or github_data.get("complete") is False
     )
     return {
         **ref_relations,

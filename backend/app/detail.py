@@ -11,7 +11,7 @@ PATCH_MAX_BYTES = 200_000
 HASH_RE = re.compile(r"^[0-9a-fA-F]{4,64}$")
 REF_SEPARATOR = "\x1f"
 # refname:short だけでは slash 付き local branch と remote を区別できない。
-# 最後の full ref は分類専用で、レスポンスには含めない。
+# full ref は分類と既定ブランチの照合に使い、レスポンスには含めない。
 REF_FORMAT = (
     "%(refname:short)%1f%(objectname:short)%1f%(upstream:short)"
     "%1f%(upstream:track)%1f%(committerdate:iso-strict)%1f%(HEAD)"
@@ -138,6 +138,7 @@ def _parse_ref_line(line: str) -> dict[str, Any] | None:
         "current": head.strip() == "*",
         "merged": False,
         "remote": is_remote,
+        "refname": refname,
         "worktree": paths.to_host(worktree_path.strip()) if worktree_path.strip() else None,
     }
 
@@ -155,11 +156,12 @@ def count_local_branches(repo: str) -> int | None:
 
 
 def get_branches(repo: str) -> dict[str, Any] | None:
-    """ローカル/リモート ref と origin/HEAD 基準の merged 状態を返す。"""
+    """ローカル/リモート ref と origin/HEAD 基準の既定・統合状態を返す。"""
     refs = gitinfo._run(repo, ["for-each-ref", f"--format={REF_FORMAT}", "refs/heads", "refs/remotes"])
     if refs is None:
         return None
     default_branch = gitinfo.default_branch(repo)
+    default_local_ref = f"refs/heads/{default_branch}" if default_branch is not None else None
     merged: set[str] | None = None
     if default_branch:
         merged_raw = gitinfo._run(
@@ -183,6 +185,7 @@ def get_branches(repo: str) -> dict[str, Any] | None:
         # keep the fact unavailable instead of treating the current checkout's
         # reachability as project completion.
         branch["merged"] = branch["name"] in merged if merged is not None and not branch["remote"] else None
+        branch["is_default"] = branch.pop("refname") == default_local_ref
         if branch.pop("remote"):
             remotes.append(branch)
         else:

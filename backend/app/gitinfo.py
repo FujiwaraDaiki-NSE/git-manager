@@ -455,7 +455,7 @@ def operations(repo: str) -> list[dict[str, Any]] | None:
     from pathlib import Path
     directory = Path(raw.strip())
     result = []
-    markers = [("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"), ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect")]
+    markers = [("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "unknown"), ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect")]
     try:
         todo = "sequencer/todo"
         try:
@@ -475,8 +475,13 @@ def operations(repo: str) -> list[dict[str, Any]] | None:
                     target.stat()
                 except FileNotFoundError:
                     continue
+            if marker == "rebase-apply":
+                applying = (target / "applying").is_file()
+                rebasing = (target / "rebasing").is_file()
+                if applying != rebasing:
+                    kind = "am" if applying else "rebase"
             step = total = None
-            if kind == "rebase":
+            if kind in ("rebase", "am"):
                 step_file, total_file = ("msgnum", "end") if marker == "rebase-merge" else ("next", "last")
                 try:
                     step = int((target / step_file).read_text().strip())
@@ -486,7 +491,7 @@ def operations(repo: str) -> list[dict[str, Any]] | None:
             commands = [{"command": "git status", "reason": "競合と現在の作業状態を確認します"}]
             if kind == "bisect":
                 commands += [{"command": "git bisect log", "reason": "これまでの判定を確認します"}, {"command": "git bisect good", "reason": "現在のコミットを正常と判定して探索を続けます"}, {"command": "git bisect bad", "reason": "現在のコミットを問題ありと判定して探索を続けます"}, {"command": "git bisect reset", "reason": "探索を終了し開始前のHEADに戻します"}]
-            else:
+            elif kind != "unknown":
                 commands += [{"command": f"git {kind} --continue", "reason": "競合を解消してステージした後、操作を継続します"}, {"command": f"git {kind} --abort", "reason": "進行中の操作を中止します"}]
             result.append({"kind": kind, "marker": marker, "step": step, "total": total, "commands": commands})
     except OSError:
@@ -502,11 +507,13 @@ def _config_key(key: str) -> str:
 
 
 @project_facts.cached
-def _branch_config(repo: str) -> dict[str, list[str | None]] | None:
-    # Cache only the settings used here, not unrelated credentials from --list.
+def _branch_config_sources(repo: str) -> tuple[dict[str, list[str | None]], dict[str, list[dict[str, str | None]]]] | None:
+    # 保存済み観測は関数名で引くため、戻り値の形を変えるときは関数名も変える。
+    # Keep the resolution and its source in one Git observation. Retain only
+    # settings used here, and origins for the three push remote selectors.
     try:
         proc = subprocess.run(
-            [GIT, "-C", repo, "config", "-z", "--list"],
+            [GIT, "-C", repo, "config", "-z", "--show-origin", "--show-scope", "--list"],
             capture_output=True, timeout=config.GIT_TIMEOUT_SEC,
             env={**os.environ, **NON_INTERACTIVE_ENV},
         )
@@ -515,16 +522,18 @@ def _branch_config(repo: str) -> dict[str, list[str | None]] | None:
     if proc.returncode != 0:
         return None
     settings: dict[str, list[str | None]] = {}
-    for record in proc.stdout.decode("utf-8", errors="replace").split("\0"):
-        if not record:
-            continue
+    push_sources: dict[str, list[dict[str, str | None]]] = {}
+    fields = proc.stdout.decode("utf-8", errors="replace").split("\0")[:-1]
+    for scope, origin, record in zip(fields[::3], fields[1::3], fields[2::3], strict=True):
         key, separator, value = record.partition("\n")
         key = _config_key(key)
         section, _, rest = key.partition(".")
         name = rest.rsplit(".", 1)[-1]
         if (section == "branch" and name in ("remote", "pushremote", "merge")) or (section == "remote" and name in ("pushdefault", "push", "pushurl")) or key in ("push.default", "push.autosetupremote"):
             settings.setdefault(key, []).append(value if separator else None)
-    return settings
+        if (section == "branch" and name in ("pushremote", "remote")) or key == "remote.pushdefault":
+            push_sources.setdefault(key, []).append({"scope": scope, "origin": origin, "value": value if separator else None})
+    return settings, push_sources
 
 
 def _config_bool(value: str | None) -> bool | None:
@@ -544,11 +553,14 @@ def _config_bool(value: str | None) -> bool | None:
 
 def branch_destinations_many(repo: str, branches: list[str]) -> dict[str, dict[str, Any] | None]:
     """Resolve a repository's branches using one config observation per batch."""
-    settings = _branch_config(repo)
+    observed = _branch_config_sources(repo)
     # Fetch refspecs can place tracking refs outside refs/remotes/.
-    raw = _run(repo, ["for-each-ref", f"--format={_DESTINATION_REF_FORMAT}", "refs/"]) if settings is not None else None
-    refs = {fields[0]: fields for fields in (line.split("\0") for line in raw.splitlines())} if raw is not None else None
-    return {branch: _branch_destinations(repo, branch, settings, refs) if settings is not None and refs is not None else None for branch in dict.fromkeys(branches)}
+    raw = _run(repo, ["for-each-ref", f"--format={_DESTINATION_REF_FORMAT}", "refs/"]) if observed is not None else None
+    if observed is None or raw is None:
+        return dict.fromkeys(branches)
+    settings, push_sources = observed
+    refs = {fields[0]: fields for fields in (line.split("\0") for line in raw.splitlines())}
+    return {branch: _branch_destinations(repo, branch, settings, refs, push_sources) for branch in dict.fromkeys(branches)}
 
 
 def branch_destinations(repo: str, branch: str) -> dict[str, Any] | None:
@@ -558,7 +570,7 @@ def branch_destinations(repo: str, branch: str) -> dict[str, Any] | None:
 _DESTINATION_REF_FORMAT = "%(refname)%00%(upstream)%00%(objectname)"
 
 
-def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | None]], refs: dict[str, list[str]]) -> dict[str, Any] | None:
+def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | None]], refs: dict[str, list[str]], push_sources: dict[str, list[dict[str, str | None]]]) -> dict[str, Any] | None:
     # Git resolves pushRemote/pushDefault/remote, refspecs and push.default.
     fields = refs.get(f"refs/heads/{branch}")
     if fields is None:
@@ -582,10 +594,13 @@ def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | 
         fetch_remote = names[0] if len(names) == 1 else "origin" if "origin" in names else None
     push_default = setting("push.default")
     push_remote = None
-    for key in (f"branch.{branch}.pushRemote", "remote.pushDefault", f"branch.{branch}.remote"):
+    push_remote_key = None
+    push_remote_keys = (f"branch.{branch}.pushRemote", "remote.pushDefault", f"branch.{branch}.remote")
+    for key in push_remote_keys:
         candidate = setting(key)
         if candidate is not None:
             push_remote = candidate
+            push_remote_key = key
             break
     if push_remote is None:
         remotes = _run(repo, ["remote"])
@@ -670,7 +685,18 @@ def _branch_destinations(repo: str, branch: str, settings: dict[str, list[str | 
     tracking = refs.get(upstream) if upstream is not None else None
     upstream_head = tracking[2] if tracking is not None else None
     upstream_gone = upstream is not None and tracking is None
-    return {"fetch_remote": fetch_remote, "fetch_urls": urls(fetch_remote, False), "upstream": upstream, "upstream_ref": merge, "upstream_state": "unset" if merge is None else "configured", "upstream_head": upstream_head, "upstream_gone": upstream_gone, "push_remote": push_remote, "push_urls": urls(push_remote, True), "push_ref": " / ".join(push_refs) if push_refs else None, "push_ref_reason": push_reason, "push_refspecs": refspecs, "push_default": mode, "push_next_command": {"command": push_command, "reason": push_reason if push_command != "git push" else "未 push のコミットがあります"}}
+    push_remote_config = {
+        "selected_key": push_remote_key,
+        "keys": [
+            {
+                "key": key,
+                "values": push_sources.get(_config_key(key), []),
+                "command": shlex.join(["git", "-C", paths.to_host(repo), "config", "--show-origin", "--show-scope", "--get-all", key]),
+            }
+            for key in push_remote_keys
+        ],
+    }
+    return {"fetch_remote": fetch_remote, "fetch_urls": urls(fetch_remote, False), "upstream": upstream, "upstream_ref": merge, "upstream_state": "unset" if merge is None else "configured", "upstream_head": upstream_head, "upstream_gone": upstream_gone, "push_remote": push_remote, "push_remote_config": push_remote_config, "push_urls": urls(push_remote, True), "push_ref": " / ".join(push_refs) if push_refs else None, "push_ref_reason": push_reason, "push_refspecs": refspecs, "push_default": mode, "push_next_command": {"command": push_command, "reason": push_reason if push_command != "git push" else "未 push のコミットがあります"}}
 
 
 def collect(

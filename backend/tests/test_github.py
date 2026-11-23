@@ -12,18 +12,94 @@ def test_remote_is_explicit_github_only(monkeypatch):
         assert github.repository("repo") == expected
 
 
-def test_paginated_metadata_and_no_credentials_in_payload(monkeypatch):
-    pr = {"number": 1, "url": "https://github.com/o/r/pull/1", "merge": "a" * 40, "head_sha": "b" * 40, "base": "main", "head": "feature", "head_repo": "o/r", "base_repo": "o/r", "merged_at": "2026-09-29T00:00:00Z"}
+def merged_pr_node():
+    return {
+        "number": 1, "url": "https://github.com/o/r/pull/1", "mergedAt": "2026-09-29T00:00:00Z",
+        "mergeCommit": {"oid": "a" * 40}, "baseRefName": "main", "headRefName": "feature",
+        "headRefOid": "b" * 40, "headRepository": {"nameWithOwner": "fork/r"},
+        "baseRepository": {"nameWithOwner": "o/r"},
+    }
+
+
+def merged_pr_page(nodes, has_next, cursor):
+    return json.dumps({"data": {"repository": {"pullRequests": {
+        "nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+    }}}})
+
+
+@pytest.mark.parametrize("has_next", [False, True])
+def test_paginated_merged_metadata_and_no_credentials_in_payload(monkeypatch, has_next):
+    monkeypatch.setattr(github.config, "GITHUB_MERGED_PR_MAX_PAGES", 2)
+    first = merged_pr_node()
+    second = {**first, "number": 2, "mergeCommit": None, "headRepository": None}
+    pages = iter([
+        merged_pr_page([first], True, "page-1=="),
+        merged_pr_page([second], has_next, "page-2=="),
+    ])
+    calls = []
+
     def run(args, **kwargs):
-        assert args[:4] == ["gh", "api", "--hostname", "github.com"]
-        assert "--paginate" in args
+        assert args[:6] == ["gh", "api", "--hostname", "github.com", "graphql", "-f"]
+        assert "pullRequests(states: MERGED, first: 100, after: $endCursor," in args[6]
+        assert "orderBy: {field: CREATED_AT, direction: DESC}" in args[6]
+        assert args[7:11] == ["-f", "owner=o", "-f", "name=r"]
+        assert args[11:] == (["-f", "endCursor=page-1=="] if calls else [])
         assert kwargs["timeout"] == 15
-        return SimpleNamespace(returncode=0, stdout=json.dumps([pr]) + '\n[]', stderr="secret")
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout=next(pages), stderr="secret")
+
     monkeypatch.setattr(github.subprocess, "run", run)
     result = github._read("o/r")
+    expected = {
+        "number": 1, "url": first["url"], "merged_at": first["mergedAt"], "merge": "a" * 40,
+        "base": "main", "head": "feature", "head_sha": "b" * 40, "head_repo": "fork/r", "base_repo": "o/r",
+    }
     assert result["status"] == "available"
-    assert result["pulls"] == [pr]
+    assert result["pulls"] == [expected, {**expected, "number": 2, "merge": None, "head_repo": None}]
+    assert result["complete"] is not has_next
+    assert result["merged_count"] == 2
+    assert len(calls) == 2
     assert "secret" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("failure", ["command", "graphql", "cursor"])
+def test_later_page_failure_discards_current_results(monkeypatch, failure):
+    first = merged_pr_page([merged_pr_node()], True, "cursor")
+    invalid = {
+        "command": SimpleNamespace(returncode=1, stdout=""),
+        "graphql": SimpleNamespace(returncode=0, stdout=json.dumps({
+            **json.loads(first), "errors": [{"message": "secret"}],
+        })),
+        "cursor": SimpleNamespace(returncode=0, stdout=first),
+    }
+    pages = iter([SimpleNamespace(returncode=0, stdout=first), invalid[failure]])
+    monkeypatch.setattr(github.subprocess, "run", lambda *args, **kwargs: next(pages))
+    result = github._read("o/r")
+    assert result["status"] == "unavailable"
+    assert result["pulls"] == []
+    assert "complete" not in result
+    assert "merged_count" not in result
+    assert "secret" not in json.dumps(result)
+
+
+def test_merged_pr_pagination_respects_total_deadline(monkeypatch):
+    clock = iter([0, 0, 40, 45])
+    monkeypatch.setattr(github.time, "monotonic", lambda: next(clock))
+    pages = iter([
+        merged_pr_page([merged_pr_node()], True, "cursor"),
+        merged_pr_page([], False, None),
+    ])
+    timeouts = []
+
+    def run(args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return SimpleNamespace(returncode=0, stdout=next(pages))
+
+    monkeypatch.setattr(github.subprocess, "run", run)
+    result = github._read("o/r")
+    assert timeouts == [15, 5]
+    assert result["status"] == "unavailable"
+    assert result["pulls"] == []
 
 
 @pytest.mark.parametrize("credential_name", ["GH_TOKEN", "GITHUB_TOKEN"])

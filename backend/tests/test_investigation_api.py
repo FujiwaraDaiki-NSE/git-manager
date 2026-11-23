@@ -56,6 +56,45 @@ def test_unknown_repository_and_required_parameters(investigation):
     assert client.get('/api/repo/file-history', params={'path': path, 'revision': target, 'file': '../outside', 'follow': False, 'offset': 0}).status_code == 422
 
 
+def test_commit_content_search_pages_matching_changes_at_fixed_shas(investigation):
+    from pathlib import Path
+
+    client, path, _, _, _, git = investigation
+    source = Path(path) / 'file.txt'
+    needle = "flag 'value'.[1]"
+    for i in range(52):
+        source.write_text(f'{needle}\n' if i % 2 == 0 else f'other {i}\n')
+        git('commit', '-am', f'change {i}')
+    source.write_text(f'{needle}\nanchor\n')
+    git('commit', '-am', 'add flag')
+    source.write_text(f'anchor\n{needle}\n')
+    git('commit', '-am', 'move flag')
+    git('commit', '--allow-empty', '-m', needle)
+    params = dict(path=path, scope='main', grep=needle, author='API Test', since_at='', until_at='', file='file.txt', offset=0)
+    endpoint = '/api/repo/commit-search'
+    assert client.get(endpoint, params=params).status_code == 422
+    assert client.get(endpoint, params={**params, 'mode': 'invalid'}).status_code == 422
+    message = client.get(endpoint, params={**params, 'mode': 'message'}).json()
+    assert message['commits'] == []
+    expected = git('log', '--format=%H', f'-S{needle}', 'main', '--', 'file.txt').splitlines()
+    assert len(expected) == 53
+    response = client.get(endpoint, params={**params, 'mode': 'content'})
+    assert response.status_code == 200, response.text
+    first = response.json()
+    assert first['has_more']
+    source.write_text('removed after search\n')
+    git('commit', '-am', 'advance main')
+    response = client.post(endpoint, json={**params, 'mode': 'content', 'offset': 50, 'fixed_shas': first['fixed_shas']})
+    assert response.status_code == 200, response.text
+    second = response.json()
+    assert not second['has_more']
+    assert second['fixed_shas'] == first['fixed_shas']
+    assert [commit['hash'] for commit in first['commits'] + second['commits']] == expected
+    for page in (first, second):
+        lines = subprocess.check_output(['bash', '-c', page['command']], cwd=path, text=True).splitlines()
+        assert [line.split()[0] for line in lines] == [git('rev-parse', '--short', commit['hash']) for commit in page['commits']]
+
+
 def test_branch_pairs_are_loaded_separately_without_changing_relations(investigation, monkeypatch, tmp_path_factory):
     from app import branch_ref_relations, config, github
     client, path, _, _, _, git = investigation

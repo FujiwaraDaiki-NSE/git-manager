@@ -80,7 +80,7 @@ def _search_boundary(value: str) -> datetime | None:
     return boundary
 
 
-def search(repo, scope, grep, author, since_at, until_at, file, offset, fixed_shas=None):
+def search(repo, scope, grep, author, since_at, until_at, file, offset, mode, fixed_shas=None):
     if offset < 0:
         raise ValueError("offset は0以上で指定してください")
     since = _search_boundary(since_at)
@@ -116,19 +116,33 @@ def search(repo, scope, grep, author, since_at, until_at, file, offset, fixed_sh
                 raise RuntimeError("固定SHAを検証できませんでした")
             if checked.stdout.splitlines() != ["commit"] * len(revision):
                 raise InvalidSearchSnapshot("fixed_shas に存在しない、またはcommitではないSHAがあります")
-    args = ["log", *revision, f"--format={FORMAT}", f"--skip={offset}", f"--max-count={PAGE_SIZE + 1}"]
-    for flag, value in (("grep", grep), ("author", author)):
-        if value:
-            args.append(f"--{flag}={value}")
+    args = ["log", *revision]
+    pickaxe = mode == "content" and grep != ""
+    if pickaxe:
+        args.extend(["--no-textconv", f"-S{grep}"])
+    elif grep:
+        args.append(f"--grep={grep}")
+    if author:
+        args.append(f"--author={author}")
     if since is not None:
         args.append(f"--since={since.isoformat()}")
     if until is not None:
         args.append(f"--until={until.isoformat()}")
-    args.append("--")
-    if file:
-        args.append(file)
-    values = records(run(repo, args)) if revision else []
-    return {"scope": scope, "fixed_shas": revision, "offset": offset, "has_more": len(values) > PAGE_SIZE, "commits": values[:PAGE_SIZE]}
+    # Git applies --skip before -S filters the history. Slice the matches instead.
+    limit = PAGE_SIZE + offset if pickaxe else PAGE_SIZE
+    if not pickaxe:
+        args.append(f"--skip={offset}")
+    paths_filter = ["--", file] if file else ["--"]
+    values = []
+    command = None
+    if revision:
+        values = records(run(repo, [*args, f"--format={FORMAT}", f"--max-count={limit + 1}", *paths_filter]))
+        command = shlex.join(["git", *args, "--oneline", f"--max-count={limit}", *paths_filter])
+        if pickaxe and offset:
+            values = values[offset:]
+            command += f" | tail -n +{offset + 1}"
+    return {"scope": scope, "fixed_shas": revision, "offset": offset, "has_more": len(values) > PAGE_SIZE,
+            "commits": values[:PAGE_SIZE], "command": command}
 
 
 def recovery(repo):
