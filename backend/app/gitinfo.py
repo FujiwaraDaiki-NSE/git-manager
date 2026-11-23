@@ -63,6 +63,27 @@ def _run_with_status(
     return output if proc.returncode == 0 else None, proc.returncode
 
 
+def _run_status(repo: str) -> tuple[str | None, str | None]:
+    error = "git status を実行できませんでした"
+    try:
+        proc = subprocess.run(
+            [GIT, "-C", repo, "--no-optional-locks", "status", "--porcelain=v2", "--branch", "-z"],
+            capture_output=True,
+            timeout=config.GIT_TIMEOUT_SEC,
+            env={**os.environ, **NON_INTERACTIVE_ENV},
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"{error}: タイムアウト（{config.GIT_TIMEOUT_SEC}秒）"
+    except OSError as exc:
+        return None, f"{error}: Gitの起動に失敗しました（{exc}）"
+    if proc.returncode == 0:
+        return proc.stdout.decode("utf-8", errors="replace"), None
+    first_line = proc.stderr.decode("utf-8", errors="replace").partition("\n")[0].removesuffix("\r")
+    if first_line:
+        return None, f"{error}: {first_line}"
+    return None, error
+
+
 def _run_limited(
     repo: str,
     args: list[str],
@@ -403,7 +424,7 @@ def next_command(
             # リモートが無いなら push を勧めても打てない
             return None
         return {
-            "command": f"git push -u origin {info['branch']}",
+            "command": shlex.join(["git", "push", "-u", "origin", info["branch"]]),
             "reason": "上流ブランチが設定されていません",
         }
     if info["ahead"] and info["behind"]:
@@ -815,9 +836,9 @@ def collect(
         "checked_at": time.time(),
     }
 
-    status = _run(repo, ["--no-optional-locks", "status", "--porcelain=v2", "--branch", "-z"])
+    status, error = _run_status(repo)
     if status is None:
-        result["error"] = "git status を実行できませんでした"
+        result["error"] = error
         result["branch_line"] = branch_line(result)
         result["next_command"] = next_command_without_status(resolved_worktree_state)
         return result

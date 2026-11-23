@@ -79,6 +79,7 @@
 .agent-timeline-pause:focus-visible,
 .agent-timeline-clear:focus-visible,
 .agent-timeline-export:focus-visible,
+.agent-timeline-decision-controls select:focus-visible,
 .agent-timeline-filters input:focus-visible,
 .agent-timeline-filters select:focus-visible { outline: 2px solid var(--control-blue); outline-offset: 2px; }
 
@@ -134,19 +135,22 @@
   padding: 0 0 8px;
 }
 
-.agent-timeline-filter-grid label {
+.agent-timeline-filter-grid label,
+.agent-timeline-decision-controls label {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.agent-timeline-filter-grid label > span {
+.agent-timeline-filter-grid label > span,
+.agent-timeline-decision-controls label > span {
   color: var(--control-muted);
   font: 9px var(--control-sans);
 }
 
 .agent-timeline-filter-grid input,
-.agent-timeline-filter-grid select {
+.agent-timeline-filter-grid select,
+.agent-timeline-decision-controls select {
   background: var(--control-bg);
   border: 1px solid var(--control-border-strong);
   border-radius: 4px;
@@ -414,6 +418,7 @@
   font: 10px/1.5 var(--control-sans);
 }
 .agent-timeline-decision-counts { display: block; margin: 4px 0 8px; }
+.agent-timeline-decision-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-bottom: 8px; }
 .agent-timeline-old-reports {
   background: var(--control-panel-soft);
   border-radius: 6px;
@@ -457,6 +462,9 @@
 .agent-timeline-project-link:focus .agent-timeline-row-head { flex-direction: column; gap: 4px; }
 .agent-timeline-project-link:hover .agent-timeline-row-head > *,
 .agent-timeline-project-link:focus .agent-timeline-row-head > * { max-width: 100%; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.agent-timeline-current-row:has(> .agent-decision) .agent-timeline-row-head { flex-wrap: wrap; gap: 4px 7px; }
+.agent-timeline-current-row:has(> .agent-decision) .agent-timeline-row-head > * { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.agent-timeline-current-row > .agent-decision { padding: 0 10px 10px; }
 .agent-timeline-project-link:focus-visible { outline: 2px solid var(--control-blue); outline-offset: -2px; }
 .agent-timeline-card-actions { display: flex; flex-wrap: wrap; align-items: start; gap: 8px; padding: 0 10px 10px; }
 .agent-timeline-card-actions .copy-button { min-height: 28px; font-size: 10px; }

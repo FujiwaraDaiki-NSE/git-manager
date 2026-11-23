@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from app import agent_events, branch_rows, branch_relation_events, detail, github, gitinfo, graph, paths, scanner, project_facts, project_git_batch
 
 MAX_PROJECT_COMMITS = 200
+GRAPH_OBSERVATION_KEY = "project.graph.v2"
 README_MAX_CHARS = 280
 PROJECT_RANGES = {"current", "24h", "7d", "all"}
 _COMMIT_HASH_LINE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -869,7 +870,7 @@ def build(
         ahead, behind = _count_against_default(repo, default_ref, head) if head else (None, None)
         base = _merge_base(repo, default_ref, head) if head else None
         commit = _commit_metadata(repo, head)
-        lane_agents = _agents_for_branch(agent_snapshots, None)
+        lane_agents = _agents_for_branch(agent_snapshots, branch_name)
         lanes.append(
             {
                 "id": f"branch:{branch_name}" if branch_name is not None else f"worktree:{path}",
@@ -909,7 +910,7 @@ def build(
 
     # A project can have no local branch refs but still expose an empty graph.
     graph_limit = None if range_name == "all" else limit
-    graph_data = project_facts.observe("project.graph", [repo, graph_limit], lambda: graph.build(repo, all_refs=True, limit=graph_limit))
+    graph_data = project_facts.observe(GRAPH_OBSERVATION_KEY, [repo, graph_limit], lambda: graph.build(repo, all_refs=True, limit=graph_limit))
     observed_at = time.time()
     merge_relations: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []

@@ -1,3 +1,4 @@
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -382,8 +383,7 @@ def test_origin_status_distinguishes_missing_config_and_failures(tmp_path, monke
     assert result["remote"] == "/tmp/origin"
     monkeypatch.setattr(gitinfo, "_run_with_status", lambda *args: (None, None))
     assert gitinfo.collect(str(repo), fetch=False)["remote_status"] == "failed"
-    original = gitinfo._run
-    monkeypatch.setattr(gitinfo, "_run", lambda repo, args, **kwargs: None if "status" in args else original(repo, args, **kwargs))
+    monkeypatch.setattr(gitinfo, "_run_status", lambda repo: (None, "git status failed"))
     result = gitinfo.collect(str(repo), fetch=False)
     assert result["error"]
     assert result["remote_status"] == "failed"
@@ -426,6 +426,17 @@ def test_ahead_push_command_agrees_with_destinations(tmp_path, mode, merge, push
         assert facts['push_ref_reason'] in result['next_command']['reason']
     else:
         assert facts['push_ref_reason'] is None
+
+
+def test_first_push_command_quotes_branch_name(tmp_path):
+    repo = tmp_path / 'repo'
+    init_repo(repo)
+    branch = "feature/O'Brien"
+    git(repo, 'switch', '-c', branch)
+    git(repo, 'remote', 'add', 'origin', 'https://example.test/origin.git')
+
+    command = gitinfo.collect(str(repo))['next_command']['command']
+    assert shlex.split(command) == ['git', 'push', '-u', 'origin', branch]
 
 
 def test_remote_push_refspec_overrides_nothing_for_next_command(tmp_path):

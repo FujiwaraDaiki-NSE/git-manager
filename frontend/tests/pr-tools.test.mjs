@@ -8,6 +8,9 @@ import {
   filterPullRequests,
   filterPullRequestDetails,
   localCalendarDate,
+  openPullRequestLabels,
+  openPullRequestLocalLanes,
+  openPullRequestStatusLabels,
   openPullRequestsNeedingAttention,
   pullRequestsToCsv,
   pullRequestDateRangeError,
@@ -220,14 +223,32 @@ test("new PR filter parameters must be provided explicitly", () => {
   assert.throws(() => pullRequestDateRangeError(null, undefined), /provided explicitly/);
 });
 
-test("オープンPRのレビュー・CI状態と欠損を区別する", async () => {
-  const { openPullRequestLabels } = await import("../app/pr-tools.mjs");
+test("オープンPRのレビュー・CI状態と欠損を区別する", () => {
   assert.deepEqual(openPullRequestLabels({ isDraft: true, reviewDecision: null, ciState: null }), ["Draft", "レビュー情報なし", "CI なし"]);
+  assert.deepEqual(openPullRequestStatusLabels({ reviewDecision: null, ciState: null }), { review: "レビュー情報なし", ci: "CI なし" });
   for (const [reviewDecision, review] of [["APPROVED", "レビュー承認"], ["CHANGES_REQUESTED", "変更要求"], ["REVIEW_REQUIRED", "レビュー待ち"]]) {
     for (const [ciState, ci] of [["SUCCESS", "CI 成功"], ["FAILURE", "CI 失敗"], ["ERROR", "CI 失敗"], ["PENDING", "CI 結果待ち"], ["EXPECTED", "CI 報告待ち"]]) {
       assert.deepEqual(openPullRequestLabels({ isDraft: false, reviewDecision, ciState }), [review, ci]);
+      assert.deepEqual(openPullRequestStatusLabels({ reviewDecision, ciState }), { review, ci });
     }
   }
+});
+
+test("PR番号が対応付けられた行のローカルレーンをすべて返す", () => {
+  const main = { id: "local:topic", branch: "topic" };
+  const fork = { id: "local:fork-topic", branch: "fork-topic" };
+  const second = { id: "local:second", branch: "second" };
+  const rows = [
+    { name: "topic", locals: [main], open_pull_requests: [pr(1)] },
+    { name: "topic", locals: [fork, second], open_pull_requests: [pr(2)] },
+    { name: "topic", locals: [fork], open_pull_requests: [pr(2)] },
+    { name: "remote-only", locals: [], open_pull_requests: [pr(3)] },
+    { name: "unavailable", locals: [], open_pull_requests: null },
+  ];
+  assert.deepEqual(openPullRequestLocalLanes(rows, 1), [main]);
+  assert.deepEqual(openPullRequestLocalLanes(rows, 2), [fork, second]);
+  assert.deepEqual(openPullRequestLocalLanes(rows, 3), []);
+  assert.deepEqual(openPullRequestLocalLanes(null, 2), []);
 });
 
 test("対応が必要なオープンPRを番号ごとに表示し、両方の理由を残す", () => {

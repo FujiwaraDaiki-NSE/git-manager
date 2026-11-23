@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import ScrollShadow from "./scroll-shadow";
 import CopyButton from "./copy-button";
@@ -8,13 +10,15 @@ import {
   filterOpenPullRequests,
   limitedMergedPullRequestCoverage,
   localCalendarDate,
-  openPullRequestLabels,
+  openPullRequestLocalLanes,
+  openPullRequestStatusLabels,
   openPullRequestsNeedingAttention,
   openPullRequestSource,
   pullRequestsToCsv,
   targetBranchName,
   validHttpUrl,
 } from "./pr-tools.mjs";
+import { updateProjectUrl } from "./project-flow.mjs";
 import type { ProjectResponse } from "./types";
 
 type PrRange = "7" | "30" | "all" | "custom";
@@ -72,8 +76,12 @@ function githubStatusMessage(status: string) {
   }
 }
 
-function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["open"] }) {
+function OpenPullRequestAttention({ open, branchRows }: {
+  open: ProjectResponse["github"]["open"];
+  branchRows: ProjectResponse["branch_rows"];
+}) {
   const [query, setQuery] = useState("");
+  const searchParams = useSearchParams();
   const pulls = open?.status === "available" ? Array.from(new Map(open.pulls.map((pr) => [pr.number, pr])).values()) : [];
   const filtered = filterOpenPullRequests(pulls, query);
   const result = open?.status === "available" ? {
@@ -101,10 +109,16 @@ function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["o
             <ul className="pr-explorer-open-list">
               {result.matches.map(({ number, url, reasons }) => {
                 const href = validHttpUrl(url);
+                const lanes = openPullRequestLocalLanes(branchRows, number);
                 return (
                   <li key={number}>
                     {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(number)}</strong>}
                     <span>{reasons.join(" · ")}</span>
+                    {lanes.map((lane) => (
+                      <Link key={lane.id} href={updateProjectUrl(`/project?${searchParams.toString()}`, {
+                        tab: "lanes", lane: lane.id, event: null, branchRow: null, relationRef: null,
+                      })}><code>{lane.branch ?? lane.name}</code></Link>
+                    ))}
                   </li>
                 );
               })}
@@ -124,16 +138,22 @@ function OpenPullRequestAttention({ open }: { open: ProjectResponse["github"]["o
                   {query !== "" && <button type="button" className="pr-explorer-clear-toolbar" onClick={() => setQuery("")}>検索を解除</button>}
                 </div>
                 <p className="pr-explorer-inline-note" role="status">{filtered.length} / {result.pulls.length} 件表示</p>
-                {filtered.length === 0 ? <p className="pr-explorer-inline-note">検索条件に一致するオープンPRはありません</p> : <ul className="pr-explorer-open-list">
+                {filtered.length === 0 ? <p className="pr-explorer-inline-note">検索条件に一致するオープンPRはありません</p> : <ul className="pr-explorer-open-list pr-explorer-open-all">
                   {filtered.map((pr) => {
                     const href = validHttpUrl(pr.url);
                     const source = openPullRequestSource(pr);
+                    const { review, ci } = openPullRequestStatusLabels(pr);
                     return (
                       <li key={pr.number}>
-                        {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(pr.number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(pr.number)}</strong>}
-                        <strong>{pr.title}</strong>
-                        <span>{source === null ? <>作成元リポジトリ未取得 · <code>{pr.headRefName}</code></> : <code>{source}</code>} → <code>{pr.baseRefName}</code></span>
-                        <span>{openPullRequestLabels(pr).join(" · ")}</span>
+                        <div>
+                          {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(pr.number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(pr.number)}</strong>}
+                          {" "}<strong>{pr.title}</strong>{pr.isDraft && <> <span>Draft</span></>}
+                          <div>{source === null ? <>作成元リポジトリ未取得 · <code>{pr.headRefName}</code></> : <code>{source}</code>} → <code>{pr.baseRefName}</code></div>
+                        </div>
+                        <dl className="pr-explorer-open-status">
+                          <div><dt>レビュー</dt><dd>{review}</dd></div>
+                          <div><dt>CI</dt><dd>{ci}</dd></div>
+                        </dl>
                       </li>
                     );
                   })}
@@ -374,7 +394,7 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
 export default function PullRequestExplorer({ project }: { project: ProjectResponse }) {
   return (
     <>
-      <OpenPullRequestAttention open={project.github.open} />
+      <OpenPullRequestAttention open={project.github.open} branchRows={project.branch_rows} />
       <MergedPullRequestExplorer project={project} />
     </>
   );

@@ -340,14 +340,29 @@ export function filterOpenPullRequests(pulls, query) {
 }
 
 /** GitHubの明示値を表示し、nullを待機状態と混同しない。 */
-export function openPullRequestLabels(pr) {
+export function openPullRequestStatusLabels(pr) {
   const review = { APPROVED: "レビュー承認", CHANGES_REQUESTED: changesRequestedLabel, REVIEW_REQUIRED: "レビュー待ち" };
   const ci = { SUCCESS: "CI 成功", FAILURE: ciFailureLabel, ERROR: ciFailureLabel, PENDING: "CI 結果待ち", EXPECTED: "CI 報告待ち" };
-  return [
-    ...(pr.isDraft ? ["Draft"] : []),
-    pr.reviewDecision === null ? "レビュー情報なし" : review[pr.reviewDecision],
-    pr.ciState === null ? "CI なし" : ci[pr.ciState],
-  ];
+  return {
+    review: pr.reviewDecision === null ? "レビュー情報なし" : review[pr.reviewDecision],
+    ci: pr.ciState === null ? "CI なし" : ci[pr.ciState],
+  };
+}
+
+export function openPullRequestLabels(pr) {
+  const { review, ci } = openPullRequestStatusLabels(pr);
+  return [...(pr.isDraft ? ["Draft"] : []), review, ci];
+}
+
+/** @param {import("./types").ProjectResponse["branch_rows"]} rows @param {number} number */
+export function openPullRequestLocalLanes(rows, number) {
+  /** @type {Map<string, import("./types").ProjectLane>} */
+  const lanes = new Map();
+  for (const row of rows === null ? [] : rows) {
+    if (!row.open_pull_requests?.some((pr) => pr.number === number)) continue;
+    for (const lane of row.locals) lanes.set(lane.id, lane);
+  }
+  return [...lanes.values()];
 }
 
 /** @param {import("./types").OpenPullRequest[]} pulls */

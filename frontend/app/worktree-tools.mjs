@@ -22,7 +22,7 @@ export const WORKTREE_HEALTH_FILTERS = Object.freeze([
   "unknown",
 ]);
 
-export const WORKTREE_SYNC_FILTERS = Object.freeze([
+export const WORKTREE_SYNC_FILTERS = Object.freeze(/** @type {const} */ ([
   "all",
   "ahead",
   "behind",
@@ -30,7 +30,7 @@ export const WORKTREE_SYNC_FILTERS = Object.freeze([
   "synced",
   "no-upstream",
   "unknown",
-]);
+]));
 
 export const WORKTREE_STATE_LABELS = Object.freeze({
   all: "すべて",
@@ -52,8 +52,8 @@ export const WORKTREE_HEALTH_LABELS = Object.freeze({
 
 export const WORKTREE_SYNC_LABELS = Object.freeze({
   all: "すべて",
-  ahead: "ahead（未push）",
-  behind: "behind（未pull）",
+  ahead: "ahead（追跡先より先行）",
+  behind: "behind（追跡先より遅れ）",
   diverged: "分岐",
   synced: "同期済み",
   "no-upstream": "追跡先なし",
@@ -261,6 +261,13 @@ export function worktreeHeadKey(row) {
   return typeof head === "string" && head.length > 0 ? head : null;
 }
 
+/** Git lists an all-zero HEAD before the first commit. */
+export function hasComparableWorktreeHead(head) {
+  return typeof head === "string"
+    && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(head)
+    && !/^0+$/u.test(head);
+}
+
 export function duplicateWorktreeHeadKeys(rows) {
   const counts = new Map();
   for (const row of rows) {
@@ -430,6 +437,10 @@ export function summarizeWorktreeInventory(rows) {
 /** POSIX shell single-quote escaping. The input must be the actual path string. */
 export function shellQuote(value) {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+export function worktreePrunePreviewCommand(mainPath) {
+  return `git -C ${shellQuote(mainPath)} worktree prune --dry-run --verbose`;
 }
 
 export function worktreeCdCommand(path) {

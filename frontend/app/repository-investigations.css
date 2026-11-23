@@ -12,9 +12,13 @@
 }
 .repository-investigation .tag-explorer-select:focus-visible,
 .repository-investigation .tag-explorer-export:focus-visible,
-.repository-investigation input:focus-visible {
+.repository-investigation input:focus-visible,
+.repository-investigation select:focus-visible {
   outline: 2px solid var(--control-blue);
   outline-offset: 2px;
 }
 
 .repository-investigation-date-error { flex-basis: 100%; margin: 0; }
+.repository-investigation-tips { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0; font-size: 12px; }
+.repository-investigation-patch-counts { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
+.repository-investigation-patch-mark { color: var(--control-ink); font-weight: 600; }

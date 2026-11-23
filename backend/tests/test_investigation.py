@@ -64,6 +64,26 @@ def test_search_filters_and_paging(repo):
         investigation.search(str(repo), '--all', '', '', 'bad-date', '', '', 0, 'message')
 
 
+def test_search_returns_committer_date_used_for_period(repo, monkeypatch):
+    author_date = '2026-11-01T12:00:00+09:00'
+    committer_date = '2026-11-20T12:00:00+09:00'
+    monkeypatch.setenv('GIT_AUTHOR_DATE', author_date)
+    monkeypatch.setenv('GIT_COMMITTER_DATE', committer_date)
+    git(repo, 'commit', '--allow-empty', '-m', 'different dates')
+    sha = git(repo, 'rev-parse', 'HEAD')
+
+    def search_day(day):
+        return investigation.search(str(repo), '--all', 'different dates', '',
+                                    f'{day}T00:00:00+09:00', f'{day}T23:59:59+09:00',
+                                    '', 0, 'message')['commits']
+
+    assert search_day('2026-11-01') == []
+    assert search_day('2026-11-20') == [{
+        'hash': sha, 'subject': 'different dates', 'date': author_date,
+        'author': 'Investigator', 'committer_date': committer_date,
+    }]
+
+
 def test_recovery_sources_and_reachable_exclusion(repo):
     git(repo, 'commit', '--allow-empty', '-m', 'lost')
     lost = git(repo, 'rev-parse', 'HEAD')
@@ -74,6 +94,20 @@ def test_recovery_sources_and_reachable_exclusion(repo):
     assert candidate['command'] == f'git branch recover/{lost[:12]} {lost}'
     git(repo, 'tag', 'saved', lost)
     assert investigation.recovery(str(repo))['commits'] == []
+
+
+def test_recovery_marks_both_unreachable_tips(repo):
+    git(repo, 'commit', '--allow-empty', '-m', 'shared lost ancestor')
+    ancestor = git(repo, 'rev-parse', 'HEAD')
+    git(repo, 'commit', '--allow-empty', '-m', 'lost left tip')
+    left = git(repo, 'rev-parse', 'HEAD')
+    git(repo, 'reset', '--hard', ancestor)
+    git(repo, 'commit', '--allow-empty', '-m', 'lost right tip')
+    right = git(repo, 'rev-parse', 'HEAD')
+    git(repo, 'reset', '--hard', f'{ancestor}^')
+
+    commits = investigation.recovery(str(repo))['commits']
+    assert {c['hash']: c['is_tip'] for c in commits} == {ancestor: False, left: True, right: True}
 
 
 def test_cherry_patch_equivalence(repo):

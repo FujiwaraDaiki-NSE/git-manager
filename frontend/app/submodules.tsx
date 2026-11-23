@@ -41,7 +41,7 @@ export default function Submodules({ repo }: { repo: Repo }) {
       <p>親のindex <code>{entry.recorded_commit === null ? "競合のため未確定" : entry.recorded_commit}</code></p>
       <p>現在のチェックアウト <code>{entry.checkout_commit === null ? "未確定" : entry.checkout_commit}</code></p>
       {entry.status === "same" && <p>親リポジトリの記録コミットと一致しています。</p>}
-      {submoduleCommands(entry.status, entry.path).map(({ meaning, command }) => <div key={command}>
+      {submoduleCommands(entry.status, entry.path, path, entry.recorded_commit, entry.checkout_commit).map(({ meaning, command }) => <div key={command}>
         <p>{meaning}</p><code>{command}</code> <CopyButton value={command} label={`${entry.path}: ${command} をコピー`} />
       </div>)}
     </div>)}

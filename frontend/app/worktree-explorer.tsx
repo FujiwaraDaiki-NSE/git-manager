@@ -2,11 +2,13 @@
 
 import { useMemo, useState } from "react";
 import CopyButton from "./copy-button";
+import { buildInvestigationShareUrl } from "./investigation-presets-tools.mjs";
 import type { ProjectLane, ProjectResponse } from "./types";
 import {
   basename,
   buildWorktreeInventory,
   filterWorktreeInventory,
+  hasComparableWorktreeHead,
   worktreeBranchKey,
   worktreeCdCommands,
   sortWorktreeInventory,
@@ -18,6 +20,7 @@ import {
   worktreeInventoryMarkdown,
   worktreeInventoryTsv,
   worktreePathHeadJson,
+  worktreePrunePreviewCommand,
   parseWorktreeSyncThreshold,
   summarizeWorktreeHeads,
   worktreeUpstreamKey,
@@ -25,6 +28,8 @@ import {
   worktreeStateTokens,
   worktreeSync,
   worktreeSyncLabel,
+  WORKTREE_SYNC_FILTERS,
+  WORKTREE_SYNC_LABELS,
 } from "./worktree-tools.mjs";
 
 type WorktreeStateFilter = "all" | "main" | "ok" | "detached" | "prunable" | "locked" | "unknown";
@@ -62,16 +67,6 @@ const healthFilters: Array<{ key: WorktreeHealthFilter; label: string }> = [
   { key: "conflict", label: "競合" },
   { key: "clean", label: "変更なし" },
   { key: "unknown", label: "未取得" },
-];
-
-const syncFilters: Array<{ key: WorktreeSyncFilter; label: string }> = [
-  { key: "all", label: "すべて" },
-  { key: "ahead", label: "ahead（未push）" },
-  { key: "behind", label: "behind（未pull）" },
-  { key: "diverged", label: "分岐" },
-  { key: "synced", label: "同期済み" },
-  { key: "no-upstream", label: "追跡先なし" },
-  { key: "unknown", label: "同期状態未取得" },
 ];
 
 const orderOptions: Array<{ key: WorktreeOrder; label: string }> = [
@@ -123,6 +118,47 @@ function upstreamOptionLabel(key: WorktreeUpstreamFilter) {
 function headLabel(row: WorktreeInventoryRow) {
   if (typeof row.worktree.head !== "string" || row.worktree.head.length === 0) return "HEAD 未取得";
   return row.worktree.head.slice(0, 10);
+}
+
+function WorktreeHeadComparison({ inventory }: { inventory: WorktreeInventoryRow[] }) {
+  const [basePath, setBasePath] = useState("");
+  const [targetPath, setTargetPath] = useState("");
+  const options = inventory.filter((row) => hasComparableWorktreeHead(row.worktree.head));
+  const base = options.find((row) => row.worktree.path === basePath)?.worktree.head;
+  const target = options.find((row) => row.worktree.path === targetPath)?.worktree.head;
+  let href = null;
+  if (typeof window !== "undefined" && base && target && basePath !== targetPath) {
+    const url = new URL(window.location.href);
+    url.hash = "commit-compare";
+    href = buildInvestigationShareUrl(url.href, "compare", { base, target, mode: "direct" });
+  }
+  const worktreeOptions = options.map((row) => (
+    <option key={row.worktree.path} value={row.worktree.path}>
+      {branchLabel(row)} · {headLabel(row)} · {row.worktree.path}
+    </option>
+  ));
+
+  return (
+    <div className="worktree-explorer-head-compare" role="group" aria-label="worktreeのHEAD差分">
+      <label className="worktree-explorer-order">
+        比較元
+        <select value={base ? basePath : ""} onChange={(event) => setBasePath(event.target.value)}>
+          <option value="">worktreeを選択</option>
+          {worktreeOptions}
+        </select>
+      </label>
+      <label className="worktree-explorer-order">
+        比較先
+        <select value={target ? targetPath : ""} onChange={(event) => setTargetPath(event.target.value)}>
+          <option value="">worktreeを選択</option>
+          {worktreeOptions}
+        </select>
+      </label>
+      {href
+        ? <a className="worktree-explorer-action" href={href}>HEADの差分を開く</a>
+        : <button className="worktree-explorer-action" type="button" disabled>HEADの差分を開く</button>}
+    </div>
+  );
 }
 
 function upstreamFactLabel(row: WorktreeInventoryRow) {
@@ -235,6 +271,7 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
   }, [branchFilter, headFilter, healthFilter, inventory, minAhead, minBehind, order, query, stateFilter, syncFilter, thresholdsValid, upstreamFilter]);
   const visibleCdCommands = useMemo(() => worktreeCdCommands(visible), [visible]);
   const headSummary = useMemo(() => summarizeWorktreeHeads(visible), [visible]);
+  const prunePreview = worktreePrunePreviewCommand(project.main_path);
   const hasActiveFilters = query.trim().length > 0
     || stateFilter !== "all"
     || healthFilter !== "all"
@@ -364,7 +401,7 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
         </div>
         <div className="worktree-explorer-filter-group" role="group" aria-label="upstream の同期状態で絞り込み">
           <span className="worktree-explorer-filter-title">upstream</span>
-          {syncFilters.map((option) => <button type="button" key={option.key} aria-pressed={syncFilter === option.key} onClick={() => setSyncFilter(option.key)}>{option.label}</button>)}
+          {WORKTREE_SYNC_FILTERS.map((key) => <button type="button" key={key} aria-pressed={syncFilter === key} onClick={() => setSyncFilter(key)}>{WORKTREE_SYNC_LABELS[key]}</button>)}
         </div>
         <div className="worktree-explorer-filter-group" role="group" aria-label="同じHEADのworktreeで絞り込み">
           <span className="worktree-explorer-filter-title">HEAD比較</span>
@@ -384,6 +421,7 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
             <span>{group.paths.join(" · ")}</span>
           </div>)}
         </div> : <p>表示中のworktreeに同じHEADはありません。</p>}
+        <WorktreeHeadComparison key={project.main_path} inventory={inventory} />
       </section>
 
       <div className="worktree-explorer-list" aria-live="polite">
@@ -421,6 +459,10 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
               <div className="worktree-explorer-card-actions">
                 {row.worktree.path.length > 0 && <CopyButton value={row.worktree.path} label="パスをコピー" />}
                 {cd && <CopyButton value={cd} label="cd をコピー" />}
+                {state === "prunable" && <div className="worktree-explorer-prune-preview">
+                  <span>このリポジトリ全体が確認対象</span>
+                  <CopyButton value={prunePreview} label="prune の確認コマンドをコピー" />
+                </div>}
                 {lane ? <>
                   <button className="worktree-explorer-action" type="button" onClick={() => onSelectLane(lane)}>作業ブランチ詳細</button>
                   <button className="worktree-explorer-action is-primary" type="button" onClick={() => onOpenGit(lane)}>Gitを開く</button>

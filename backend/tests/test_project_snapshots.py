@@ -272,7 +272,7 @@ def test_cached_facts_reload_after_an_observation_changes_on_another_thread(snap
     assert after["fingerprint"] == before["fingerprint"]
     assert after["observed_at"] > before["observed_at"]
     assert after["facts"] is not before["facts"]
-    assert json.dumps(["project.graph", [project_id, None]], ensure_ascii=False) in after["facts"]
+    assert json.dumps(["project.graph.v2", [project_id, None]], ensure_ascii=False) in after["facts"]
     assert project_snapshots.load(project_id)["facts"] is after["facts"]
 
 

@@ -1,0 +1,46 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-24</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>壊れたworktreeの失敗理由をGitの言葉で表示、PRから手元のブランチへ、判断待ちの一括コピー、グラフ・worktree台帳・調査ツールの読み解きを追加 — 2026-11-24</h1>
+<p>「再起動直後のfetch殺到」は 2026-11-21 に解消済みのため、通常の改善を行いました。開始時30点 + 検証済み加点72点 = <b>100点</b>（上限到達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+
+<h2>高速化（+5）</h2>
+<table><thead><tr><th>対象</th><th>開始時</th><th>終了時</th><th>内容</th></tr></thead><tbody>
+<tr><td>ホームの <code>/api/projects</code>（645 worktree行 / 111プロジェクト）</td><td>0.52〜0.56秒 / 201KB（HTTP、8:12）</td><td>0.33〜0.35秒 / 201KB（HTTP、再ビルド後、load 2.0）</td><td>レーン数の集計に使う <code>git for-each-ref</code> が追跡先との差やコミット日時まで読んでいたのを、件数用の出力形式に変更。応答はバイト同一（コンテナ内の交互計測で中央値 522 → 331ms）。</td></tr>
+</tbody></table>
+<p>不採用：refが動いていないプロジェクトでGit起動を省く案は、既存fingerprintの確認自体が高コストで 327 → 546ms と悪化したため入れていません（1リクエストあたりGit 292回起動が残る要因）。</p>
+
+<h2>バグ修正（+1 ×7）</h2>
+<ul>
+<li><code>git status</code> 失敗の理由が一律「実行できませんでした」だった → Gitのstderr 1行目をそのまま表示（実データ：<code>.cursor/worktrees/thinkplatform/*</code> 19件が <code>fatal: not a git repository: …/.git/worktrees/&lt;name&gt;</code>）。</li>
+<li>プロジェクトを切り替えても前のプロジェクトのGit詳細（別worktree向けコマンド）が残る。</li>
+<li>初回コミット前のブランチでagent報告が作業レーンに出ない。</li>
+<li>引用符を含むブランチ名で初回pushの提示コマンドが壊れる。</li>
+<li>コミット検索の期間条件（コミッター日時）と結果の日時（作者日時のみ）が食い違う → 両方を明示。</li>
+<li>コミットグラフに添えるコマンドが実際の対象範囲（HEAD＋追跡先、件数、順序）と違う。</li>
+<li>カンマを含むブランチ名がグラフで2本に分かれる。</li>
+</ul>
+
+<h2>機能追加（+5 ×10）</h2>
+<ul>
+<li>対応が必要なオープンPRから、対応するローカルブランチのレーンを開く。</li>
+<li>未確認の判断待ちをまとめてコピー（プロジェクト / ブランチ・状態・質問・報告時刻）。</li>
+<li>未確認の判断待ちを同じ状態内で古い順に並べ替え。</li>
+<li>worktree台帳で2つのworktreeの先端を選んで差分を開く。</li>
+<li>prunable行に <code>git worktree prune --dry-run --verbose</code> の確認コマンド。</li>
+<li>変更パスの重なりを特定のworktreeで絞り込む。</li>
+<li>到達不能コミットを「先端候補のみ」に絞る。</li>
+<li>コミットグラフで選択コミットの第N親へ移動。</li>
+<li>グラフの「未コミット変更」行から状態タブ（変更ファイル）を開く。</li>
+<li>ずれたサブモジュールの記録SHA…現在SHAを <code>git log --left-right</code> で確認するコマンド。</li>
+</ul>
+
+<h2>UIをリッチにする改善（+2 ×4）・文言（+1 ×2）</h2>
+<ul>
+<li>判断カードはプロジェクト名・ブランチ名を質問より先に表示。</li>
+<li>パッチ同等判定に「Aのみ / Bのみ / 同等」の件数と行ラベル。</li>
+<li>オープンPR一覧のレビュー欄・CI欄を行ごとに同じ位置へ、Draftは題名の横。</li>
+<li>rebase・amの進行位置を目盛りで表示（全N件のうちM件目を処理中）。</li>
+<li>文言：「PRのCI対象」→「PRの先端コミット」、worktree台帳の「ahead（未push）/ behind（未pull）」→「追跡先より先行 / 遅れ」。</li>
+</ul>
+
+<h2>確認</h2>
+<p>backend 471件、frontend 484件、<code>tsc --noEmit</code> 通過。全23件を再ビルド後の稼働環境（http://localhost:4412）で、実データ（thinkplatform・design_db）と一時fixture（確認後に削除・再走査）を使ってブラウザ確認しました。Codexレビュー4件のうち3件を採用（比較リンクのURL状態保持、保存済みグラフ観測のキー更新、テストのGit設定依存）、1件（状態をまたぐ時刻順）は仕様どおりとしてラベルを「同じ状態内の順序（最終報告時刻）」に明確化。</p>

@@ -9,7 +9,10 @@ import type { AgentTask, CommitDetail } from "./types";
 import "./tag-explorer.css";
 import "./repository-investigations.css";
 
-type Commit = { hash: string; subject: string; date: string; author: string; mark?: string; sources?: { selector: string; message: string }[]; command?: string };
+const patchLabels = { "<": "Aのみ", ">": "Bのみ", "=": "同等" } as const;
+type PatchMark = keyof typeof patchLabels;
+const patchMarks: PatchMark[] = ["<", ">", "="];
+type Commit = { hash: string; subject: string; date: string; author: string; committer_date?: string; mark?: PatchMark; is_tip?: boolean; sources?: { selector: string; message: string }[]; command?: string };
 type Result = { commits?: Commit[]; scope?: string; fixed_shas?: string[]; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string | null; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string[] }[] }[] };
 async function read<T,>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, cache: "no-store", signal });
@@ -58,6 +61,11 @@ function Investigation(props: InvestigationProps) {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [pageLoading, setPageLoading] = useState<string | null>(null);
+  const [overlapWorktree, setOverlapWorktree] = useState("");
+  const [tipsOnly, setTipsOnly] = useState(false);
+  const overlapWorktrees = data?.overlaps && [...new Set(data.overlaps.flatMap(item => item.worktrees.map(w => w.worktree)))].sort();
+  const overlaps = data?.overlaps?.filter(item => overlapWorktree === "" || item.worktrees.some(w => w.worktree === overlapWorktree));
+  const commits = tipsOnly ? data?.commits?.filter(c => c.is_tip === true) : data?.commits;
   const invalidDates = kind === "search" && fields.since !== "" && fields.until !== "" && fields.since > fields.until;
   const dateErrorId = `${inputId}-date-error`;
   const controller = useRef<AbortController | null>(null);
@@ -71,6 +79,7 @@ function Investigation(props: InvestigationProps) {
     setLoading(true);
     setPageLoading(fixedShas === null ? null : offset > data!.offset! ? "次の50件を取得中…" : "前の50件を取得中…");
     if (fixedShas === null) setData(null);
+    setOverlapWorktree("");
     setError(null); setSelected(null);
     try {
       const submitted = kind === "search" && fixedShas === null
@@ -124,9 +133,18 @@ function Investigation(props: InvestigationProps) {
           {data.left && <p className="tag-explorer-note">A: {data.left} @ {data.left_sha?.slice(0, 12)} ／ B: {data.right} @ {data.right_sha?.slice(0, 12)}</p>}
           {data.command && <p className="tag-explorer-note">{kind === "search" && "再現用コマンド（対象リポジトリで実行） "}<code>{data.command}</code>{kind === "search" && <> <CopyButton value={data.command} label="再現用コマンドをコピー" /></>}</p>}
           {data.unavailable && data.unavailable.length > 0 && <p className="tag-explorer-error" role="alert">一部worktreeを取得できませんでした。重なりの一覧は不完全です: {data.unavailable.join("、")}</p>}
-          {kind === "overlaps" && data.overlaps && (data.overlaps.length ? (
+          {kind === "overlaps" && overlapWorktrees && overlapWorktrees.length > 0 && <div className="tag-explorer-tools">
+            <label>
+              <span>対象worktree</span>
+              <select value={overlapWorktree} onChange={e => setOverlapWorktree(e.target.value)}>
+                <option value="">すべてのworktree</option>
+                {overlapWorktrees.map(worktree => <option key={worktree} value={worktree}>{worktree}</option>)}
+              </select>
+            </label>
+          </div>}
+          {kind === "overlaps" && overlaps && (overlaps.length ? (
             <ul className="repository-investigation-list">
-              {data.overlaps.map(item => <li className="tag-explorer-commit" key={item.path}>
+              {overlaps.map(item => <li className="tag-explorer-commit" key={item.path}>
                 <div className="tag-explorer-commit-heading"><strong><code>{item.path}</code></strong></div>
                 <ul className="repository-investigation-list">
                   {item.worktrees.map(w => {
@@ -149,14 +167,30 @@ function Investigation(props: InvestigationProps) {
               </li>)}
             </ul>
           ) : <p className="tag-explorer-empty">{data.complete ? "変更パスの重なりはありません。" : "取得できたworktree間では変更パスの重なりはありません。"}</p>)}
-          {data.commits && (data.commits.length ? (
+          {kind === "recovery" && data.commits && data.commits.length > 0 && <label className="repository-investigation-tips">
+            <input type="checkbox" checked={tipsOnly} onChange={e => {
+              const checked = e.target.checked;
+              setTipsOnly(checked);
+              if (checked && data.commits?.some(c => c.hash === selected && c.is_tip === false)) setSelected(null);
+            }} />
+            先端候補のみ
+          </label>}
+          {kind === "cherry" && commits && <p className="repository-investigation-patch-counts" aria-label="判定別のコミット件数">
+            {patchMarks.map(mark => <span key={mark}>{patchLabels[mark]} {commits.filter(c => c.mark === mark).length}件</span>)}
+          </p>}
+          {commits && (commits.length ? (
             <ul className="repository-investigation-list">
-              {data.commits.map(c => <li className="tag-explorer-commit" key={c.hash}>
+              {commits.map(c => <li className="tag-explorer-commit" key={c.hash}>
                 <button className="tag-explorer-select" type="button" aria-pressed={selected === c.hash} onClick={() => setSelected(c.hash)}>
                   <strong>{c.subject}</strong>
-                  <code>{c.mark} {c.hash}</code>
+                  <code>{c.mark === undefined ? c.hash : `${c.mark} ${c.hash}`}</code>
                 </button>
-                <p className="tag-explorer-commit-meta"><time dateTime={c.date}>{c.date}</time><span>{c.author}</span></p>
+                <p className="tag-explorer-commit-meta">
+                  {c.mark !== undefined && <span className="repository-investigation-patch-mark">{patchLabels[c.mark]}</span>}
+                  {c.committer_date !== undefined && <span>期間判定に使うコミッター日時 <time dateTime={c.committer_date}>{new Date(c.committer_date).toLocaleString("ja-JP", { timeZoneName: "short" })}</time></span>}
+                  <span>{kind === "search" && "作者日時 "}<time dateTime={c.date}>{c.date}</time></span>
+                  <span>{c.author}</span>
+                </p>
                 {c.sources && <>
                   {c.sources.length === 0 && <p className="tag-explorer-note">この祖先コミットを直接指すreflog操作はありません。</p>}
                   <ul className="repository-investigation-list">

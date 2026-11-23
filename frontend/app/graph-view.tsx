@@ -596,7 +596,7 @@ export function GraphView({
       }
       return firstKey;
     });
-  }, [firstKey, onSelect, onVirtualSelect, rows, selectedHash]);
+  }, [firstKey, onSelect, rows, selectedHash]);
 
   const select = (hash: string) => {
     setActiveKey(hash);
@@ -620,19 +620,18 @@ export function GraphView({
     }
     const next = items[nextIndex];
     if (!next) return;
-    const nextKey = rowKey(next);
-    setActiveKey(nextKey);
     if (isGraphRow(next)) {
       select(next.hash);
     } else {
-      selectVirtual();
+      setActiveKey(virtualKey);
     }
     document.getElementById(rowId(next))?.focus();
   };
   const classes = ["graph-view", className].filter(Boolean).join(" ");
   const headIndex = virtualNode ? rows.findIndex((row) => row.is_head) : -1;
+  const selectedRow = rows.find((row) => row.hash === selectedHash);
 
-  return (
+  const graphRows = (
     <div aria-label={ariaLabel} className={classes} role="group">
       {items.map((item, index) => {
         const commit = isGraphRow(item);
@@ -668,6 +667,36 @@ export function GraphView({
         );
       })}
     </div>
+  );
+
+  return (
+    <>
+      {graphRows}
+      {onSelect && selectedRow && selectedRow.parents.length > 0 && (
+        <div className="commit-meta" role="group" aria-label="親コミットへ移動">
+          {selectedRow.parents.map((hash, index) => {
+            const parent = rows.find((row) => row.hash === hash);
+            const label = `第${index + 1}親（${hash.slice(0, 7)}）`;
+            const key = `${index}:${hash}`;
+            return parent ? (
+              <button
+                key={key}
+                className="copy"
+                type="button"
+                onClick={() => {
+                  select(parent.hash);
+                  document.getElementById(rowId(parent))?.focus();
+                }}
+              >
+                {label}へ移動
+              </button>
+            ) : (
+              <span key={key}>{label}は表示範囲外です</span>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 

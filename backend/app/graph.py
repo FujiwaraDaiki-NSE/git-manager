@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import shlex
 from typing import Any
 
 from app.gitinfo import _run
@@ -17,7 +18,7 @@ FORMAT = "%H%x1f%h%x1f%P%x1f%D%x1f%an%x1f%cI%x1f%s"
 def _parse_refs(raw: str) -> list[dict[str, str]]:
     """%D の ref 表示を、local branch / remote / tag に分類する。"""
     refs: list[dict[str, str]] = []
-    for part in raw.split(","):
+    for part in raw.split(", "):
         name = part.strip()
         if not name:
             continue
@@ -110,7 +111,7 @@ def _local_branch_heads(repo: str) -> list[dict[str, str]] | None:
 
 
 def _empty_response(
-    all_refs: bool,
+    command: str,
     default: str | None,
     default_hash: str | None,
     branch_heads: list[dict[str, str]],
@@ -125,7 +126,7 @@ def _empty_response(
         "default_lane": None,
         "branch_heads": branch_heads,
         "truncated": False,
-        "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
+        "command": command,
     }
 
 
@@ -135,21 +136,23 @@ def build(repo: str, all_refs: bool = True, limit: int | None = 200) -> dict[str
     if branch_heads is None:
         return None
 
-    args = [
-        "log",
-        "--date-order",
-        "--decorate=full",
-        f"--format={FORMAT}",
-    ]
-    if limit is not None:
-        args.append(f"--max-count={limit + 1}")
+    order = ["--date-order"]
     if all_refs:
-        args.insert(1, "--all")
+        refs = ["--all"]
     else:
+        refs = ["HEAD"]
         upstream = _run(repo, ["rev-parse", "--symbolic-full-name", "@{upstream}"])
         if upstream:
-            args.extend(["HEAD", upstream.strip(), "--"])
+            refs.append(upstream.strip())
+        refs.append("--")
 
+    args = ["log", *order, "--decorate=full", f"--format={FORMAT}"]
+    command_args = ["git", "log", "--oneline", "--graph", *order]
+    if limit is not None:
+        args.append(f"--max-count={limit + 1}")
+        command_args.append(f"--max-count={limit}")
+    args.extend(refs)
+    command = shlex.join([*command_args, *refs])
     out = _run(repo, args)
     if out is None:
         # unborn HEAD の空リポジトリでは、現在ブランチを限定した git log が
@@ -158,7 +161,7 @@ def build(repo: str, all_refs: bool = True, limit: int | None = 200) -> dict[str
         inside = _run(repo, ["rev-parse", "--is-inside-work-tree"])
         head = _run(repo, ["rev-parse", "--verify", "--quiet", "HEAD"])
         if inside == "true\n" and head is None:
-            return _empty_response(all_refs, default, default_hash, branch_heads)
+            return _empty_response(command, default, default_hash, branch_heads)
         return None
 
     raw_rows: list[dict[str, Any]] = []
@@ -259,5 +262,5 @@ def build(repo: str, all_refs: bool = True, limit: int | None = 200) -> dict[str
         "default_lane": default_lane,
         "branch_heads": branch_heads,
         "truncated": truncated,
-        "command": "git log --oneline --graph" + (" --all" if all_refs else ""),
+        "command": command,
     }

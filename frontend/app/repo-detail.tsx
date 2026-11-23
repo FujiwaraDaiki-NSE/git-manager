@@ -219,7 +219,11 @@ function StatusPane({ repo }: { repo: Repo }) {
   return (
     <section className="status-pane" aria-labelledby="status-pane-title">
       <div className="section-head"><h3 id="status-pane-title">変更ファイル</h3><code className="cmdhint">git status --short</code></div>
-      {entries === undefined || repo.error || repo.pending ? <div className="inline-error" role="status">変更ファイルの状態は未取得です。{repo.error && <span>{repo.error}。</span>}再走査で最新の状態を取得できます。</div> : <>
+      {entries === undefined || repo.error || repo.pending ? <div className="inline-error" role="status">
+        <span>変更ファイルの状態は未取得です。</span>
+        {repo.error && <span className="git-status-error-reason">{repo.error}</span>}
+        <span>再走査で最新の状態を取得できます。</span>
+      </div> : <>
         <div className="status-file-tools-panel">
           <div className="status-file-tools-controls" aria-label="変更ファイルの表示条件">
             <label className="status-file-search"><span>変更ファイルを検索</span><input type="search" aria-label="変更ファイルを検索" placeholder="ファイル名・パスで検索" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
@@ -767,7 +771,7 @@ export default function RepoDetail({
       return undefined;
     return {
       lane: graph.head_lane,
-      label: repo.branch_line,
+      label: `未コミット変更 · ${repo.branch_line}`,
       summary: (repo.counts ?? [])
         .map((count) => `${display(count.xy)} ${count.count}`)
         .join("  "),
@@ -910,6 +914,10 @@ export default function RepoDetail({
                   maxLane={graph.max_lane}
                   selectedHash={selectedHash}
                   onSelect={setSelectedHash}
+                  onVirtualSelect={() => {
+                    onTabChange("status");
+                    document.getElementById("repo-tab-status")?.focus();
+                  }}
                   virtualNode={virtualNode}
                 />
               ) : (

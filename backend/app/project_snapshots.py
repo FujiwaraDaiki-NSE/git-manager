@@ -190,7 +190,7 @@ def _shareable_git_result(key, value):
 
 def get(repo, project_id, state_rows, repo_lock, range_name, as_of, load_github):
     saved = load(project_id)
-    graph_key = json.dumps(["project.graph", [repo, None if range_name == "all" else project.MAX_PROJECT_COMMITS]], sort_keys=True, ensure_ascii=False)
+    graph_key = json.dumps([project.GRAPH_OBSERVATION_KEY, [repo, None if range_name == "all" else project.MAX_PROJECT_COMMITS]], sort_keys=True, ensure_ascii=False)
     if saved is None or graph_key not in saved["facts"]:
         with _lock(project_id):
             saved = load(project_id)

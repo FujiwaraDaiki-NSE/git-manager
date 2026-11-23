@@ -5,6 +5,7 @@ import {
   buildWorktreeInventory,
   escapeTsvCell,
   filterWorktreeInventory,
+  hasComparableWorktreeHead,
   worktreeBranchFilterValue,
   worktreeBranchKey,
   worktreeCdCommands,
@@ -18,6 +19,7 @@ import {
   worktreeInventoryJson,
   worktreeInventoryMarkdown,
   worktreePathHeadJson,
+  worktreePrunePreviewCommand,
   summarizeWorktreeHeads,
   worktreeUpstreamKey,
   worktreeSyncThresholdsMatch,
@@ -27,6 +29,8 @@ import {
   worktreeState,
   worktreeStateTokens,
   worktreeSync,
+  worktreeSyncLabel,
+  WORKTREE_SYNC_LABELS,
 } from "../app/worktree-tools.mjs";
 
 function worktree(overrides = {}) {
@@ -70,6 +74,33 @@ function filterOptions(overrides = {}) {
     ...overrides,
   };
 }
+
+test("HEAD comparison accepts complete hashes and excludes missing or unborn tips", () => {
+  assert.equal(hasComparableWorktreeHead("1".repeat(40)), true);
+  assert.equal(hasComparableWorktreeHead("A".repeat(64)), true);
+  for (const head of [null, "", "abcd123", "0".repeat(40), "0".repeat(64)]) {
+    assert.equal(hasComparableWorktreeHead(head), false);
+  }
+});
+
+test("prune preview quotes the main path and includes both read-only flags", () => {
+  assert.equal(
+    worktreePrunePreviewCommand("/repos/O'Brien project"),
+    "git -C '/repos/O'\\''Brien project' worktree prune --dry-run --verbose",
+  );
+});
+
+test("local upstream ahead and behind use the filter wording and keep their classifications", () => {
+  const rows = [
+    { worktree: worktree(), lane: lane("/repo/main", { upstream: "local-base", upstream_ahead: 2 }) },
+    { worktree: worktree({ path: "/repo/behind" }), lane: lane("/repo/behind", { upstream: "local-base", upstream_behind: 1 }) },
+  ];
+  assert.deepEqual(rows.map(worktreeSyncLabel), ["ahead（追跡先より先行）", "behind（追跡先より遅れ）"]);
+  for (const [index, sync] of ["ahead", "behind"].entries()) {
+    assert.equal(worktreeSyncLabel(rows[index]), WORKTREE_SYNC_LABELS[sync]);
+    assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ sync })), [rows[index]]);
+  }
+});
 
 test("inventory membership is authoritative and lane links require an exact path", () => {
   const exact = lane("/repo/main");

@@ -743,7 +743,7 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
                 <strong>{comparison}</strong>
                 <small>{openPullRequestLabels(pr).join(" · ")}</small>
                 <small>ローカル先端 <code>{valueOrUnknown(lane.head)}</code></small>
-                <small>PRのCI対象 <code>{valueOrUnknown(pr.headRefOid)}</code></small>
+                <small>PRの先端コミット <code>{valueOrUnknown(pr.headRefOid)}</code></small>
               </dd>
             </div>;
           })}
@@ -1012,7 +1012,14 @@ export default function ProjectControl() {
   const setLaneOrder = (value: LaneOrder) => updateUrl({ laneOrder: value === "name" ? null : value });
   const setActivityQuery = (value: string) => updateUrl({ activityQuery: value }, "replace");
   const setActivityOrder = (value: ActivityOrder) => updateUrl({ activityOrder: value === "newest" ? null : value });
-  const [gitPath, setGitPath] = useState<string | null>(null);
+  const projectId = project?.id;
+  const projectPath = urlState.path;
+  const [gitSelection, setGitSelection] = useState<{ projectId: string; projectPath: string; path: string } | null>(null);
+  const gitPath = gitSelection !== null && gitSelection.projectId === projectId && gitSelection.projectPath === projectPath
+    ? gitSelection.path : null;
+  useEffect(() => {
+    setGitSelection((current) => current !== null && current.projectId === projectId && current.projectPath === projectPath ? current : null);
+  }, [projectId, projectPath]);
   const [gitTab, setGitTab] = useState<DetailTab>("status");
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -1174,19 +1181,21 @@ export default function ProjectControl() {
     updateUrl({ event: hash, lane: lane?.id ?? null, branchRow: branchRowId ?? null, relationRef: null });
   }, [project?.lanes, updateUrl]);
   const selectLane = useCallback((lane: ProjectLane) => updateUrl({ lane: lane.id, event: null, branchRow: null, relationRef: null }), [updateUrl]);
+  const selectGitPath = useCallback((path: string) => {
+    if (projectId === undefined || projectPath === null) return;
+    setCopyError(null);
+    setGitSelection({ projectId, projectPath, path });
+  }, [projectId, projectPath]);
   const openGit = useCallback((lane: ProjectLane) => {
-    setCopyError(null);
-    if (lane.path) setGitPath(lane.path);
-
-  }, []);
+    if (lane.path) selectGitPath(lane.path);
+  }, [selectGitPath]);
   const openWorktreeGit = useCallback((path: string) => {
-    setCopyError(null);
-    setGitPath(path);
+    selectGitPath(path);
     setGitTab("status");
-  }, []);
+  }, [selectGitPath]);
   const closeGit = useCallback(() => {
     setCopyError(null);
-    setGitPath(null);
+    setGitSelection(null);
   }, []);
   const closeSelection = useCallback(() => updateUrl({ event: null, lane: null, branchRow: null }), [updateUrl]);
   if (urlState.invalidParams.length) {

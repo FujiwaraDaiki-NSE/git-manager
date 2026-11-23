@@ -7,3 +7,25 @@
 .git-state-facts .selection-command {
   margin-block: 8px;
 }
+.git-operation-progress {
+  max-width: 16rem;
+}
+.git-operation-progress-track {
+  display: flex;
+  height: 0.625rem;
+  margin-block: 4px 8px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.git-operation-progress-track > span {
+  flex-basis: 0;
+}
+.git-operation-progress-earlier {
+  background: currentColor;
+}
+.git-operation-progress-current {
+  flex-grow: 1;
+  min-width: 3px;
+  background: repeating-linear-gradient(135deg, currentColor 0 1px, transparent 1px 4px);
+}

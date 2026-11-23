@@ -188,6 +188,9 @@ export default function CommitCompare({ path, laneComparison }: CommitComparePro
     setMode(values.mode);
     setValidationError(null);
     setOpen(true);
+    if (window.location.hash === "#commit-compare") {
+      document.getElementById("commit-compare")?.scrollIntoView();
+    }
   };
 
   const exportCsv = () => {
@@ -348,7 +351,7 @@ export default function CommitCompare({ path, laneComparison }: CommitComparePro
   );
   if (laneComparison !== null) return <div className="commit-compare commit-compare-lane">{body}</div>;
   return (
-    <details className="commit-compare" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details id="commit-compare" className="commit-compare" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary id={titleId}>2地点を比較する</summary>
       {body}
     </details>

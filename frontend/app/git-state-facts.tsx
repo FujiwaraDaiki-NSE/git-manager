@@ -26,7 +26,26 @@ function Command({ command, reason }: { command: string; reason: string }) {
   return <div className="selection-command"><code>{command}</code><CopyButton value={command} label="コマンドをコピー" /><small>{reason}</small></div>;
 }
 export function OperationFacts({ operations }: { operations: GitOperation[] | null | undefined }) {
-  return <section className="git-state-facts" aria-label="Git操作の途中状態"><strong>Git操作の途中状態</strong>{operations == null ? <p>未取得</p> : operations.length === 0 ? <p>進行中の操作なし</p> : operations.map((operation) => <div key={operation.marker}><p><strong>{operation.kind}途中{operation.step !== null && operation.total !== null ? `（${operation.step}/${operation.total}）` : ""}</strong> · {operation.marker}</p>{operation.commands.map((command) => <Command key={command.command} {...command} />)}</div>)}</section>;
+  return <section className="git-state-facts" aria-label="Git操作の途中状態">
+    <strong>Git操作の途中状態</strong>
+    {operations == null ? <p>未取得</p> : operations.length === 0 ? <p>進行中の操作なし</p> : operations.map(({ kind, marker, step, total, commands }) => (
+      <div key={marker}>
+        <p><strong>{kind}途中{step !== null && total !== null ? `（${step}/${total}）` : ""}</strong> · {marker}</p>
+        {(kind === "rebase" || kind === "am") && step !== null && total !== null
+          && Number.isInteger(step) && Number.isInteger(total) && step >= 1 && step <= total && (
+          <div className="git-operation-progress">
+            <span>全{total}件のうち{step}件目を処理中</span>
+            <div className="git-operation-progress-track" aria-hidden="true">
+              <span className="git-operation-progress-earlier" style={{ flexGrow: step - 1 }} />
+              <span className="git-operation-progress-current" />
+              <span style={{ flexGrow: total - step }} />
+            </div>
+          </div>
+        )}
+        {commands.map((command) => <Command key={command.command} {...command} />)}
+      </div>
+    ))}
+  </section>;
 }
 function PushRemoteDetails({ config, remote }: { config: PushRemoteConfig; remote: string | null }) {
   return (

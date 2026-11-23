@@ -831,10 +831,20 @@ def test_readme_plain_markdown_and_missing_file(tmp_path: Path) -> None:
     assert project._readme_description(str(tmp_path)) == "A plain explanation. Second line."
 
 
-def test_unborn_branch_is_not_reported_as_detached(tmp_path: Path) -> None:
+def test_unborn_branch_is_not_reported_as_detached(tmp_path: Path, monkeypatch) -> None:
+    from app import agent_events, mcp_server
+
     repo = tmp_path / "unborn"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "first-branch")
+    path = str(repo)
+    state = {path: {"path": path, "common_dir": path, "branch": "first-branch"}}
+    monkeypatch.setenv("GITDASH_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(mcp_server, "_state_provider", lambda: state)
+    monkeypatch.setattr(mcp_server, "_event_publisher", lambda event: None)
+    agent_events.initialize()
+    decision = agent_events.AgentDecision(question="最初に何を作りますか？", options=[], links=[])
+    assert mcp_server.report_agent_status(path, "waiting_for_user", None, decision) == "ok"
     result = project.build(str(repo), str(repo))
     assert result is not None
     assert result["graph"]["rows"] == []
@@ -848,6 +858,9 @@ def test_unborn_branch_is_not_reported_as_detached(tmp_path: Path) -> None:
     assert lane["head"] is None
     assert lane["last_commit"] is None
     assert lane["default_ahead"] is None
+    assert lane["agent"]["status"] == "waiting_for_user"
+    assert lane["agent"]["decision"] == decision.model_dump()
+    assert lane["agents"] == [lane["agent"]]
 
     git(repo, "config", "user.name", "Test")
     git(repo, "config", "user.email", "test@example.invalid")
@@ -857,6 +870,12 @@ def test_unborn_branch_is_not_reported_as_detached(tmp_path: Path) -> None:
     assert created["lanes"][0]["id"] == lane["id"]
     assert created["lanes"][0]["head"] == git(repo, "rev-parse", "HEAD").strip()
     assert not created["lanes"][0].get("unborn", False)
+
+    git(repo, "switch", "--detach")
+    detached = project.build(path, path)
+    assert detached is not None
+    detached_lane = next(row for row in detached["lanes"] if row["id"] == f"worktree:{path}")
+    assert detached_lane["agent"] is None
 
 
 def test_summary_batched_comparisons_match_individual_and_read_changed_refs(tmp_path: Path, monkeypatch) -> None:

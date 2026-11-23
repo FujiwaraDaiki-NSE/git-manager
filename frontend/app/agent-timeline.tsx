@@ -165,7 +165,6 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
   const branch = task.branch;
   return (
     <li className={`agent-timeline-current-row status-${statusClass(agentTaskState(task))}${decision ? ` report-age-${freshness}` : ""}`}>
-      <AgentDecisionDetails key={JSON.stringify(identity)} decision={task.decision} replyBranch={branch} />
       <ProjectBranch project={project} projectId={projectId} branch={task.branch}>
         <span className="agent-timeline-row-head"><strong>{projectLabel(project, projectId)}</strong><span>{branchLabel(task.branch)}</span></span>
         <span className="agent-timeline-status-line"><span title={agentTaskState(task) === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{currentStatus(task)}</span>{task.attention && <span className="agent-timeline-attention">注意: {agentStateLabel(task.attention)}</span>}</span>
@@ -174,6 +173,7 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
         {oldDecision && <span className="agent-timeline-freshness">{relativeTime(task.occurred_at)}から（古い報告）</span>}
         <TimeValue value={task.occurred_at} />
       </ProjectBranch>
+      <AgentDecisionDetails key={JSON.stringify(identity)} decision={task.decision} replyBranch={branch} />
       {decision && <div className="agent-timeline-card-actions">
         {reportProjectId && branch && <button type="button" className="agent-timeline-pause" onClick={() => onBranchHistory({ projectId: reportProjectId, branch })}>このブランチの履歴</button>}
         {canAcknowledge && <button id={reportKey === null ? undefined : `agent-ack-${encodeURIComponent(reportKey)}`} type="button" className="agent-timeline-pause" onClick={() => onAcknowledge(task, !acknowledged)}>{acknowledged ? "未確認に戻す" : "確認済みにする"}</button>}
@@ -260,7 +260,7 @@ function HistoryList({ events, projectById, decisionChanges }: {
   ));
 }
 
-function sortCurrentRows(rows: CurrentRow[]) {
+function sortCurrentRows(rows: CurrentRow[], oldestFirst: boolean) {
   return [...rows].sort((left, right) => {
     const leftPriority = agentStatePriority(agentTaskState(left.task) as string | null) ?? Number.MAX_SAFE_INTEGER;
     const rightPriority = agentStatePriority(agentTaskState(right.task) as string | null) ?? Number.MAX_SAFE_INTEGER;
@@ -268,7 +268,8 @@ function sortCurrentRows(rows: CurrentRow[]) {
     if (byState) return byState;
     const leftTime = left.task.occurred_at ? Date.parse(left.task.occurred_at) : 0;
     const rightTime = right.task.occurred_at ? Date.parse(right.task.occurred_at) : 0;
-    return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0)
+    const byTime = (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+    return (oldestFirst ? -byTime : byTime)
       || projectLabel(left.project, left.project.id).localeCompare(projectLabel(right.project, right.project.id))
       || branchLabel(left.task.branch).localeCompare(branchLabel(right.task.branch));
   });
@@ -387,6 +388,7 @@ export default function AgentTimelineSidebar({
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [historySort, setHistorySort] = useState<"newest" | "oldest">(TIMELINE_SORT_NEWEST);
+  const [oldestDecisionFirst, setOldestDecisionFirst] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
 
   const displaySnapshot = isPaused
@@ -397,7 +399,7 @@ export default function AgentTimelineSidebar({
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
   const currentRows = useMemo(
-    () => sortCurrentRows(currentAgentTasks(projects) as CurrentRow[]),
+    () => sortCurrentRows(currentAgentTasks(projects) as CurrentRow[], false),
     [projects],
   );
   const unknownCurrent = useMemo(() => hasUnknownCurrentTasks(projects), [projects]);
@@ -431,6 +433,13 @@ export default function AgentTimelineSidebar({
     <ul className="agent-timeline-list agent-timeline-current-list">{rows.map(({ project, task }) => <CurrentRow key={agentReportKey(task)} project={project} task={task} oldDecision={oldDecision} acknowledged={isAcknowledged(task, acknowledgements)} onAcknowledge={acknowledge} onBranchHistory={openBranchHistory} now={now} />)}</ul>
   );
   const decisionCount = AGENT_DECISION_STATUSES.reduce((sum, status) => sum + currentGroups.decisionCounts[status], 0);
+  const { recent, old, unknown } = currentGroups.decision as Record<"recent" | "old" | "unknown", CurrentRow[]>;
+  const recentDecisions = oldestDecisionFirst ? sortCurrentRows(recent, true) : recent;
+  const oldDecisions = oldestDecisionFirst ? sortCurrentRows(old, true) : old;
+  const decisionCopyText = [...recentDecisions, ...oldDecisions, ...unknown].map(({ project, task }) => [
+    `${projectLabel(project, project.id)} / ${branchLabel(task.branch)} · ${currentStatus(task)} · ${exactTime(task.occurred_at)}`,
+    task.decision?.question ?? "質問なし",
+  ].join("\n")).join("\n\n");
   const historyDetails = useMemo(
     () => timelineHistoryDetails(events, filterOptions, projectById),
     [events, filterOptions, projectById],
@@ -521,9 +530,16 @@ export default function AgentTimelineSidebar({
           {filteredCurrentRows.length > 0 && <>
             <div className="agent-timeline-current-group">
               <h4>未確認の判断待ち · {decisionCount}件<span className="agent-timeline-decision-counts">{AGENT_DECISION_STATUSES.map((status) => `${statusLabels[status]} ${currentGroups.decisionCounts[status]}件`).join(" · ")}</span></h4>
-              {currentGroups.decision.recent.length > 0 && <><h5>直近 · {currentGroups.decision.recent.length}件</h5>{renderCurrentRows(currentGroups.decision.recent)}</>}
-              {currentGroups.decision.old.length > 0 && <details className="agent-timeline-old-reports"><summary>古い判断待ち · {currentGroups.decision.old.length}件</summary><div className="agent-timeline-bulk-actions"><button type="button" className="agent-timeline-pause" onClick={() => bulkAcknowledge(currentGroups.decision.old, true)}>このグループを一括で確認済みにする</button><span>現在の絞り込みに一致する古い判断待ちが対象です。</span></div>{renderCurrentRows(currentGroups.decision.old, true)}</details>}
-              {currentGroups.decision.unknown.length > 0 && <><h5>報告時刻未取得 · {currentGroups.decision.unknown.length}件</h5>{renderCurrentRows(currentGroups.decision.unknown)}</>}
+              {decisionCount > 0 && <div className="agent-timeline-decision-controls">
+                <label><span>同じ状態内の順序（最終報告時刻）</span><select value={oldestDecisionFirst ? TIMELINE_SORT_OLDEST : TIMELINE_SORT_NEWEST} onChange={(event) => setOldestDecisionFirst(event.target.value === TIMELINE_SORT_OLDEST)}>
+                  <option value={TIMELINE_SORT_NEWEST}>新しい順</option>
+                  <option value={TIMELINE_SORT_OLDEST}>古い順</option>
+                </select></label>
+                <CopyButton value={decisionCopyText} label="未確認の判断待ちをコピー" />
+              </div>}
+              {recentDecisions.length > 0 && <><h5>直近 · {recentDecisions.length}件</h5>{renderCurrentRows(recentDecisions)}</>}
+              {oldDecisions.length > 0 && <details className="agent-timeline-old-reports"><summary>古い判断待ち · {oldDecisions.length}件</summary><div className="agent-timeline-bulk-actions"><button type="button" className="agent-timeline-pause" onClick={() => bulkAcknowledge(oldDecisions, true)}>このグループを一括で確認済みにする</button><span>現在の絞り込みに一致する古い判断待ちが対象です。</span></div>{renderCurrentRows(oldDecisions, true)}</details>}
+              {unknown.length > 0 && <><h5>報告時刻未取得 · {unknown.length}件</h5>{renderCurrentRows(unknown)}</>}
             </div>
             {acknowledgedRows.length > 0 && <details className="agent-timeline-acknowledged"><summary id="agent-acknowledged-summary">確認済み · {acknowledgedRows.length}件</summary><div className="agent-timeline-bulk-actions"><button type="button" className="agent-timeline-pause" onClick={() => bulkAcknowledge(acknowledgedRows, false)}>このグループを一括で未確認に戻す</button><span>現在の絞り込みに一致する確認済みの報告が対象です。</span></div>{renderCurrentRows(acknowledgedRows)}</details>}
             <div className="agent-timeline-current-group"><h4>実行中として報告 · {currentGroups.active.length}件</h4>{renderCurrentRows(currentGroups.active)}</div>

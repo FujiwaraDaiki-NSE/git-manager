@@ -344,6 +344,34 @@ button.worktree-explorer-metric {
   margin-top: 9px;
 }
 
+.worktree-explorer-head-compare {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+
+.worktree-explorer-head-compare label {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.worktree-explorer-head-compare select {
+  min-width: 0;
+  max-width: min(62vw, 260px);
+}
+
+.worktree-explorer-head-compare .worktree-explorer-action {
+  align-content: center;
+  text-decoration: none;
+}
+
+.worktree-explorer-head-compare button:disabled {
+  color: var(--worktree-muted);
+  cursor: default;
+}
+
 .worktree-explorer-head-group {
   align-items: baseline;
   display: flex;
@@ -537,6 +565,16 @@ button.worktree-explorer-metric {
 .worktree-explorer-card-actions .copy-control {
   align-self: center;
   margin-right: 4px;
+}
+
+.worktree-explorer-prune-preview {
+  align-self: center;
+  color: var(--worktree-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  font: 11px var(--sans);
 }
 
 .worktree-explorer.density-compact .worktree-explorer-card-main {

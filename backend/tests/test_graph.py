@@ -1,3 +1,4 @@
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -192,12 +193,45 @@ def test_graph_all_false_keeps_existing_range_and_extended_metadata(
     result = graph.build(str(graph_repo), all_refs=False, limit=200)
 
     assert result is not None
-    assert result["command"] == "git log --oneline --graph"
     assert feature_head not in {row["hash"] for row in result["rows"]}
     assert {branch["name"] for branch in result["branch_heads"]} == {
         "main",
         "feature",
     }
+
+
+def test_graph_command_includes_upstream_and_matches_display_limit(graph_repo: Path) -> None:
+    git(graph_repo, "config", "log.decorate", "no")
+    git(graph_repo, "switch", "-q", "-c", "behind", "main~1")
+    git(graph_repo, "branch", "--set-upstream-to=origin/main")
+
+    result = graph.build(str(graph_repo), all_refs=False, limit=1)
+
+    assert result is not None
+    assert result["truncated"]
+    assert [row["subject"] for row in result["rows"]] == ["main"]
+    command = shlex.split(result["command"])
+    assert command == [
+        "git", "log", "--oneline", "--graph", "--date-order", "--max-count=1",
+        "HEAD", "refs/remotes/origin/main", "--",
+    ]
+    assert git(graph_repo, *command[1:]).splitlines() == [
+        f"* {result['rows'][0]['short']} main",
+    ]
+
+
+def test_graph_keeps_commas_within_ref_names(graph_repo: Path) -> None:
+    git(graph_repo, "switch", "-q", "-c", "release,west", "feature~1")
+    git(graph_repo, "tag", "release-tag")
+
+    result = graph.build(str(graph_repo), all_refs=True, limit=None)
+
+    assert result is not None
+    head = next(row for row in result["rows"] if row["is_head"])
+    assert head["refs"] == [
+        {"name": "release,west", "kind": "head"},
+        {"name": "release-tag", "kind": "tag"},
+    ]
 
 
 def test_graph_keeps_stable_shape_for_empty_repository(tmp_path: Path) -> None:
@@ -216,5 +250,5 @@ def test_graph_keeps_stable_shape_for_empty_repository(tmp_path: Path) -> None:
         "default_lane": None,
         "branch_heads": [],
         "truncated": False,
-        "command": "git log --oneline --graph --all",
+        "command": "git log --oneline --graph --date-order --max-count=200 --all",
     }

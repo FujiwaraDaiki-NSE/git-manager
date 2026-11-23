@@ -581,6 +581,9 @@ def test_failed_worktree_status_only_suggests_pruning_when_git_marks_it_prunable
     index = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "index").strip())
     original_index = index.read_bytes()
     index.write_bytes(b"invalid index")
+    status = subprocess.run(["git", "-C", str(worktree), "status"], capture_output=True, text=True)
+    assert status.returncode != 0
+    reason = status.stderr.splitlines()[0]
 
     for state in ("ok", "locked", "prunable"):
         result = gitinfo.collect(str(worktree), context={
@@ -589,7 +592,7 @@ def test_failed_worktree_status_only_suggests_pruning_when_git_marks_it_prunable
             "merged_branch": "merged-unused",
             "worktree_state": state,
         })
-        assert result["error"] == "git status を実行できませんでした"
+        assert result["error"] == f"git status を実行できませんでした: {reason}"
         expected = {"command": "git worktree prune", "reason": "prunable な worktree があります"} if state == "prunable" else None
         assert result["next_command"] == expected
 

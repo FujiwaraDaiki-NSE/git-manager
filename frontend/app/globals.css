@@ -622,6 +622,10 @@ body {
   color: var(--c-conflict);
   padding: 8px 0;
 }
+.git-status-error-reason {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
 .sr-only {
   position: absolute;
   width: 1px;

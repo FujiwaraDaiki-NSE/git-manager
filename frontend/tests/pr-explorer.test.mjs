@@ -6,6 +6,7 @@ import { runInNewContext } from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import * as projectFlow from "../app/project-flow.mjs";
 import * as prTools from "../app/pr-tools.mjs";
 
 const source = readFileSync(new URL("../app/pr-explorer.tsx", import.meta.url), "utf8");
@@ -18,6 +19,8 @@ runInNewContext(compiled.outputText, {
   exports,
   require(id) {
     if (id === "./pr-tools.mjs") return prTools;
+    if (id === "./project-flow.mjs") return projectFlow;
+    if (id === "next/navigation") return { useSearchParams: () => new URLSearchParams("path=%2Frepo&tab=info&event=old") };
     if (id === "./scroll-shadow" || id === "./copy-button") return {};
     return require(id);
   },
@@ -27,7 +30,11 @@ test("オープンPRの取得結果から件数と照会時刻を表示する", 
   const checkedAt = Date.parse("2026-10-02T00:00:00Z") / 1000;
   const render = (open) => renderToStaticMarkup(createElement(exports.default, {
     project: {
-      branch_rows: [],
+      branch_rows: [{
+        locals: [{ id: "local:ready", branch: "ready" }],
+        pull_requests: [],
+        open_pull_requests: [{ number: 2 }],
+      }],
       observed_at: checkedAt + 7200,
       github: { status: "available", checked_at: checkedAt + 3600, open },
     },
@@ -52,11 +59,12 @@ test("オープンPRの取得結果から件数と照会時刻を表示する", 
   const [attention, all] = withMatch.split("<details>");
   const prNumbers = (html) => html.match(/PR #\d+/g);
   assert.deepEqual(prNumbers(attention), ["PR #2"]);
+  assert.match(attention, /href="\/project\?path=%2Frepo&amp;tab=lanes&amp;lane=local%3Aready"><code>ready<\/code>/);
   assert.deepEqual(prNumbers(all), ["PR #1", "PR #2", "PR #3", "PR #4"]);
   assert.match(all, /すべてのオープンPR（4件）.*オープンPRを検索.*4 \/ 4 件表示/);
-  assert.match(all, /確認済み.*<code>example\/first-fork:ready<\/code> → <code>main<\/code>.*レビュー承認 · CI 成功/);
+  assert.match(all, /確認済み.*<code>example\/first-fork:ready<\/code> → <code>main<\/code>.*<dt>レビュー<\/dt><dd>レビュー承認<\/dd>.*<dt>CI<\/dt><dd>CI 成功<\/dd>/);
   assert.match(all, /下書き.*作成元リポジトリ未取得 · <code>ready<\/code>/);
-  assert.match(all, /レビュー待ち.*Draft/);
+  assert.match(all, /レビュー待ち.*下書き<\/strong> <span>Draft<\/span>.*<dt>CI<\/dt><dd>CI なし<\/dd>/);
 
   const unavailable = render({ status: "unavailable", reason: "取得失敗", checked_at: null, pulls: [] });
   assert.match(unavailable, /オープンPRを取得できませんでした/);

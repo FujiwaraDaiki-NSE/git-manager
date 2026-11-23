@@ -11,6 +11,7 @@ from app import compare, gitinfo, paths
 
 PAGE_SIZE = 50
 FORMAT = "%H%x00%s%x00%aI%x00%an%x00"
+COMMIT_FIELDS = ("hash", "subject", "date", "author")
 
 
 def run(repo, args):
@@ -20,14 +21,15 @@ def run(repo, args):
     return value
 
 
-def records(raw):
+def records(raw, columns):
     fields = raw.split("\0")
     if fields[-1].strip():
         raise RuntimeError("Gitの応答形式が不正です")
     fields.pop()
-    if len(fields) % 4:
+    width = len(columns)
+    if len(fields) % width:
         raise RuntimeError("Gitの応答形式が不正です")
-    return [dict(zip(("hash", "subject", "date", "author"), [fields[i].lstrip("\n"), *fields[i + 1:i + 4]])) for i in range(0, len(fields), 4)]
+    return [dict(zip(columns, [fields[i].lstrip("\n"), *fields[i + 1:i + width]])) for i in range(0, len(fields), width)]
 
 
 def overlaps(repo):
@@ -136,7 +138,8 @@ def search(repo, scope, grep, author, since_at, until_at, file, offset, mode, fi
     values = []
     command = None
     if revision:
-        values = records(run(repo, [*args, f"--format={FORMAT}", f"--max-count={limit + 1}", *paths_filter]))
+        raw = run(repo, [*args, f"--format={FORMAT}%cI%x00", f"--max-count={limit + 1}", *paths_filter])
+        values = records(raw, (*COMMIT_FIELDS, "committer_date"))
         command = shlex.join(["git", *args, "--oneline", f"--max-count={limit}", *paths_filter])
         if pickaxe and offset:
             values = values[offset:]
@@ -153,11 +156,16 @@ def recovery(repo):
     for i in range(0, len(fields) - 1, 3):
         sources[fields[i].lstrip("\n")].append({"selector": fields[i + 1], "message": fields[i + 2]})
     commits = []
+    parent_shas = set()
     for sha in sorted(candidates):
-        item = records(run(repo, ["show", "-s", f"--format={FORMAT}", sha]))[0]
+        raw = run(repo, ["show", "-s", f"--format={FORMAT}%P%x00", sha])
+        item = records(raw, (*COMMIT_FIELDS, "parents"))[0]
+        parent_shas.update(item.pop("parents").split())
         item["sources"] = sources[sha]
         item["command"] = f"git branch recover/{sha[:12]} {sha}"
         commits.append(item)
+    for item in commits:
+        item["is_tip"] = item["hash"] not in parent_shas
     commits.sort(key=lambda item: (item["date"], item["hash"]), reverse=True)
     return {"commits": commits}
 
@@ -169,5 +177,5 @@ def cherry(repo, left, right):
     fields = raw.split("\0")
     commits = []
     for i in range(0, len(fields) - 1, 5):
-        commits.append({"mark": fields[i].strip(), **dict(zip(("hash", "subject", "date", "author"), fields[i + 1:i + 5]))})
+        commits.append({"mark": fields[i].strip(), **dict(zip(COMMIT_FIELDS, fields[i + 1:i + 5]))})
     return {"left": left, "right": right, "left_sha": a, "right_sha": b, "commits": commits, "command": shlex.join(["git", "log", "--cherry-mark", "--left-right", f"{a}...{b}"])}
