@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import CommitFiles from "./commit-files";
 import CopyButton from "./copy-button";
 import PatchView from "./patch-view";
+import { repositoryFileLineContext, repositoryFileQuery } from "./repository-files-tools.mjs";
 import type { CommitDetail } from "./types";
 import {
   MAX_BLAME_LINES,
@@ -170,6 +171,55 @@ function CommitDetailPane({
   </section>;
 }
 
+type OriginalSource =
+  | { state: "loading" }
+  | { state: "error"; message: string }
+  | { state: "ready"; lines: ReturnType<typeof repositoryFileLineContext>; truncated: boolean };
+
+function BlameOriginalSource({ path, line, onClose }: { path: string; line: BlameLine; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [source, setSource] = useState<OriginalSource>({ state: "loading" });
+
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = repositoryFileQuery(path, line.commit, line.path);
+    void fetch(`/api/repo/file?${params}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error(await responseError(response));
+      const blob = await response.json() as { pinned_hash: string; path: string; text: string | null; truncated: boolean };
+      if (blob.pinned_hash !== line.commit || blob.path !== line.path) throw new Error("原文のコミットまたはパスが一致しません。");
+      if (controller.signal.aborted) return;
+      const lines = typeof blob.text === "string" ? repositoryFileLineContext(blob.text, blob.truncated, line.original_line) : null;
+      setSource({ state: "ready", lines, truncated: blob.truncated });
+    }).catch((caught: unknown) => {
+      if (!controller.signal.aborted) {
+        setSource({ state: "error", message: caught instanceof Error ? caught.message : "不明なエラー" });
+      }
+    });
+    return () => controller.abort();
+  }, [line, path]);
+
+  return <dialog ref={dialog} className="blame-original-source" aria-labelledby="blame-original-source-title" onClose={onClose}>
+    <div className="blame-original-source-heading">
+      <h4 id="blame-original-source-title">当時の原文</h4>
+      <button type="button" className="subtle-button" onClick={() => dialog.current?.close()} autoFocus>閉じる</button>
+    </div>
+    <p><code title={line.commit}>{shortHash(line.commit)}</code> · <code>{line.path}</code> · 原文 {line.original_line}行目</p>
+    {source.state === "loading" && <p role="status">原文を取得中…</p>}
+    {source.state === "error" && <p className="blame-error" role="alert">原文を取得できませんでした。（{source.message}）</p>}
+    {source.state === "ready" && (source.lines === null
+      ? <p role="status">{source.truncated ? "取得上限内に原文の対象行が収まらないため、表示できません。" : "原文の対象行を表示できません。"}</p>
+      : <div className="blame-original-source-lines" role="region" aria-label="行番号付きの原文" tabIndex={0}>
+        {source.lines.map(({ number, content }) => <div className="blame-original-source-line" key={number} aria-current={number === line.original_line ? "true" : undefined}>
+          <span aria-label={`${number}行目`}>{number}</span><code>{content}</code>
+        </div>)}
+      </div>)}
+  </dialog>;
+}
+
 export default function BlameExplorer({ path }: { path: string }) {
   const [revision, setRevision] = useState("");
   const [file, setFile] = useState("");
@@ -190,6 +240,7 @@ export default function BlameExplorer({ path }: { path: string }) {
   const [error, setError] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState("");
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
+  const [originalSource, setOriginalSource] = useState<{ path: string; line: BlameLine; trigger: HTMLButtonElement } | null>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
   const requestKeyRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -219,6 +270,7 @@ export default function BlameExplorer({ path }: { path: string }) {
     setError(null);
     setExportStatus("");
     setSelectedHash(null);
+    setOriginalSource(null);
     setOpen(false);
   }, [path]);
 
@@ -233,6 +285,7 @@ export default function BlameExplorer({ path }: { path: string }) {
     setError(null);
     setExportStatus("");
     setSelectedHash(null);
+    setOriginalSource(null);
   }, [file, revision, start, end]);
 
   const authors = useMemo(() => blameAuthors(lines) as string[], [lines]);
@@ -296,6 +349,7 @@ export default function BlameExplorer({ path }: { path: string }) {
     setPinnedHash(null);
     setRange(null);
     setSelectedHash(null);
+    setOriginalSource(null);
     setExportStatus("");
     const params = blameQuery(path, revision, file, selectedStart, selectedEnd);
     void fetch(`/api/repo/blame?${params}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
@@ -369,7 +423,16 @@ export default function BlameExplorer({ path }: { path: string }) {
         <div className="blame-coverage" role="status"><span>{filtered.length} / {lines.length} 行を表示</span>{range && <span>取得範囲 行 {range.start}–{range.end}</span>}{pinnedHash && <span className="blame-pinned"><code title={pinnedHash}>{shortHash(pinnedHash)}</code><CopyButton value={pinnedHash} label="固定したコミットIDをコピー" /></span>}{exportStatus && <span>{exportStatus}</span>}</div>
         {rawContentIsNonContiguous && filtered.length > 0 && <p className="blame-note blame-inline-note" role="status">表示中の行は連続していないため、行内容のコピーには表示順の行間だけ改行を入れます。途中の非表示行は含まれません。</p>}
         {filtered.length > 0 && <section className="blame-summary" aria-labelledby="blame-summary-title"><div className="blame-summary-heading"><h4 id="blame-summary-title">表示中のコミット別寄与</h4><span>{filtered.length}行を集計</span></div><ul className="blame-summary-list">{contributionSummary.map((summary) => <li key={summary.commit} className="blame-summary-item"><code title={summary.commit}>{shortHash(summary.commit)}</code><span>{summary.lineCount}行（{summary.percent.toFixed(1)}%）</span><button type="button" className="table-action" disabled={commitFilter === summary.commit} onClick={() => setCommitFilter(summary.commit)} aria-label={`${shortHash(summary.commit)} の行だけに絞り込む`}>{commitFilter === summary.commit ? "選択中" : "このコミットだけ表示"}</button></li>)}</ul></section>}
-        {filterError ? <p className="blame-empty" role="status">絞り込み条件が正しくなると、取得済み行を表示します。</p> : filtered.length === 0 ? <p className="blame-empty" role="status">{lines.length === 0 ? "一致する行はありません。" : "条件に一致する取得済み行はありません。"}</p> : <div className="blame-table-wrap" role="region" aria-label="行ごとの変更元" tabIndex={0}><table className="blame-table"><thead><tr><th>行</th><th>変更元</th><th>作成者</th><th>日時</th><th>内容</th><th>パス</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{filtered.map((line) => <tr key={`${line.final_line}:${line.commit}`}><td className="blame-line"><strong>{line.final_line}</strong><small>原文 {line.original_line}</small></td><td className="blame-commit-cell"><code title={line.commit}>{shortHash(line.commit)}</code><span title={line.summary}>{line.summary || "件名未取得"}</span><CopyButton value={line.commit} label={`${shortHash(line.commit)} をコピー`} /></td><td><span>{line.author || "作成者未取得"}</span><small>{line.email || "メール未取得"}</small></td><td><time>{blameTime(line.time)}</time></td><td className="blame-content"><code>{line.content}</code></td><td className="blame-path" title={line.path}>{line.path}</td><td><button type="button" className="table-action" onClick={() => setSelectedHash(line.commit)} aria-label={`${shortHash(line.commit)} のコミット詳細を表示`}>コミットを表示</button></td></tr>)}</tbody></table></div>}
+        {filterError ? <p className="blame-empty" role="status">絞り込み条件が正しくなると、取得済み行を表示します。</p> : filtered.length === 0 ? <p className="blame-empty" role="status">{lines.length === 0 ? "一致する行はありません。" : "条件に一致する取得済み行はありません。"}</p> : <div className="blame-table-wrap" role="region" aria-label="行ごとの変更元" tabIndex={0}><table className="blame-table"><thead><tr><th>行</th><th>変更元</th><th>作成者</th><th>日時</th><th>内容</th><th>パス</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{filtered.map((line) => <tr key={`${line.final_line}:${line.commit}`}><td className="blame-line"><strong>{line.final_line}</strong><small>原文 {line.original_line}</small></td><td className="blame-commit-cell"><code title={line.commit}>{shortHash(line.commit)}</code><span title={line.summary}>{line.summary || "件名未取得"}</span><CopyButton value={line.commit} label={`${shortHash(line.commit)} をコピー`} /></td><td><span>{line.author || "作成者未取得"}</span><small>{line.email || "メール未取得"}</small></td><td><time>{blameTime(line.time)}</time></td><td className="blame-content"><code>{line.content}</code></td><td className="blame-path" title={line.path}>{line.path}</td><td>
+          <div className="blame-row-actions">
+            <button type="button" className="table-action" onClick={() => setSelectedHash(line.commit)} aria-label={`${shortHash(line.commit)} のコミット詳細を表示`}>コミットを表示</button>
+            <button type="button" className="table-action" aria-haspopup="dialog" onClick={(event) => setOriginalSource({ path, line, trigger: event.currentTarget })}>当時の原文</button>
+          </div>
+        </td></tr>)}</tbody></table></div>}
+        {originalSource?.path === path && <BlameOriginalSource path={path} line={originalSource.line} onClose={() => {
+          setOriginalSource(null);
+          originalSource.trigger.focus({ preventScroll: true });
+        }} />}
         {selectedHash && <CommitDetailPane key={selectedHash} path={path} hash={selectedHash} visibleCommitHashes={visibleCommitHashes} onSelectHash={setSelectedHash} />}
       </>}
       {state === "idle" && <p className="blame-empty" role="status">対象を入力して行帰属を取得してください。</p>}

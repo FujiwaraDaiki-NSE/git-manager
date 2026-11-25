@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import ScrollShadow from "./scroll-shadow";
 import CopyButton from "./copy-button";
+import { CommitPane } from "./repo-detail";
 import {
   buildPullRequestExplorerData,
   filterOpenPullRequests,
@@ -81,9 +82,12 @@ function OpenPullRequestAttention({ open, branchRows }: {
   branchRows: ProjectResponse["branch_rows"];
 }) {
   const [query, setQuery] = useState("");
+  const [target, setTarget] = useState("");
+  const [excludeDraft, setExcludeDraft] = useState(false);
   const searchParams = useSearchParams();
   const pulls = open?.status === "available" ? Array.from(new Map(open.pulls.map((pr) => [pr.number, pr])).values()) : [];
-  const filtered = filterOpenPullRequests(pulls, query);
+  const targets = [...new Set(pulls.map((pr) => pr.baseRefName))].sort();
+  const filtered = filterOpenPullRequests(pulls, { query, target, excludeDraft });
   const result = open?.status === "available" ? {
     pulls,
     matches: openPullRequestsNeedingAttention(pulls),
@@ -136,6 +140,15 @@ function OpenPullRequestAttention({ open, branchRows }: {
                     <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="番号・題名・作成元" />
                   </label>
                   {query !== "" && <button type="button" className="pr-explorer-clear-toolbar" onClick={() => setQuery("")}>検索を解除</button>}
+                  <label className="pr-explorer-select">
+                    <span>取り込み先</span>
+                    <select value={target} onChange={(event) => setTarget(event.target.value)}>
+                      <option value="">すべての取り込み先</option>
+                      {target !== "" && !targets.includes(target) && <option value={target}>{target}</option>}
+                      {targets.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </label>
+                  <label><input type="checkbox" checked={excludeDraft} onChange={(event) => setExcludeDraft(event.target.checked)} /> Draftを除く</label>
                 </div>
                 <p className="pr-explorer-inline-note" role="status">{filtered.length} / {result.pulls.length} 件表示</p>
                 {filtered.length === 0 ? <p className="pr-explorer-inline-note">検索条件に一致するオープンPRはありません</p> : <ul className="pr-explorer-open-list pr-explorer-open-all">
@@ -167,7 +180,18 @@ function OpenPullRequestAttention({ open, branchRows }: {
   );
 }
 
-function PullRequestCard({ record }: { record: PullRequestRecord }) {
+type OpenCommit = (hash: string) => void;
+
+function PullRequestCommit({ hash, onOpenCommit }: { hash: string | null; onOpenCommit: OpenCommit }) {
+  if (!hash) return <span className="pr-explorer-missing-hash">取り込み先コミット未取得</span>;
+  return <>
+    <code className="pr-explorer-merge-hash" title={`${hash} · PR取り込み後のコミット。Squash/Rebaseでは複数親のmerge commitとは限りません。`}>{hash}</code>
+    <CopyButton value={hash} label="取り込み先コミットをコピー" />
+    <button className="subtle-button" type="button" onClick={() => onOpenCommit(hash)}>取り込みコミットを開く</button>
+  </>;
+}
+
+function PullRequestCard({ record, onOpenCommit }: { record: PullRequestRecord; onOpenCommit: OpenCommit }) {
   const href = validHttpUrl(record.url);
   const date = record.merged_at && localCalendarDate(record.merged_at) !== null && !Number.isNaN(new Date(record.merged_at).getTime())
     ? new Date(record.merged_at).toISOString()
@@ -195,7 +219,7 @@ function PullRequestCard({ record }: { record: PullRequestRecord }) {
           </div>
         </div>
         <footer className="pr-explorer-card-foot">
-          {record.commit_hash ? <><code className="pr-explorer-merge-hash" title={`${record.commit_hash} · PR取り込み後のコミット。Squash/Rebaseでは複数親のmerge commitとは限りません。`}>{record.commit_hash}</code><CopyButton value={record.commit_hash} label="取り込み先コミットをコピー" /></> : <span className="pr-explorer-missing-hash">取り込み先コミット未取得</span>}
+          <PullRequestCommit hash={record.commit_hash} onOpenCommit={onOpenCommit} />
           {!href && <span className="pr-explorer-missing-url">リンク未取得</span>}
         </footer>
       </article>
@@ -203,7 +227,7 @@ function PullRequestCard({ record }: { record: PullRequestRecord }) {
   );
 }
 
-function PullRequestTable({ records }: { records: PullRequestRecord[] }) {
+function PullRequestTable({ records, onOpenCommit }: { records: PullRequestRecord[]; onOpenCommit: OpenCommit }) {
   return (
     <ScrollShadow className="pr-explorer-table-scroll" label="横スクロールできる表">
       <table className="pr-explorer-table">
@@ -228,7 +252,7 @@ function PullRequestTable({ records }: { records: PullRequestRecord[] }) {
                 <td><code title={record.source}>{record.source}</code></td>
                 <td><code title={record.target}>{record.target}</code></td>
                 <td className="pr-explorer-table-hash">
-                  {record.commit_hash ? <><code title={`${record.commit_hash} · PR取り込み後のコミット。Squash/Rebaseでは複数親のmerge commitとは限りません。`}>{record.commit_hash}</code><CopyButton value={record.commit_hash} label="取り込み先コミットをコピー" /></> : <span className="pr-explorer-missing-hash">取り込み先コミット未取得</span>}
+                  <PullRequestCommit hash={record.commit_hash} onOpenCommit={onOpenCommit} />
                 </td>
               </tr>
             );
@@ -248,6 +272,8 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
   const [endDate, setEndDate] = useState("");
   const [sort, setSort] = useState<PrSort>("newest");
   const [view, setView] = useState<PrView>("cards");
+  const [selectedHash, setSelectedHash] = useState<string | null>(null);
+  const commitDialog = useRef<HTMLDialogElement>(null);
   const model = useMemo(() => buildPullRequestExplorerData(project, {
     query,
     target,
@@ -262,6 +288,11 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
   const unavailableMessage = githubStatusMessage(githubStatus);
   const limitedCoverage = limitedMergedPullRequestCoverage(project.github);
   const hasActiveFilters = query.trim() !== "" || target !== "all" || source !== "all" || range !== "all" || startDate !== "" || endDate !== "" || sort !== "newest";
+
+  const openCommit: OpenCommit = (hash) => {
+    setSelectedHash(hash);
+    commitDialog.current?.showModal();
+  };
 
   const chooseRange = (nextRange: PrRange) => {
     setRange(nextRange);
@@ -377,7 +408,15 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
         </div>
       </div>
 
-      {!branchRowsAvailable ? null : model.filtered.length ? view === "table" ? <PullRequestTable records={model.filtered} /> : <ol className="pr-explorer-timeline">{model.filtered.map((record: PullRequestRecord, index: number) => <PullRequestCard key={`${record.url}:${record.number}:${index}`} record={record} />)}</ol> : githubStatus !== "available" ? (
+      {!branchRowsAvailable ? null : model.filtered.length ? (
+        view === "table" ? <PullRequestTable records={model.filtered} onOpenCommit={openCommit} /> : (
+          <ol className="pr-explorer-timeline">
+            {model.filtered.map((record: PullRequestRecord, index: number) => (
+              <PullRequestCard key={`${record.url}:${record.number}:${index}`} record={record} onOpenCommit={openCommit} />
+            ))}
+          </ol>
+        )
+      ) : githubStatus !== "available" ? (
         <div className="pr-explorer-empty" role="status">
           <strong>確認できるPR記録はありません</strong>
           <span>GitHubまたはブランチ情報が未取得のため、PRがないとは判断できません。</span>
@@ -387,6 +426,21 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
           {model.all.length === 0 ? <><strong>{limitedCoverage === null ? "マージ済みPRはありません" : "照会範囲内にマージ済みPRの記録はありません"}</strong><span>取得済みのブランチ行に紐づく記録はありません。</span></> : <><strong>条件に一致するPRはありません</strong><span>検索・マージ先・期間の条件を解除すると、別の記録を確認できます。</span></>}
         </div>
       )}
+      <dialog
+        ref={commitDialog}
+        aria-label="取り込みコミット"
+        onClose={() => setSelectedHash(null)}
+        style={{
+          width: "min(960px, calc(100% - 2rem))",
+          boxSizing: "border-box",
+          background: "var(--pr-panel)",
+          color: "var(--pr-ink)",
+          border: "1px solid var(--pr-border)",
+        }}
+      >
+        <button className="subtle-button" type="button" onClick={() => commitDialog.current?.close()}>閉じる</button>
+        {selectedHash !== null && <CommitPane key={selectedHash} repoPath={project.main_path} hash={selectedHash} onCopy={null} />}
+      </dialog>
     </section>
   );
 }
@@ -395,7 +449,7 @@ export default function PullRequestExplorer({ project }: { project: ProjectRespo
   return (
     <>
       <OpenPullRequestAttention open={project.github.open} branchRows={project.branch_rows} />
-      <MergedPullRequestExplorer project={project} />
+      <MergedPullRequestExplorer key={project.main_path} project={project} />
     </>
   );
 }

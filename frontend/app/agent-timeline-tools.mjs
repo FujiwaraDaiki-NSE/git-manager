@@ -5,6 +5,51 @@ import {
   isExplicitAgentStatus,
   mergeAgentSnapshot,
 } from "./agent-overview.mjs";
+import { agentWorktreeCommand } from "./agent-acknowledgements.mjs";
+
+/** @param {Map<string, string>} namesById */
+export function createTimelineProjectLabel(namesById) {
+  const counts = new Map();
+  for (const name of namesById.values()) counts.set(name, (counts.get(name) ?? 0) + 1);
+
+  return (/** @type {string} */ id, /** @type {string} */ name) => {
+    const separator = id.lastIndexOf("/");
+    const parent = separator === 0 ? "/" : id.slice(0, separator);
+    return counts.get(name) > 1 && separator >= 0 ? `${name}（${parent}）` : name;
+  };
+}
+
+/** @param {string | null} path @param {ReadonlyMap<string, Pick<import("./types").Repo, "common_dir">>} repos */
+export function timelineProjectId(path, repos) {
+  return path === null ? null : repos.get(path)?.common_dir ?? null;
+}
+
+/**
+ * @param {string} header
+ * @param {Pick<import("./types").AgentTask, "summary" | "decision">} report
+ */
+export function timelineDecisionCopy(header, report) {
+  const lines = [header];
+  if (report.summary) lines.push(`報告要約: ${report.summary}`);
+  if (report.decision?.question?.trim()) lines.push(`質問: ${report.decision.question}`);
+  return lines.join("\n");
+}
+
+/**
+ * @param {string} path
+ * @param {string} projectId
+ * @param {ReadonlyMap<string, Pick<import("./types").Repo, "common_dir" | "worktree_state">> | null} repos
+ */
+export function timelineWorktreeLocation(path, projectId, repos) {
+  if (repos === null) return { command: null, note: "現在の台帳を取得中…" };
+  if (timelineProjectId(path, repos) !== projectId) {
+    return { command: null, note: "現在の台帳にない" };
+  }
+  if (repos.get(path)?.worktree_state === "prunable") {
+    return { command: null, note: "作業ディレクトリが存在しないため移動できません" };
+  }
+  return { command: agentWorktreeCommand(path), note: null };
+}
 
 /**
  * Merge the persisted replay and live stream into one identity-stable list.

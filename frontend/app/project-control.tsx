@@ -34,7 +34,7 @@ import Link from "next/link";
 import { homeReturnHref } from "./home-overview.mjs";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { upstreamLabel } from "./upstream-label.mjs";
+import { missingLocalTrackingRefLabel, upstreamLabel } from "./upstream-label.mjs";
 import { PaneSeparator, paneStyle, usePaneWidth } from "./ui-preferences";
 import CopyButton from "./copy-button";
 import { commandTarget, worktreeCommand } from "./next-command-tools.mjs";
@@ -47,7 +47,7 @@ import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { agentDecisionReportTimes, agentReportKey, agentStateLabel, agentTaskState, mergeProjectAgentEvent } from "./agent-overview.mjs";
 import { parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
-import { activityMatchesSearch, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
+import { activityMatchesSearch, checkedOutWorktreePaths, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import {
   activityAuthors,
   activityBranches,
@@ -294,7 +294,7 @@ const laneFilters: { id: LaneFilter; label: string }[] = [
   { id: "conflict", label: "競合" },
   { id: "ahead", label: "未push" },
   { id: "behind", label: "未pull" },
-  { id: "worktree", label: "worktree" },
+  { id: "worktree", label: "チェックアウト中" },
 ];
 
 function commitEventForBranch(project: ProjectResponse, hash: string, branch: string | null, lane: ProjectLane | null, metadata: ProjectBranchCommit | null = null): ProjectEvent {
@@ -348,6 +348,7 @@ function WorkLanes({
 }) {
   const [exportStatus, setExportStatus] = useState("");
   const normalizedQuery = normalizedSearchQuery(searchQuery);
+  const checkoutPaths = useMemo(() => checkedOutWorktreePaths(project.worktrees), [project.worktrees]);
   const upstreamFilters = useMemo(() => LANE_UPSTREAM_FILTERS.map((id) => ({ id: id as LaneUpstreamFilter, label: LANE_UPSTREAM_LABELS[id] })), []);
   const relationLaneIds = useMemo(() => new Set(project.merge_relations.flatMap((relation) => (
     [relation.source_lane_id, relation.target_lane_id].filter((id): id is string => id !== null)
@@ -359,12 +360,12 @@ function WorkLanes({
   const lanes = useMemo(
     () => sortWorkLanes(visibleLanes.filter((lane) => (
       laneMatchesSearch(lane, normalizedQuery)
-      && laneMatchesFilter(lane, filter)
+      && laneMatchesFilter(lane, filter, checkoutPaths)
       && laneMatchesAuthor(lane, authorFilter)
       && laneMatchesUpstream(lane, upstreamFilter)
       && laneMatchesAgent(lane, agentFilter)
     )), order),
-    [agentFilter, authorFilter, filter, order, normalizedQuery, upstreamFilter, visibleLanes],
+    [agentFilter, authorFilter, checkoutPaths, filter, order, normalizedQuery, upstreamFilter, visibleLanes],
   );
   const authors = useMemo(() => laneAuthors(visibleLanes), [visibleLanes]);
   const includesUnknownAuthor = useMemo(() => hasUnknownLaneAuthor(visibleLanes), [visibleLanes]);
@@ -414,7 +415,7 @@ function WorkLanes({
           {exportStatus && <span className="lane-explorer-status" role="status">{exportStatus}</span>}
         </div>
       </div>
-      <div className="lane-filters" role="group" aria-label="作業の状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{visibleLanes.filter((lane) => laneMatchesFilter(lane, item.id)).length}</span></button>)}</div>
+      <div className="lane-filters" role="group" aria-label="作業の状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{visibleLanes.filter((lane) => laneMatchesFilter(lane, item.id, checkoutPaths)).length}</span></button>)}</div>
       <div className="lane-explorer-upstream-filters" role="group" aria-label="upstream の同期状態で絞り込み"><span>upstream</span>{upstreamFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={upstreamFilter === item.id} onClick={() => onUpstreamFilter(item.id)}>{item.label}<span>{item.id === "all" ? visibleLanes.length : visibleLanes.filter((lane) => laneMatchesUpstream(lane, item.id)).length}</span></button>)}</div>
       <div className="lane-table-wrap">
         <table className="lane-table">
@@ -695,7 +696,7 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
     && destinations.upstream !== null && destinations.upstream_head !== null && lane.head !== null
     ? { base: destinations.upstream_head, target: lane.head, baseLabel: destinations.upstream, supportsMergeBase: laneUpstreamState(lane) === "diverged" } : null;
   const comparisonUnavailable = lane.branch === null || destinations?.upstream_state === "unset" ? "追跡先が設定されていません。"
-    : destinations?.upstream_gone === true ? "追跡先の参照がローカルにありません。リモートを追跡している場合、未fetchやリモート側での削除が考えられます。"
+    : destinations?.upstream_gone === true ? missingLocalTrackingRefLabel
     : lane.head === null ? "差分を表示できる作業先端がありません。"
     : "差分を表示できる追跡先の参照を取得できませんでした。";
   const searchParams = useSearchParams();
@@ -754,7 +755,7 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
         <div><dt>追跡先との差</dt><dd>{upstreamLabel(lane)}{laneComparison === null && <small>{comparisonUnavailable}</small>}</dd></div>
       </dl>
       {laneComparison !== null && <CommitCompare key={JSON.stringify([project.main_path, lane.id])} path={project.main_path} laneComparison={{ ...laneComparison, directLabel: "追跡先 → ローカル先端の差分" }} />}
-      <OperationFacts operations={lane.operations} />
+      <OperationFacts operations={lane.operations} path={lane.path} />
       {lane.branch !== null && <DestinationFacts destinations={lane.destinations} />}
       <p>記録がない場合も、取り込まれていないとは限りません。<Link href={`${relationHref.split("#")[0]}#branch-relations-title`}>現在の包含関係・未解決の記録を確認</Link></p>
       <details className="flow-help selection-help">

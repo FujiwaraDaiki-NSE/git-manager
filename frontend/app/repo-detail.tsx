@@ -37,7 +37,7 @@ import WorktreeDiff, { type WorktreeDiffStage } from "./worktree-diff";
 import "./repo-tools.css";
 import "./status-file-tools.css";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import {
   BranchRelationSummary,
   GraphView,
@@ -123,7 +123,7 @@ function StatusBlock({ repo }: { repo: Repo }) {
   const badges = stateBadges(repo);
   return (
     <div className="statusblock">
-      <OperationFacts operations={repo.operations} />
+      <OperationFacts operations={repo.operations} path={repo.path} />
       <div className="status-branch">
         {repo.branch_line ? <BranchLine line={repo.branch_line} /> : "—"}
       </div>
@@ -317,73 +317,104 @@ function StatusPane({ repo }: { repo: Repo }) {
   );
 }
 
-function CommitPane({
-  detail,
+export function CommitPane({
   repoPath,
-  state,
-  error,
-  onRetry,
+  hash,
   onCopy,
 }: {
-  detail: CommitDetail | null;
   repoPath: string;
-  state: LoadState;
-  error: string | null;
-  onRetry: () => void;
-  onCopy: (command: string) => void;
+  hash: string;
+  onCopy: ((command: string) => void) | null;
 }) {
-  if (state === "idle") return null;
+  const titleId = useId();
+  const [commit, setCommit] = useState<CommitDetail | null>(null);
+  const [commitState, setCommitState] = useState<LoadState>("loading");
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [commitRetry, setCommitRetry] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setCommit(null);
+    setCommitState("loading");
+    setCommitError(null);
+    const timer = window.setTimeout(() => {
+      void getJson<CommitDetail>(
+        `/api/repo/commit?${apiQuery(repoPath, { hash })}`,
+        controller.signal,
+      )
+        .then((value) => {
+          if (controller.signal.aborted) return;
+          setCommit(value);
+          setCommitState("ready");
+        })
+        .catch((reason: unknown) => {
+          if (controller.signal.aborted)
+            return;
+          setCommitError(
+            reason instanceof Error ? reason.message : "unknown error",
+          );
+          setCommitState("error");
+        });
+    }, COMMIT_FETCH_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [repoPath, hash, commitRetry]);
+
   return (
     <section
-      aria-busy={state === "loading"}
-      aria-labelledby="commit-pane-title"
+      aria-busy={commitState === "loading"}
+      aria-labelledby={titleId}
       className="commit-pane"
     >
       <div className="section-head">
         <div>
-          <h3 id="commit-pane-title">コミット詳細</h3>
-          {detail && <code className="cmdhint">{detail.command}</code>}
+          <h3 id={titleId}>コミット詳細</h3>
+          {commit && <code className="cmdhint">{commit.command}</code>}
         </div>
-        {detail && (
+        {commit && (onCopy === null ? (
+          <CopyButton value={commit.command} label="コマンドをコピー" />
+        ) : (
           <button
             className="copy"
             type="button"
-            onClick={() => onCopy(detail.command)}
+            onClick={() => onCopy(commit.command)}
           >
             コマンドをコピー
           </button>
-        )}
+        ))}
       </div>
-      {state === "loading" && (
+      {commitState === "loading" && (
         <div className="loading" role="status">
           コミット詳細を取得中…
         </div>
       )}
-      {state === "error" && (
+      {commitState === "error" && (
         <div className="inline-error" role="alert">
           コミット詳細を取得できませんでした。
-          <button className="copy" type="button" onClick={onRetry}>
+          <button className="copy" type="button" onClick={() => setCommitRetry((value) => value + 1)}>
             再取得
           </button>
-          {error && <span>{error}</span>}
+          {commitError && <span>{commitError}</span>}
         </div>
       )}
-      {state === "ready" && detail && (
+      {commitState === "ready" && commit && (
         <>
           <div className="commit-meta">
-            <strong>{detail.subject || "(no subject)"}</strong>
-            <span>{detail.author}</span>
-            <span>{detail.date}</span>
+            <strong>{commit.subject || "(no subject)"}</strong>
+            <span>{commit.author}</span>
+            <span>{commit.date}</span>
           </div>
-          {detail.parents.length > 1 && (
+          {commit.parents.length > 1 && (
             <div className="commit-meta">
-              {detail.parents.map((parent, index) => (
+              {commit.parents.map((parent, index) => (
                 <a
                   key={`${index}:${parent}`}
                   className="copy"
                   href={buildInvestigationShareUrl(`/project?${apiQuery(repoPath, { tab: "info" })}`, "compare", {
                     base: parent,
-                    target: detail.hash,
+                    target: commit.hash,
                     mode: "direct",
                   })}
                 >
@@ -392,9 +423,9 @@ function CommitPane({
               ))}
             </div>
           )}
-          <CommitFiles key={detail.hash} files={detail.files} downloadName={`${detail.hash}-files.tsv`} />
-          <PatchView key={detail.hash} patch={detail.patch} />
-          {detail.patch_truncated && (
+          <CommitFiles key={commit.hash} files={commit.files} downloadName={`${commit.hash}-files.tsv`} />
+          <PatchView key={commit.hash} patch={commit.patch} />
+          {commit.patch_truncated && (
             <div className="truncated" role="status">
               {truncationLabel(200)}
             </div>
@@ -625,10 +656,6 @@ export default function RepoDetail({
   const [graphError, setGraphError] = useState<string | null>(null);
   const [graphRetry, setGraphRetry] = useState(0);
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
-  const [commit, setCommit] = useState<CommitDetail | null>(null);
-  const [commitState, setCommitState] = useState<LoadState>("idle");
-  const [commitError, setCommitError] = useState<string | null>(null);
-  const [commitRetry, setCommitRetry] = useState(0);
   const [branches, setBranches] = useState<BranchesResponse | null>(null);
   const [branchesState, setBranchesState] = useState<LoadState>("idle");
   const [branchesError, setBranchesError] = useState<string | null>(null);
@@ -637,9 +664,6 @@ export default function RepoDetail({
 
   useEffect(() => {
     setSelectedHash(null);
-    setCommit(null);
-    setCommitState("idle");
-    setCommitError(null);
     setShowMerged(false);
     setBranches(null);
   }, [repo.path]);
@@ -720,46 +744,6 @@ export default function RepoDetail({
     repo.checked_at,
     repo.path,
   ]);
-
-  useEffect(() => {
-    if (activeTab !== "graph") {
-      setCommit(null);
-      setCommitState("idle");
-      return;
-    }
-    if (!selectedHash) {
-      setCommit(null);
-      setCommitState("idle");
-      return;
-    }
-    const controller = new AbortController();
-    setCommit(null);
-    setCommitState("loading");
-    setCommitError(null);
-    const timer = window.setTimeout(() => {
-      void getJson<CommitDetail>(
-        `/api/repo/commit?${apiQuery(repo.path, { hash: selectedHash })}`,
-        controller.signal,
-      )
-        .then((value) => {
-          if (controller.signal.aborted) return;
-          setCommit(value);
-          setCommitState("ready");
-        })
-        .catch((reason: unknown) => {
-          if (controller.signal.aborted)
-            return;
-          setCommitError(
-            reason instanceof Error ? reason.message : "unknown error",
-          );
-          setCommitState("error");
-        });
-    }, COMMIT_FETCH_DEBOUNCE_MS);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [activeTab, repo.path, selectedHash, commitRetry]);
 
   const virtualNode = useMemo(() => {
     if (
@@ -944,15 +928,8 @@ export default function RepoDetail({
         </section>
       )}
 
-      {activeTab === "graph" && (
-        <CommitPane
-          detail={commit}
-          repoPath={repo.path}
-          state={commitState}
-          error={commitError}
-          onRetry={() => setCommitRetry((value) => value + 1)}
-          onCopy={onCopy}
-        />
+      {activeTab === "graph" && selectedHash !== null && (
+        <CommitPane key={`${repo.path}:${selectedHash}`} repoPath={repo.path} hash={selectedHash} onCopy={onCopy} />
       )}
 
       {activeTab === "branches" && (

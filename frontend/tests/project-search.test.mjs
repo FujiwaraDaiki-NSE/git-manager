@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   activityMatchesSearch,
+  checkedOutWorktreePaths,
   compareActivityEvents,
   laneMatchesSearch,
   normalizedSearchQuery,
@@ -49,11 +50,28 @@ test("activity ordering keeps unknown timestamps explicit and supports both dire
 test("lane filters never treat unknown counts as a positive Git state", async () => {
   const { laneMatchesFilter } = await import("../app/project-search.mjs");
   const unknown = { dirty: null, conflict: null, upstream_ahead: null, upstream_behind: null, is_worktree: false };
-  for (const filter of ["dirty", "conflict", "ahead", "behind", "worktree"]) assert.equal(laneMatchesFilter(unknown, filter), false);
+  for (const filter of ["dirty", "conflict", "ahead", "behind"]) assert.equal(laneMatchesFilter(unknown, filter), false);
   assert.equal(laneMatchesFilter({ ...unknown, dirty: true }, "dirty"), true);
   assert.equal(laneMatchesFilter({ ...unknown, upstream_ahead: 3 }, "ahead"), true);
   assert.equal(laneMatchesFilter({ ...unknown, upstream_behind: 2 }, "behind"), true);
   assert.equal(laneMatchesFilter(unknown, "bogus"), false);
+});
+
+test("checkout filter matches inventory paths except prunable worktrees", async () => {
+  const { laneMatchesFilter } = await import("../app/project-search.mjs");
+  const matches = (lane, checkoutPaths) => laneMatchesFilter(lane, "worktree", checkoutPaths);
+  const checkouts = checkedOutWorktreePaths([
+    { path: "/repo", state: "ok" },
+    { path: "/linked", state: "locked" },
+    { path: "/gone", state: "prunable" },
+  ]);
+  assert.equal(checkouts.size, 2);
+  assert.equal(matches({ path: "/repo", is_worktree: true }, checkouts), true);
+  assert.equal(matches({ path: "/repo", is_worktree: false, detached: true }, checkouts), true);
+  assert.equal(matches({ path: "/linked", is_worktree: true }, checkouts), true);
+  assert.equal(matches({ path: "/gone", is_worktree: true }, checkouts), false);
+  assert.equal(matches({ path: null, is_worktree: false }, checkouts), false);
+  assert.equal(matches({ path: "/linked/other", is_worktree: true }, checkouts), false);
 });
 
 test("work lanes sort attention before clean, and unknown dates after known dates", async () => {

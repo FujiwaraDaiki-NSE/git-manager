@@ -2,6 +2,7 @@
 
 import "./git-state-facts.css";
 import CopyButton from "./copy-button";
+import { worktreeCommand } from "./next-command-tools.mjs";
 import type { FetchStatus, GitOperation, BranchDestinations, ProjectSummary, PushRemoteConfig } from "./types";
 
 const categories = { authentication: "認証", connection: "接続", timeout: "タイムアウト", other: "その他" };
@@ -22,10 +23,15 @@ export function FetchFailureBreakdown({ projects }: { projects: Pick<ProjectSumm
 export function FetchFacts({ fetchedAt, status }: { fetchedAt: number | null | undefined; status: FetchStatus | null | undefined }) {
   return <div className="git-state-facts"><div>最後に成功したfetch: {fetchedAt == null ? "記録なし" : new Date(fetchedAt * 1000).toLocaleString("ja-JP")}</div><div>直近の試行: {status == null ? "記録なし" : `${status.result === "success" ? "成功" : "失敗"}（${new Date(status.attempted_at * 1000).toLocaleString("ja-JP")}）`}</div>{status?.result === "failure" && <div role="status">失敗理由: {fetchCategoryLabel(status.category)} · {status.reason === null ? "stderr未取得" : status.reason === "" ? "stderrなし" : status.reason}</div>}</div>;
 }
-function Command({ command, reason }: { command: string; reason: string }) {
-  return <div className="selection-command"><code>{command}</code><CopyButton value={command} label="コマンドをコピー" /><small>{reason}</small></div>;
+function Command({ command, reason, path }: { command: string; reason: string; path: string | null }) {
+  const scopedCommand = path === null ? null : worktreeCommand(command, path, null);
+  return <div className="selection-command">
+    {scopedCommand !== null && <><code>{scopedCommand}</code><CopyButton value={scopedCommand} label="コマンドをコピー" /></>}
+    <small>実行先: {path === null ? "未取得" : path}</small>
+    <small>{reason}</small>
+  </div>;
 }
-export function OperationFacts({ operations }: { operations: GitOperation[] | null | undefined }) {
+export function OperationFacts({ operations, path }: { operations: GitOperation[] | null | undefined; path: string | null }) {
   return <section className="git-state-facts" aria-label="Git操作の途中状態">
     <strong>Git操作の途中状態</strong>
     {operations == null ? <p>未取得</p> : operations.length === 0 ? <p>進行中の操作なし</p> : operations.map(({ kind, marker, step, total, commands }) => (
@@ -42,7 +48,7 @@ export function OperationFacts({ operations }: { operations: GitOperation[] | nu
             </div>
           </div>
         )}
-        {commands.map((command) => <Command key={command.command} {...command} />)}
+        {commands.map((command) => <Command key={command.command} {...command} path={path} />)}
       </div>
     ))}
   </section>;

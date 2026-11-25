@@ -459,6 +459,7 @@ button.worktree-explorer-metric {
 .worktree-explorer-card.state-detached .worktree-explorer-card-marker { background: var(--worktree-purple); }
 .worktree-explorer-card.state-unknown .worktree-explorer-card-marker,
 .worktree-explorer-card.health-unknown .worktree-explorer-card-marker { background: var(--worktree-muted); }
+.worktree-explorer-card.state-git-dir-missing .worktree-explorer-card-marker { background: var(--worktree-amber); }
 
 .worktree-explorer-card-main {
   min-width: 0;
@@ -495,6 +496,7 @@ button.worktree-explorer-metric {
 .worktree-explorer-state.state-ok { background: var(--worktree-green-soft); color: var(--worktree-green); }
 .worktree-explorer-state.state-detached { background: color-mix(in srgb, var(--worktree-purple) 13%, transparent); color: var(--worktree-purple); }
 .worktree-explorer-state.state-prunable,
+.worktree-explorer-state.state-git-dir-missing,
 .worktree-explorer-state.state-locked { background: var(--worktree-amber-soft); color: var(--worktree-amber); }
 .worktree-explorer-state.state-unknown,
 .worktree-explorer-health.health-unknown { background: var(--worktree-panel-soft); color: var(--worktree-muted); }

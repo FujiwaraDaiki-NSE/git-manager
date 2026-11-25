@@ -200,6 +200,8 @@
 .commit-files-arrow { color: var(--muted); }
 .commit-files-path .copy-control { flex: 0 0 auto; }
 .commit-files-path .copy-button { min-height: 26px; padding: 3px 6px; font-size: 10px; }
+.commit-files-source-button { margin-top: 4px; }
+.commit-files-table td.commit-files-source-cell { width: auto; text-align: start; }
 .commit-files-binary { color: var(--c-behind); font: 10px var(--sans); white-space: nowrap; }
 
 .commit-files-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 18px 12px; color: var(--muted); font: 12px var(--sans); }

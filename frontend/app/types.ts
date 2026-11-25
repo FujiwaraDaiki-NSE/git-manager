@@ -372,6 +372,7 @@ export type ProjectWorktree = {
   branch: string | null;
   head: string | null;
   state: "ok" | "prunable" | "locked" | null;
+  git_dir_missing: boolean;
   lock_reason: string | null;
   detached: boolean;
   is_main: boolean;
@@ -439,6 +440,7 @@ export type ProjectSummary = {
   latest_observed_at: number;
   priority: number;
   next_lane: string | null;
+  next_lane_id: string | null;
   largest_difference_lane: string | null;
   agent_counts: AgentCounts;
   agent_tasks: AgentTask[] | null;

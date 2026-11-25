@@ -16,6 +16,7 @@ import {
   worktreeCdCommand,
   worktreeHealth,
   worktreeHealthTokens,
+  worktreeHeadLabel,
   worktreeInventoryJson,
   worktreeInventoryMarkdown,
   worktreeInventoryTsv,
@@ -28,11 +29,13 @@ import {
   worktreeStateTokens,
   worktreeSync,
   worktreeSyncLabel,
+  WORKTREE_STATE_FILTERS,
+  WORKTREE_STATE_LABELS,
   WORKTREE_SYNC_FILTERS,
   WORKTREE_SYNC_LABELS,
 } from "./worktree-tools.mjs";
 
-type WorktreeStateFilter = "all" | "main" | "ok" | "detached" | "prunable" | "locked" | "unknown";
+type WorktreeStateFilter = keyof typeof WORKTREE_STATE_LABELS;
 type WorktreeHealthFilter = "all" | "dirty" | "conflict" | "clean" | "unknown";
 type WorktreeSyncFilter = "all" | "ahead" | "behind" | "diverged" | "synced" | "no-upstream" | "unknown";
 type WorktreeBranchFilter = "all" | "detached" | "unknown" | `branch:${string}`;
@@ -51,15 +54,7 @@ export type WorktreeExplorerProps = {
   onSelectLane: (lane: ProjectLane) => void;
 };
 
-const stateFilters: Array<{ key: WorktreeStateFilter; label: string }> = [
-  { key: "all", label: "すべて" },
-  { key: "main", label: "メイン作業場所" },
-  { key: "ok", label: "利用可能" },
-  { key: "detached", label: "detached" },
-  { key: "prunable", label: "参照先なし" },
-  { key: "locked", label: "ロック中" },
-  { key: "unknown", label: "状態未取得" },
-];
+const stateFilters = WORKTREE_STATE_FILTERS.map((key) => ({ key, label: WORKTREE_STATE_LABELS[key] }));
 
 const healthFilters: Array<{ key: WorktreeHealthFilter; label: string }> = [
   { key: "all", label: "すべて" },
@@ -74,17 +69,6 @@ const orderOptions: Array<{ key: WorktreeOrder; label: string }> = [
   { key: "branch", label: "ブランチ順" },
   { key: "path", label: "パス順" },
 ];
-
-function stateLabel(state: string) {
-  switch (state) {
-    case "main": return "メイン作業場所";
-    case "ok": return "利用可能";
-    case "detached": return "detached";
-    case "prunable": return "参照先なし";
-    case "locked": return "ロック中";
-    default: return "状態未取得";
-  }
-}
 
 function healthLabel(health: string) {
   switch (health) {
@@ -115,11 +99,6 @@ function upstreamOptionLabel(key: WorktreeUpstreamFilter) {
   return key.slice("upstream:".length);
 }
 
-function headLabel(row: WorktreeInventoryRow) {
-  if (typeof row.worktree.head !== "string" || row.worktree.head.length === 0) return "HEAD 未取得";
-  return row.worktree.head.slice(0, 10);
-}
-
 function WorktreeHeadComparison({ inventory }: { inventory: WorktreeInventoryRow[] }) {
   const [basePath, setBasePath] = useState("");
   const [targetPath, setTargetPath] = useState("");
@@ -134,7 +113,7 @@ function WorktreeHeadComparison({ inventory }: { inventory: WorktreeInventoryRow
   }
   const worktreeOptions = options.map((row) => (
     <option key={row.worktree.path} value={row.worktree.path}>
-      {branchLabel(row)} · {headLabel(row)} · {row.worktree.path}
+      {branchLabel(row)} · {worktreeHeadLabel(row)} · {row.worktree.path}
     </option>
   ));
 
@@ -413,7 +392,7 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
       <section className="worktree-explorer-head-summary" aria-label="同じHEADの比較">
         <div className="worktree-explorer-head-summary-heading">
           <strong>HEAD比較</strong>
-          <span>{headSummary.uniqueCount} unique · {headSummary.duplicateCount} 組の重複 · {headSummary.unknownCount} 未取得</span>
+          <span>{headSummary.uniqueCount} unique · {headSummary.duplicateCount} 組の重複 · {headSummary.unknownCount} 未取得{headSummary.unbornCount > 0 && ` · ${headSummary.unbornCount} 初回コミット前`}</span>
         </div>
         {headSummary.groups.some((group: { count: number }) => group.count > 1) ? <div className="worktree-explorer-head-groups">
           {headSummary.groups.filter((group: { count: number }) => group.count > 1).map((group: { head: string; paths: string[]; count: number }) => <div className="worktree-explorer-head-group" key={group.head}>
@@ -439,8 +418,8 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
               <div className="worktree-explorer-card-main">
                 <div className="worktree-explorer-card-topline">
                   <div className="worktree-explorer-state-badges" aria-label="worktree の状態">
-                    {tokens.map((token: string) => <span className={`worktree-explorer-state state-${token}`} key={token}>{stateLabel(token)}</span>)}
-                    {state === "locked" && row.worktree.lock_reason && (
+                    {tokens.map((token) => <span className={`worktree-explorer-state state-${token}`} key={token}>{WORKTREE_STATE_LABELS[token]}</span>)}
+                    {row.worktree.state === "locked" && row.worktree.lock_reason && (
                       <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.worktree.lock_reason}</span>
                     )}
                     {healthTokens.map((token: string) => <span className={`worktree-explorer-health health-${token}`} key={token}>{healthLabel(token)}</span>)}
@@ -451,7 +430,7 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
                 <h3 title={branchLabel(row)}>{branchLabel(row)}</h3>
                 <code className="worktree-explorer-path" title={row.worktree.path}>{row.worktree.path || "パス未取得"}</code>
                 <div className="worktree-explorer-facts">
-                  <span><b>HEAD</b> {headLabel(row)}</span>
+                  <span><b>HEAD</b> {worktreeHeadLabel(row)}</span>
                   {lane ? <span title={lane.path ?? undefined}><b>作業ブランチ</b> {lane.name}</span> : <span className="is-unknown"><b>作業ブランチ</b> 対応する作業情報なし</span>}
                   <span className={sync === "unknown" ? "is-unknown" : undefined}><b>同期</b> {upstreamFactLabel(row)}</span>
                 </div>

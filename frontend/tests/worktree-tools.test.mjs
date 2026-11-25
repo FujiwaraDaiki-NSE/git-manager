@@ -26,7 +26,9 @@ import {
   parseWorktreeSyncThreshold,
   duplicateWorktreeHeadKeys,
   worktreeHeadMatches,
+  worktreeHeadLabel,
   worktreeState,
+  worktreeStateLabel,
   worktreeStateTokens,
   worktreeSync,
   worktreeSyncLabel,
@@ -39,6 +41,7 @@ function worktree(overrides = {}) {
     branch: "main",
     head: "1111111111111111111111111111111111111111",
     state: "ok",
+    git_dir_missing: false,
     detached: false,
     is_main: true,
     ...overrides,
@@ -165,6 +168,23 @@ test("state and health filters select only explicit facts", () => {
   });
 });
 
+test("missing git directories have their own state and are excluded from available worktrees", () => {
+  const rows = [
+    { worktree: worktree({ path: "/available" }), lane: { error: "git status failed" } },
+    { worktree: worktree({ path: "/broken", git_dir_missing: true }), lane: null },
+    { worktree: worktree({ path: "/locked", state: "locked", git_dir_missing: true }), lane: null },
+    { worktree: worktree({ path: "/prunable", state: "prunable" }), lane: null },
+  ];
+  const pathsFor = (state) => filterWorktreeInventory(rows, filterOptions({ state })).map((row) => row.worktree.path);
+  assert.deepEqual(pathsFor("ok"), ["/available"]);
+  assert.deepEqual(pathsFor("git-dir-missing"), ["/broken", "/locked"]);
+  assert.deepEqual(pathsFor("prunable"), ["/prunable"]);
+  assert.deepEqual(pathsFor("locked"), ["/locked"]);
+  assert.deepEqual(pathsFor("unknown"), []);
+  assert.equal(worktreeStateLabel(rows[1].worktree), "Git管理ディレクトリなし");
+  assert.deepEqual(worktreeStateTokens(rows[2].worktree), ["main", "git-dir-missing", "locked"]);
+});
+
 test("upstream synchronization uses only explicit lane tracking facts", () => {
   const rows = [
     { worktree: worktree({ path: "/repo/synced", branch: "main" }), lane: lane("/repo/synced", { upstream: "origin/main", upstream_ahead: 0, upstream_behind: 0 }) },
@@ -249,8 +269,27 @@ test("duplicate HEAD filter and grouping identify shared commits without groupin
     uniqueCount: 1,
     duplicateCount: 1,
     unknownCount: 1,
+    unbornCount: 0,
     groups: [{ head: shared, paths: ["/repo/a", "/repo/b"], count: 2 }],
   });
+});
+
+test("all-zero SHA-1 and SHA-256 heads are labeled before the first commit and excluded from HEAD groups", () => {
+  for (const length of [40, 64]) {
+    const head = "0".repeat(length);
+    const rows = ["/a", "/b"].map((path) => ({ worktree: worktree({ path, head }), lane: null }));
+    assert.equal(worktreeHeadLabel(rows[0]), "初回コミット前");
+    assert.equal(hasComparableWorktreeHead(head), false);
+    assert.deepEqual(filterWorktreeInventory(rows, filterOptions({ head: "duplicate" })), []);
+    assert.deepEqual(summarizeWorktreeHeads(rows), {
+      uniqueCount: 0,
+      duplicateCount: 0,
+      unknownCount: 0,
+      unbornCount: 2,
+      groups: [],
+    });
+  }
+  assert.equal(worktreeHeadLabel({ worktree: worktree() }), "1111111111");
 });
 
 test("branch selector preserves exact branches and distinguishes detached from unknown", () => {
@@ -299,7 +338,7 @@ test("TSV cells neutralize formula prefixes and delimiters while preserving unkn
     lane: lane("/repo/feature\t=bad", { dirty: null, conflict: null }),
   }];
   const tsv = worktreeInventoryTsv(rows);
-  assert.match(tsv, /^path\tbranch\thead\tstate\tis_main\tdetached\tdirty\tconflict\tlane_id\tupstream\tupstream_ahead\tupstream_behind\tupstream_sync\n/);
+  assert.match(tsv, /^path\tbranch\thead\tstate\tis_main\tdetached\tdirty\tconflict\tlane_id\tupstream\tupstream_ahead\tupstream_behind\tupstream_sync\tgit_dir_missing\n/);
   assert.match(tsv, /\t'=formula\t/);
   assert.match(tsv, /\/repo\/feature =bad\t/);
   assert.match(tsv, /\t\tfalse\tfalse\t\t\t/);
@@ -329,4 +368,20 @@ test("JSON and Markdown exports retain filtered context and explicit metadata", 
   assert.match(worktreeInventoryMarkdown(rows, context), /\| Path \| Branch \| HEAD \| State \| Health \| Upstream \| Ahead \| Behind \|/);
   assert.match(worktreeInventoryMarkdown(rows, context), /origin\/feature/);
   assert.deepEqual(JSON.parse(worktreePathHeadJson(rows)), { "/repo/feature": "abcdef1234567890" });
+});
+
+test("inventory exports preserve a missing Git directory", () => {
+  const rows = [true, false].map((git_dir_missing) => ({
+    worktree: worktree({ git_dir_missing }),
+    lane: null,
+  }));
+  const context = { project: "demo", mainPath: "/repo", order: "path", filters: {} };
+
+  assert.match(worktreeInventoryMarkdown(rows, context), /\| Git管理ディレクトリなし \|/);
+  assert.deepEqual(worktreeInventoryTsv(rows).trimEnd().split("\n").map((line) => line.split("\t").at(-1)), [
+    "git_dir_missing", "true", "false",
+  ]);
+  assert.deepEqual(JSON.parse(worktreeInventoryJson(rows, context)).worktrees.map(({ state, git_dir_missing }) => (
+    [state, git_dir_missing]
+  )), [["ok", true], ["ok", false]]);
 });

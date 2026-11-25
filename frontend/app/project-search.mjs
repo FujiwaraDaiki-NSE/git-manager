@@ -43,14 +43,20 @@ export function compareActivityEvents(a, b, order) {
   return a.id.localeCompare(b.id);
 }
 
-export function laneMatchesFilter(lane, filter) {
+/** @param {import("./types").ProjectWorktree[]} worktrees */
+export function checkedOutWorktreePaths(worktrees) {
+  return new Set(worktrees.filter((worktree) => worktree.state !== "prunable").map((worktree) => worktree.path));
+}
+
+/** @param {ReadonlySet<string>} checkoutPaths */
+export function laneMatchesFilter(lane, filter, checkoutPaths) {
   switch (filter) {
     case "all": return true;
     case "dirty": return lane.dirty === true;
     case "conflict": return lane.conflict === true;
     case "ahead": return typeof lane.upstream_ahead === "number" && lane.upstream_ahead > 0;
     case "behind": return typeof lane.upstream_behind === "number" && lane.upstream_behind > 0;
-    case "worktree": return lane.is_worktree === true;
+    case "worktree": return checkoutPaths.has(lane.path);
     default: return false;
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
 import {
   COMMON_ANCESTOR_MARKER,
@@ -14,6 +14,7 @@ import type {
   GraphRef,
   GraphRow,
 } from "./types";
+import "./graph-view.css";
 
 export type GraphVirtualNode = {
   lane: number;
@@ -37,6 +38,20 @@ export type GraphViewProps = {
 const ROW_HEIGHT = 30;
 const NODE_RADIUS = 4;
 const ROW_CONTENT_MIN_WIDTH = 160;
+
+function firstParentHistory(rows: GraphRow[]) {
+  const hashes = new Set<string>();
+  const byHash = new Map(rows.map((row) => [row.hash, row]));
+  let row = rows.find((candidate) => candidate.is_head);
+  while (row) {
+    hashes.add(row.hash);
+    const parent = row.parents[0];
+    if (parent === undefined) return { hashes, endsOutside: false };
+    row = byHash.get(parent);
+    if (!row) return { hashes, endsOutside: true };
+  }
+  return { hashes, endsOutside: false };
+}
 
 function isGraphRow(item: GraphItem): item is GraphRow {
   return "hash" in item;
@@ -223,6 +238,7 @@ type GraphRowViewProps = {
   item: GraphItem;
   selected: boolean;
   active: boolean;
+  firstParent: boolean;
   width: number;
   onClick?: (item: GraphItem) => void;
   onMove?: (item: GraphItem, direction: -1 | 1) => void;
@@ -234,6 +250,7 @@ function GraphRowView({
   item,
   selected,
   active,
+  firstParent,
   width,
   onClick,
   onMove,
@@ -264,6 +281,7 @@ function GraphRowView({
     selected ? "graph-row-selected" : "",
     commit?.is_head ? "graph-row-head" : "",
     commit?.is_merge ? "graph-row-merge" : "",
+    firstParent ? "graph-row-first-parent" : "",
     !commit ? "graph-row-virtual" : "",
   ]
     .filter(Boolean)
@@ -271,7 +289,7 @@ function GraphRowView({
 
   return (
     <div
-      aria-label={rowLabel(item)}
+      aria-label={firstParent ? `${rowLabel(item)}、HEADの第1親履歴` : rowLabel(item)}
       aria-current={selected ? "true" : undefined}
       aria-pressed={interactive ? selected : undefined}
       className={classes}
@@ -583,6 +601,8 @@ export function GraphView({
   const [activeKey, setActiveKey] = useState<string | null>(
     selectedHash ?? firstKey,
   );
+  const [showFirstParent, setShowFirstParent] = useState(false);
+  const history = useMemo(() => showFirstParent ? firstParentHistory(rows) : null, [rows, showFirstParent]);
   useEffect(() => {
     setActiveKey((current) => {
       if (selectedHash && rows.some((row) => row.hash === selectedHash))
@@ -646,6 +666,7 @@ export function GraphView({
             connectFromVirtualLane={
               isVirtualHeadRow ? virtualNode?.lane : undefined
             }
+            firstParent={commit && history?.hashes.has(item.hash) === true}
             item={item}
             key={rowKey(item)}
             onClick={
@@ -671,6 +692,15 @@ export function GraphView({
 
   return (
     <>
+      <div className="graph-first-parent-controls">
+        <label>
+          <input type="checkbox" checked={showFirstParent} onChange={(event) => setShowFirstParent(event.target.checked)} />
+          HEADの第1親履歴
+        </label>
+        {history && <span role="status">{history.hashes.size === 0
+          ? "取得範囲にHEADがありません"
+          : `${history.hashes.size}件${history.endsOutside ? "（取得範囲の端）" : ""}`}</span>}
+      </div>
       {graphRows}
       {onSelect && selectedRow && selectedRow.parents.length > 0 && (
         <div className="commit-meta" role="group" aria-label="親コミットへ移動">

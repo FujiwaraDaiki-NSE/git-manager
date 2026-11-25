@@ -1,0 +1,21 @@
+.graph-first-parent-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-size: var(--fs-aux);
+}
+
+.graph-first-parent-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.graph-row-first-parent .graph-row-content {
+  border-inline-start: 3px solid var(--accent);
+  padding-inline-start: 4px;
+}

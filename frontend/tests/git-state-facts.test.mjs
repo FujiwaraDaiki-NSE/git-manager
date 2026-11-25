@@ -6,13 +6,18 @@ import { runInNewContext } from "node:vm";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { worktreeCommand } from "../app/next-command-tools.mjs";
 
 const source = readFileSync(new URL("../app/git-state-facts.tsx", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source.replace('import "./git-state-facts.css";', ""), { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
 const module = { exports: {} };
 const baseRequire = createRequire(import.meta.url);
 const CopyButton = ({ value, label }) => React.createElement("button", { type: "button", "aria-label": label, "data-value": value }, "コピー");
-runInNewContext(compiled.outputText, { exports: module.exports, require: (id) => id === "./copy-button" ? { __esModule: true, default: CopyButton } : baseRequire(id) });
+runInNewContext(compiled.outputText, { exports: module.exports, require: (id) => {
+  if (id === "./copy-button") return { __esModule: true, default: CopyButton };
+  if (id === "./next-command-tools.mjs") return { worktreeCommand };
+  return baseRequire(id);
+} });
 const { FetchFacts, FetchFailureBreakdown, OperationFacts, DestinationFacts } = module.exports;
 const render = (component, props) => renderToStaticMarkup(React.createElement(component, props));
 
@@ -33,13 +38,27 @@ test("fetch failure breakdown counts the supplied projects and keeps missing cat
 });
 
 test("operation progress and copyable commands render separately from unknown and absent operations", () => {
-  const html = render(OperationFacts, { operations: [{ kind: "rebase", marker: "rebase-merge", step: 3, total: 7, commands: [{ command: "git rebase --continue", reason: "競合解消後に継続" }, { command: "git rebase --abort", reason: "中止" }] }] });
+  const html = render(OperationFacts, { path: "/repo/topic", operations: [{ kind: "rebase", marker: "rebase-merge", step: 3, total: 7, commands: [{ command: "git rebase --continue", reason: "競合解消後に継続" }, { command: "git rebase --abort", reason: "中止" }] }] });
   assert.match(html, /rebase途中（3\/7）/);
-  assert.match(html, /git rebase --continue/);
-  assert.match(html, /git rebase --abort/);
+  assert.match(html, /git -C &#x27;\/repo\/topic&#x27; rebase --continue/);
+  assert.match(html, /git -C &#x27;\/repo\/topic&#x27; rebase --abort/);
   assert.equal((html.match(/>コピー<\/button>/g) ?? []).length, 2);
-  assert.match(render(OperationFacts, { operations: null }), /未取得/);
-  assert.match(render(OperationFacts, { operations: [] }), /進行中の操作なし/);
+  assert.match(render(OperationFacts, { operations: null, path: null }), /未取得/);
+  assert.match(render(OperationFacts, { operations: [], path: "/repo/topic" }), /進行中の操作なし/);
+});
+
+test("cherry-pick uses the observed checkout for both display and copy", () => {
+  const operations = [{ kind: "cherry-pick", marker: "CHERRY_PICK_HEAD", step: null, total: null,
+    commands: [{ command: "git cherry-pick --abort", reason: "中止" }] }];
+  const path = "/repo/linked checkout";
+  const html = render(OperationFacts, { operations, path });
+  const command = "git -C &#x27;/repo/linked checkout&#x27; cherry-pick --abort";
+  assert.ok(html.includes(`<code>${command}</code>`));
+  assert.ok(html.includes(`data-value="${command}"`));
+  assert.ok(html.includes(`実行先: ${path}`));
+  const unknownPath = render(OperationFacts, { operations, path: null });
+  assert.match(unknownPath, /実行先: 未取得/);
+  assert.doesNotMatch(unknownPath, /data-value=/);
 });
 
 test("branch destinations show both push URLs and explain rejected push", () => {

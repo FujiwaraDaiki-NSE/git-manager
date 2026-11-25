@@ -154,3 +154,28 @@
 .commit-compare-metric-wrap { overflow: auto; }
 .commit-compare-evidence table { width: 100%; border-collapse: collapse; }
 .commit-compare-evidence th, .commit-compare-evidence td { text-align: start; padding: 4px 8px; border-bottom: 1px solid var(--rule); }
+.commit-compare-file-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 8px;
+}
+
+.commit-compare-file-sources > section {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.commit-compare-file-sources h5 { margin: 0; font: 700 12px var(--sans); }
+.commit-compare-file-sources p { margin: 6px 0; overflow-wrap: anywhere; }
+.commit-compare-file-sources pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--rule);
+  font: var(--code-font-size, 11px)/1.6 var(--mono);
+  tab-size: 4;
+}

@@ -4,15 +4,16 @@
  * and is linked only when its path is exactly equal to the worktree path.
  */
 
-export const WORKTREE_STATE_FILTERS = Object.freeze([
+export const WORKTREE_STATE_FILTERS = Object.freeze(/** @type {const} */ ([
   "all",
   "main",
   "ok",
   "detached",
   "prunable",
+  "git-dir-missing",
   "locked",
   "unknown",
-]);
+]));
 
 export const WORKTREE_HEALTH_FILTERS = Object.freeze([
   "all",
@@ -38,6 +39,7 @@ export const WORKTREE_STATE_LABELS = Object.freeze({
   ok: "利用可能",
   detached: "detached",
   prunable: "参照先なし",
+  "git-dir-missing": "Git管理ディレクトリなし",
   locked: "ロック中",
   unknown: "状態未取得",
 });
@@ -110,17 +112,20 @@ export function buildWorktreeInventory(project) {
 /** The raw worktree state remains independent from main/detached identity flags. */
 export function worktreeState(worktree) {
   if (worktree.state === "prunable") return "prunable";
+  if (worktree.git_dir_missing === true) return "git-dir-missing";
   if (worktree.state === "locked") return "locked";
   if (worktree.state === "ok") return "ok";
   return "unknown";
 }
 
 export function worktreeStateTokens(worktree) {
+  /** @type {Array<keyof typeof WORKTREE_STATE_LABELS>} */
   const tokens = [];
   if (worktree.is_main === true) tokens.push("main");
   if (worktree.detached === true) tokens.push("detached");
   const state = worktreeState(worktree);
-  if (!tokens.includes(state)) tokens.push(state);
+  tokens.push(state);
+  if (state === "git-dir-missing" && worktree.state === "locked") tokens.push("locked");
   return tokens;
 }
 
@@ -133,12 +138,9 @@ export function worktreeStateMatches(row, filter) {
   switch (filter) {
     case "all": return true;
     case "main": return worktree.is_main === true;
-    case "ok": return worktree.state === "ok";
     case "detached": return worktree.detached === true;
-    case "prunable": return worktree.state === "prunable";
     case "locked": return worktree.state === "locked";
-    case "unknown": return worktree.state !== "ok" && worktree.state !== "prunable" && worktree.state !== "locked";
-    default: return false;
+    default: return worktreeState(worktree) === filter;
   }
 }
 
@@ -258,14 +260,24 @@ export function worktreeSyncThresholdsMatch(row, minAhead, minBehind) {
 
 export function worktreeHeadKey(row) {
   const head = row.worktree?.head;
-  return typeof head === "string" && head.length > 0 ? head : null;
+  return typeof head === "string" && head.length > 0 && !isUnbornWorktreeHead(head) ? head : null;
 }
 
 /** Git lists an all-zero HEAD before the first commit. */
+function isUnbornWorktreeHead(head) {
+  return typeof head === "string" && /^0+$/u.test(head);
+}
+
 export function hasComparableWorktreeHead(head) {
   return typeof head === "string"
     && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(head)
-    && !/^0+$/u.test(head);
+    && !isUnbornWorktreeHead(head);
+}
+
+export function worktreeHeadLabel(row) {
+  if (isUnbornWorktreeHead(row.worktree.head)) return "初回コミット前";
+  const head = worktreeHeadKey(row);
+  return head === null ? "HEAD 未取得" : head.slice(0, 10);
 }
 
 export function duplicateWorktreeHeadKeys(rows) {
@@ -285,7 +297,12 @@ export function worktreeHeadMatches(row, filter, duplicateHeads) {
 export function summarizeWorktreeHeads(rows) {
   const grouped = new Map();
   let unknownCount = 0;
+  let unbornCount = 0;
   for (const row of rows) {
+    if (isUnbornWorktreeHead(row.worktree.head)) {
+      unbornCount += 1;
+      continue;
+    }
     const head = worktreeHeadKey(row);
     if (head === null) {
       unknownCount += 1;
@@ -302,6 +319,7 @@ export function summarizeWorktreeHeads(rows) {
     uniqueCount: groups.length,
     duplicateCount: groups.filter((group) => group.count > 1).length,
     unknownCount,
+    unbornCount,
     groups,
   };
 }
@@ -390,7 +408,7 @@ function statusRank(row) {
   if (health === "conflict") return 0;
   if (health === "dirty") return 1;
   const state = worktreeState(row.worktree);
-  if (state === "prunable") return 2;
+  if (state === "prunable" || state === "git-dir-missing") return 2;
   if (state === "locked") return 3;
   if (state === "unknown") return 7;
   if (row.worktree.detached === true) return 4;
@@ -481,6 +499,7 @@ export const WORKTREE_TSV_HEADERS = Object.freeze([
   "upstream_ahead",
   "upstream_behind",
   "upstream_sync",
+  "git_dir_missing",
 ]);
 
 /** Serialize only the supplied, already-filtered inventory rows. */
@@ -502,6 +521,7 @@ export function worktreeInventoryTsv(rows) {
       lane?.upstream_ahead,
       lane?.upstream_behind,
       worktreeSync(row),
+      row.worktree.git_dir_missing,
     ].map(tsvCell).join("\t"));
   }
   return `${lines.join("\n")}\n`;
@@ -516,6 +536,7 @@ function metadataRow(row) {
     branch: worktree.branch,
     head: worktree.head,
     state: worktree.state,
+    git_dir_missing: worktree.git_dir_missing,
     is_main: worktree.is_main,
     detached: worktree.detached,
     lane: lane ? {
@@ -565,8 +586,7 @@ export function worktreeInventoryMarkdown(rows, context) {
     "| --- | --- | --- | --- | --- | --- | ---: | ---: |",
   ];
   for (const row of rows) {
-    const head = worktreeHeadKey(row);
-    lines.push(`| ${markdownCell(row.worktree.path)} | ${markdownCell(row.worktree.branch)} | ${markdownCell(head ? head.slice(0, 10) : "HEAD 未取得")} | ${markdownCell(row.worktree.state ?? "状態未取得")} | ${markdownCell(worktreeHealth(row))} | ${markdownCell(worktreeUpstreamKey(row).replace(/^upstream:/, ""))} | ${markdownCell(row.lane?.upstream_ahead ?? "未取得")} | ${markdownCell(row.lane?.upstream_behind ?? "未取得")} |`);
+    lines.push(`| ${markdownCell(row.worktree.path)} | ${markdownCell(row.worktree.branch)} | ${markdownCell(worktreeHeadLabel(row))} | ${markdownCell(worktreeStateLabel(row.worktree))} | ${markdownCell(worktreeHealth(row))} | ${markdownCell(worktreeUpstreamKey(row).replace(/^upstream:/, ""))} | ${markdownCell(row.lane?.upstream_ahead ?? "未取得")} | ${markdownCell(row.lane?.upstream_behind ?? "未取得")} |`);
   }
   return `${lines.join("\n")}\n`;
 }

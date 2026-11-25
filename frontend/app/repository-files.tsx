@@ -6,6 +6,7 @@ import {
   REPOSITORY_FILES_MAX_PREVIEW_BYTES,
   buildRepositoryFileHistoryHref,
   filterRepositoryFileEntries,
+  findRepositorySymlinkTarget,
   repositoryBase64ToBytes,
   repositoryFileName,
   repositoryFileQuery,
@@ -328,6 +329,9 @@ export default function RepositoryFiles({ path }: { path: string }) {
   }
   const binaryPreview = file?.binary && file.content_base64 ? file.content_base64.slice(0, Math.floor(REPOSITORY_FILES_MAX_PREVIEW_BYTES / 3) * 4) : "";
   const canDownload = file?.downloadable === true && file.truncated === false && file.size <= REPOSITORY_FILES_MAX_BLOB_BYTES;
+  const symlinkTarget: RepositoryFileEntry | null = file?.kind === "symlink" && file.text !== null && !file.truncated && inventory?.pinned_hash === file.pinned_hash
+    ? findRepositorySymlinkTarget(inventory.entries, file.path, file.text)
+    : null;
 
   return (
     <details className="repository-files" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -386,7 +390,7 @@ export default function RepositoryFiles({ path }: { path: string }) {
                 <button type="button" className="subtle-button" disabled={!canDownload} onClick={download}>完全なblobを保存</button>
               </div>
             </div>
-            {file.kind === "symlink" && <p className="repository-files-note" role="note">symlinkのリンク先は追跡しません。Gitに保存されたリンク文字列だけを表示しています。</p>}
+            {file.kind === "symlink" && <p className="repository-files-note" role="note">Gitに保存されたリンク文字列{symlinkTarget && <>{" "}<button type="button" className="subtle-button" onClick={() => loadFile(symlinkTarget)}>この版の参照先を開く</button></>}</p>}
             {file.kind === "gitlink" && <p className="repository-files-note" role="note">gitlinkはサブモジュールの参照です。別リポジトリの内容は読み取りません。</p>}
             {file.binary ? <div className="repository-files-binary" role="status"><strong>バイナリblob</strong><p>UTF-8テキストとして表示できないため、保存可能な完全blobかどうかだけを明示します。</p>{binaryPreview && <pre aria-label="バイナリblobのbase64プレビュー">{binaryPreview}</pre>}</div> : file.text !== null && file.text !== undefined ? <RepositoryTextView key={`${file.pinned_hash}:${file.path}`} text={file.text} /> : <p className="repository-files-empty" role="status">表示できる本文はありません。</p>}
             {file.truncated && <p className="repository-files-truncated" role="status">blobが{formatBytes(file.download_limit)}を超えるため、先頭のプレビューだけを表示しています。完全な保存はできません。</p>}

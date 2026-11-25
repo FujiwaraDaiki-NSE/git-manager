@@ -22,7 +22,10 @@ async function read<T,>(url: string, signal: AbortSignal, init?: RequestInit): P
   }
   return response.json();
 }
-function Detail({ path, hash }: { path: string; hash: string }) {
+function formatSearchDate(value: string) {
+  return new Date(value).toLocaleString("ja-JP", { timeZoneName: "short" });
+}
+function Detail({ path, hash, searchCommit }: { path: string; hash: string; searchCommit: Commit | undefined }) {
   const [data, setData] = useState<CommitDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -30,7 +33,14 @@ function Detail({ path, hash }: { path: string; hash: string }) {
     void read<CommitDetail>(`/api/repo/commit?${new URLSearchParams({ path, hash })}`, controller.signal).then(setData).catch(e => { if (!controller.signal.aborted) setError(String(e)); });
     return () => controller.abort();
   }, [path, hash]);
-  return <section className="tag-explorer-detail"><div className="tag-explorer-detail-heading"><h3>コミット詳細</h3><code>{hash}</code></div>{error && <p className="tag-explorer-error" role="alert">{error}</p>}{!data && !error && <p className="tag-explorer-state" role="status">取得中…</p>}{data && <><p className="tag-explorer-note">{data.subject}</p><CommitFiles files={data.files} downloadName={`${hash}.tsv`} /><PatchView patch={data.patch} />{data.patch_truncated && <p className="tag-explorer-note">パッチは一部省略されています。</p>}</>}</section>;
+  return <section className="tag-explorer-detail">
+    <div className="tag-explorer-detail-heading"><h3>コミット詳細</h3><code>{hash}</code></div>
+    {searchCommit && <p className="tag-explorer-commit-meta">
+      {searchCommit.committer_date !== undefined && <span>期間判定に使うコミッター日時 <time dateTime={searchCommit.committer_date}>{searchCommit.committer_date}</time></span>}
+      <span>作者日時 <time dateTime={searchCommit.date}>{searchCommit.date}</time></span>
+    </p>}
+    {error && <p className="tag-explorer-error" role="alert">{error}</p>}{!data && !error && <p className="tag-explorer-state" role="status">取得中…</p>}{data && <><p className="tag-explorer-note">{data.subject}</p><CommitFiles files={data.files} downloadName={`${hash}.tsv`} /><PatchView patch={data.patch} />{data.patch_truncated && <p className="tag-explorer-note">パッチは一部省略されています。</p>}</>}
+  </section>;
 }
 type InvestigationProps = { path: string } & (
   | { kind: "overlaps"; agentTasks: AgentTask[] | null; onOpenWorktree: (path: string) => void }
@@ -187,8 +197,8 @@ function Investigation(props: InvestigationProps) {
                 </button>
                 <p className="tag-explorer-commit-meta">
                   {c.mark !== undefined && <span className="repository-investigation-patch-mark">{patchLabels[c.mark]}</span>}
-                  {c.committer_date !== undefined && <span>期間判定に使うコミッター日時 <time dateTime={c.committer_date}>{new Date(c.committer_date).toLocaleString("ja-JP", { timeZoneName: "short" })}</time></span>}
-                  <span>{kind === "search" && "作者日時 "}<time dateTime={c.date}>{c.date}</time></span>
+                  {c.committer_date !== undefined && <span>期間判定に使うコミッター日時 <time dateTime={c.committer_date}>{formatSearchDate(c.committer_date)}</time></span>}
+                  <span>{kind === "search" && "作者日時 "}<time dateTime={c.date}>{kind === "search" ? formatSearchDate(c.date) : c.date}</time></span>
                   <span>{c.author}</span>
                 </p>
                 {c.sources && <>
@@ -208,7 +218,7 @@ function Investigation(props: InvestigationProps) {
         </div>}
         {selected && <>
           <div className="tag-explorer-navigation"><button className="tag-explorer-export" type="button" onClick={() => setSelected(null)}>コミット詳細を閉じる</button></div>
-          <Detail key={selected} path={path} hash={selected} />
+          <Detail key={selected} path={path} hash={selected} searchCommit={kind === "search" ? commits?.find(c => c.hash === selected) : undefined} />
         </>}
       </div>
     </details>

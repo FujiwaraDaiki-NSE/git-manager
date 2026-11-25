@@ -4,7 +4,7 @@ import { AgentDecisionDetails } from "./agent-decision";
 
 import CopyButton from "./copy-button";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ACKNOWLEDGEMENTS_STORAGE_KEY, agentWorktreeCommand, isAcknowledged, parseAcknowledgements, reportIdentity, updateAcknowledgements } from "./agent-acknowledgements.mjs";
+import { ACKNOWLEDGEMENTS_STORAGE_KEY, isAcknowledged, parseAcknowledgements, reportIdentity, updateAcknowledgements } from "./agent-acknowledgements.mjs";
 import type { Acknowledgements } from "./agent-acknowledgements.mjs";
 import DesktopNotifications from "./desktop-notifications";
 import Link from "next/link";
@@ -21,8 +21,12 @@ import {
   AGENT_DECISION_STATUSES,
   classifyCurrentAgentRows,
   agentReportFreshness,
+  createTimelineProjectLabel,
   currentAgentTasks,
   hasUnknownCurrentTasks,
+  timelineDecisionCopy,
+  timelineProjectId,
+  timelineWorktreeLocation,
 } from "./agent-timeline-tools.mjs";
 import {
   TIMELINE_KIND_ALL,
@@ -40,7 +44,7 @@ import {
   timelineHistoryDetails,
 } from "./agent-timeline-investigation-tools.mjs";
 import type { TimelineDecisionChange, TimelineFilterOptions } from "./agent-timeline-investigation-tools.mjs";
-import type { AgentEvent, AgentTask, ProjectResponse, ProjectSummary } from "./types";
+import type { AgentEvent, AgentTask, ProjectResponse, ProjectSummary, Repo } from "./types";
 import "./agent-timeline.css";
 
 type TimelineProject = ProjectSummary | ProjectResponse;
@@ -132,14 +136,14 @@ function TimeValue({ value }: { value: string | null | undefined }) {
   return <time className="agent-timeline-time" dateTime={value ?? undefined} title={exactTime(value)}>{relativeTime(value)} · {exactTime(value)}</time>;
 }
 
-function ProjectBranch({ project, projectId, branch, children }: {
+function ProjectBranch({ project, name, branch, children }: {
   project: TimelineProject | null;
-  projectId: string | null | undefined;
+  name: string;
   branch: string | null | undefined;
   children: ReactNode;
 }) {
   const href = projectHref(project, branch);
-  const label = `${projectLabel(project, projectId)} / ${branchLabel(branch)}`;
+  const label = `${name} / ${branchLabel(branch)}`;
   return href
     ? <Link className="agent-timeline-project-link" href={href} prefetch={false} aria-label={`${label}を開く`}>{children}</Link>
     : <span tabIndex={0} className="agent-timeline-project-link is-unavailable" title="プロジェクトの作業パス未取得">{children}</span>;
@@ -149,14 +153,14 @@ function currentStatus(task: AgentTask) {
   return agentStateLabel(agentTaskState(task));
 }
 
-function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknowledge, onBranchHistory, now }: {
-  project: TimelineProject; task: AgentTask; oldDecision?: boolean;
+function CurrentRow({ project, name, task, repos, oldDecision = false, acknowledged, onAcknowledge, onBranchHistory, now }: {
+  project: TimelineProject; name: string; task: AgentTask; repos: ReadonlyMap<string, Repo> | null; oldDecision?: boolean;
   now: number; acknowledged: boolean; onAcknowledge: (task: AgentTask, acknowledged: boolean) => void;
   onBranchHistory: (branch: HistoryBranch) => void;
 }) {
-  const projectId = typeof task.project_id === "string" ? task.project_id : project.id;
   const decision = AGENT_DECISION_STATUSES.includes(agentTaskState(task));
-  const command = agentWorktreeCommand(task.worktree);
+  const worktree = task.worktree;
+  const location = decision && worktree ? timelineWorktreeLocation(worktree, project.id, repos) : null;
   const freshness = agentReportFreshness(task.occurred_at, now);
   const reportKey = agentReportKey(task);
   const identity = reportIdentity(task);
@@ -165,8 +169,8 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
   const branch = task.branch;
   return (
     <li className={`agent-timeline-current-row status-${statusClass(agentTaskState(task))}${decision ? ` report-age-${freshness}` : ""}`}>
-      <ProjectBranch project={project} projectId={projectId} branch={task.branch}>
-        <span className="agent-timeline-row-head"><strong>{projectLabel(project, projectId)}</strong><span>{branchLabel(task.branch)}</span></span>
+      <ProjectBranch project={project} name={name} branch={task.branch}>
+        <span className="agent-timeline-row-head"><strong>{name}</strong><span>{branchLabel(task.branch)}</span></span>
         <span className="agent-timeline-status-line"><span title={agentTaskState(task) === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{currentStatus(task)}</span>{task.attention && <span className="agent-timeline-attention">注意: {agentStateLabel(task.attention)}</span>}</span>
         {decision && <span className={`agent-timeline-age age-${freshness}`}>{freshness === "old" ? "古い · 24時間以上" : freshness === "recent" ? "直近 · 24時間未満" : "報告時刻未取得"}</span>}
         <span className="agent-timeline-summary">{task.summary || "報告内容なし"}</span>
@@ -174,10 +178,13 @@ function CurrentRow({ project, task, oldDecision = false, acknowledged, onAcknow
         <TimeValue value={task.occurred_at} />
       </ProjectBranch>
       <AgentDecisionDetails key={JSON.stringify(identity)} decision={task.decision} replyBranch={branch} />
+      {location !== null && <p className="agent-timeline-report-path">
+        報告時のパス <code>{worktree}</code>{location.note !== null && <span role="status">{location.note}</span>}
+      </p>}
       {decision && <div className="agent-timeline-card-actions">
         {reportProjectId && branch && <button type="button" className="agent-timeline-pause" onClick={() => onBranchHistory({ projectId: reportProjectId, branch })}>このブランチの履歴</button>}
         {canAcknowledge && <button id={reportKey === null ? undefined : `agent-ack-${encodeURIComponent(reportKey)}`} type="button" className="agent-timeline-pause" onClick={() => onAcknowledge(task, !acknowledged)}>{acknowledged ? "未確認に戻す" : "確認済みにする"}</button>}
-        {command !== null && <CopyButton value={command} label="worktreeへ移動するコマンドをコピー" />}
+        {location?.command != null && <CopyButton value={location.command} label="worktreeへ移動するコマンドをコピー" />}
       </div>}
     </li>
   );
@@ -212,11 +219,11 @@ function HistoryRow({ event, project, decisionChanges }: {
   project: TimelineProject | null;
   decisionChanges: TimelineDecisionChange[] | undefined;
 }) {
-  const projectId = event.project_id;
+  const name = projectLabel(project, event.project_id);
   return (
     <li className={`agent-timeline-history-row ${event.kind === "lifecycle" ? "is-lifecycle" : "is-status"} status-${statusClass(event.status)}`}>
-      <ProjectBranch project={project} projectId={projectId} branch={event.branch}>
-        <span className="agent-timeline-row-head"><strong>{projectLabel(project, projectId)}</strong><span>{branchLabel(event.branch)}</span></span>
+      <ProjectBranch project={project} name={name} branch={event.branch}>
+        <span className="agent-timeline-row-head"><strong>{name}</strong><span>{branchLabel(event.branch)}</span></span>
         <span className="agent-timeline-status-line"><span title={event.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{historicalStatus(event)}</span></span>
         <span className="agent-timeline-summary">{historicalSummary(event)}</span>
         <TimeValue value={event.occurred_at} />
@@ -297,7 +304,7 @@ export default function AgentTimelineSidebar({
   loading = false,
   error = null,
 }: AgentTimelineProps) {
-  const { subscribeAgentEvents, loadOlderEvents, historyHasMore, historyLoading, historyError } = useRepoStream();
+  const { repos, reposLoading, subscribeAgentEvents, loadOlderEvents, historyHasMore, historyLoading, historyError } = useRepoStream();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -334,9 +341,7 @@ export default function AgentTimelineSidebar({
   const routePath = useSearchParams().get("path");
   const isProjectPage = pathname === "/project";
   const scoped = isProjectPage && onlyCurrentProject;
-  const routeProject = isProjectPage && routePath !== null
-    ? projectSummaries.find((project) => project.main_path === routePath) : undefined;
-  const scopedProjectId = routeProject === undefined ? null : routeProject.id;
+  const scopedProjectId = isProjectPage ? timelineProjectId(routePath, repos) : null;
   useEffect(() => {
     const readAcknowledgements = () => {
       try {
@@ -397,6 +402,21 @@ export default function AgentTimelineSidebar({
   const projects = displaySnapshot.projects;
   const events = displaySnapshot.events;
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const { projectLabels, labelProject } = useMemo(() => {
+    const names = new Map(projects.map((project) => [project.id, projectLabel(project, project.id)]));
+    if (scopedProjectId !== null && !names.has(scopedProjectId)) {
+      names.set(scopedProjectId, projectLabel(null, scopedProjectId));
+    }
+    for (const event of events) {
+      const id = event.project_id;
+      if (typeof id === "string" && id.length > 0 && !names.has(id)) names.set(id, projectLabel(null, id));
+    }
+    const label = createTimelineProjectLabel(names);
+    return {
+      projectLabels: new Map([...names].map(([id, name]) => [id, label(id, name)])),
+      labelProject: (project: TimelineProject) => label(project.id, projectLabel(project, project.id)),
+    };
+  }, [events, projects, scopedProjectId]);
 
   const currentRows = useMemo(
     () => sortCurrentRows(currentAgentTasks(projects) as CurrentRow[], false),
@@ -430,16 +450,16 @@ export default function AgentTimelineSidebar({
     window.requestAnimationFrame(() => { document.getElementById("agent-timeline-history-title")?.focus(); });
   };
   const renderCurrentRows = (rows: CurrentRow[], oldDecision = false) => (
-    <ul className="agent-timeline-list agent-timeline-current-list">{rows.map(({ project, task }) => <CurrentRow key={agentReportKey(task)} project={project} task={task} oldDecision={oldDecision} acknowledged={isAcknowledged(task, acknowledgements)} onAcknowledge={acknowledge} onBranchHistory={openBranchHistory} now={now} />)}</ul>
+    <ul className="agent-timeline-list agent-timeline-current-list">{rows.map(({ project, task }) => <CurrentRow key={agentReportKey(task)} project={project} name={labelProject(project)} task={task} repos={reposLoading ? null : repos} oldDecision={oldDecision} acknowledged={isAcknowledged(task, acknowledgements)} onAcknowledge={acknowledge} onBranchHistory={openBranchHistory} now={now} />)}</ul>
   );
   const decisionCount = AGENT_DECISION_STATUSES.reduce((sum, status) => sum + currentGroups.decisionCounts[status], 0);
   const { recent, old, unknown } = currentGroups.decision as Record<"recent" | "old" | "unknown", CurrentRow[]>;
   const recentDecisions = oldestDecisionFirst ? sortCurrentRows(recent, true) : recent;
   const oldDecisions = oldestDecisionFirst ? sortCurrentRows(old, true) : old;
-  const decisionCopyText = [...recentDecisions, ...oldDecisions, ...unknown].map(({ project, task }) => [
-    `${projectLabel(project, project.id)} / ${branchLabel(task.branch)} · ${currentStatus(task)} · ${exactTime(task.occurred_at)}`,
-    task.decision?.question ?? "質問なし",
-  ].join("\n")).join("\n\n");
+  const decisionCopyText = [...recentDecisions, ...oldDecisions, ...unknown].map(({ project, task }) => timelineDecisionCopy(
+    `${labelProject(project)} / ${branchLabel(task.branch)} · ${currentStatus(task)} · ${exactTime(task.occurred_at)}`,
+    task,
+  )).join("\n\n");
   const historyDetails = useMemo(
     () => timelineHistoryDetails(events, filterOptions, projectById),
     [events, filterOptions, projectById],
@@ -448,17 +468,9 @@ export default function AgentTimelineSidebar({
   const decisionChanges = useMemo(() => timelineDecisionChanges(events), [events]);
   const currentLoading = displaySnapshot.loading && projects.length === 0;
 
-  const projectOptions = useMemo(() => {
-    const labels = new Map<string, string>();
-    for (const project of projects) labels.set(project.id, project.name || project.id);
-    if (routeProject !== undefined) labels.set(routeProject.id, routeProject.name);
-    for (const event of events) {
-      if (typeof event.project_id === "string" && event.project_id.length > 0 && !labels.has(event.project_id)) {
-        labels.set(event.project_id, projectLabel(null, event.project_id));
-      }
-    }
-    return [...labels.entries()].sort((left, right) => left[1].localeCompare(right[1]) || left[0].localeCompare(right[0]));
-  }, [events, projects, routeProject]);
+  const projectOptions = useMemo(() =>
+    [...projectLabels.entries()].sort((left, right) => left[1].localeCompare(right[1]) || left[0].localeCompare(right[0])),
+  [projectLabels]);
 
   const hasFilters = Boolean(scoped || query.trim() || projectFilter || historyBranch || statusFilter !== TIMELINE_STATUS_ALL || kindFilter !== TIMELINE_KIND_ALL || startDate || endDate || historySort !== TIMELINE_SORT_NEWEST);
   const filteredSummary = `取得済み ${events.length}件の履歴を対象 · 現在 ${filteredCurrentRows.length}件 / 履歴 ${history.length}件を表示`;
@@ -497,7 +509,7 @@ export default function AgentTimelineSidebar({
         </div>
       </div>
       <DesktopNotifications />
-      {isProjectPage && <div className="agent-timeline-scope"><button type="button" className="agent-timeline-pause" aria-pressed={onlyCurrentProject} onClick={toggleProjectScope}>このプロジェクトのみ</button>{scoped && <span>{routeProject === undefined ? "現在のプロジェクト情報は未取得です" : routeProject.name}</span>}</div>}
+      {isProjectPage && <div className="agent-timeline-scope"><button type="button" className="agent-timeline-pause" aria-pressed={onlyCurrentProject} onClick={toggleProjectScope}>このプロジェクトのみ</button>{scoped && <span>{scopedProjectId === null ? "現在のプロジェクト情報は未取得です" : projectLabels.get(scopedProjectId)}</span>}</div>}
       {scopeStorageIssue && <p role="status" className="agent-timeline-caption">プロジェクト絞り込みの設定を保存・復元できません。この画面でのみ適用します。</p>}
       {acknowledgementsIssue && <p role="status" className="agent-timeline-caption">確認済みの設定を保存・復元できません。この画面でのみ適用します。</p>}
       {isPaused && <p className="agent-timeline-paused" role="status" aria-live="polite"><span aria-hidden="true">Ⅱ</span> 表示を固定中。固定後に届いた判断待ち {newDecisionCount}件（全プロジェクト）。新しい報告は表示していません。</p>}

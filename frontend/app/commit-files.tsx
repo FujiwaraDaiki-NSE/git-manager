@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { Fragment, useId, useMemo, useState, type ReactNode } from "react";
 import { validCommitColumns } from "./ui-preference-tools.mjs";
 import { usePreference } from "./ui-preferences";
 import ScrollShadow from "./scroll-shadow";
@@ -40,6 +40,7 @@ type CommitFileOrder = "asc" | "desc";
 type CommitFilesProps = {
   files: Numstat[];
   downloadName: string;
+  renderFileSource?: (file: Numstat) => ReactNode;
 };
 
 const filters: { id: CommitFileFilter; label: string }[] = [
@@ -109,7 +110,7 @@ function FileVolume({ file }: { file: Numstat }) {
     : <span>+{volume}</span>;
 }
 
-export default function CommitFiles({ files, downloadName }: CommitFilesProps) {
+export default function CommitFiles({ files, downloadName, renderFileSource }: CommitFilesProps) {
   const [columns, setColumns] = usePreference("gitdash.commit-file-columns", [true, true, true], validColumns);
   const titleId = `commit-files-title-${useId().replaceAll(":", "")}`;
   const [query, setQuery] = useState("");
@@ -126,6 +127,7 @@ export default function CommitFiles({ files, downloadName }: CommitFilesProps) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sourceFile, setSourceFile] = useState<string | null>(null);
   const invalidMinimum = minimum !== "" && (!/^\d+$/.test(minimum) || !Number.isSafeInteger(Number(minimum)));
   const searchedFiles = useMemo(
     () => narrowCommitFiles(files, { query, excluded, scope, minimum, change }) as Numstat[],
@@ -152,6 +154,9 @@ export default function CommitFiles({ files, downloadName }: CommitFilesProps) {
   const currentPage = Math.min(page, pageCount);
   const start = (currentPage - 1) * pageSize;
   const pageFiles = visibleFiles.slice(start, start + pageSize);
+  if (sourceFile !== null && !pageFiles.some((file) => commitFileIdentity(file) === sourceFile)) {
+    setSourceFile(null);
+  }
   const hasFilters = query !== "" || excluded !== "" || scope !== "both" || minimum !== "" || change !== "all"
     || filter !== "all" || directory !== COMMIT_FILE_DIRECTORY_ALL || extension !== COMMIT_FILE_EXTENSION_ALL;
 
@@ -330,15 +335,23 @@ export default function CommitFiles({ files, downloadName }: CommitFilesProps) {
             <caption className="sr-only">コミットで変更されたファイル</caption>
             <thead><tr><th scope="col">選択</th>{columns[0] && <th scope="col">追加</th>}{columns[1] && <th scope="col">削除</th>}{columns[2] && <th scope="col">変更量</th>}<th scope="col">パス</th></tr></thead>
             <tbody>
-              {pageFiles.map((file, index) => (
-                <tr key={`${file.old_path ?? ""}:${file.path}:${index}`}>
-                  <td><input type="checkbox" aria-label={`${file.path} を選択`} checked={selected.has(commitFileIdentity(file))} onChange={() => toggleFile(file)} /></td>
-                  {columns[0] && <td className="additions" aria-label={lineLabel(file, "additions")}>{displayCommitFileCount(file, "additions") === "不明" ? <span className="commit-files-unknown">不明</span> : `+${displayCommitFileCount(file, "additions")}`}</td>}
-                  {columns[1] && <td className="deletions" aria-label={lineLabel(file, "deletions")}>{displayCommitFileCount(file, "deletions") === "不明" ? <span className="commit-files-unknown">不明</span> : `−${displayCommitFileCount(file, "deletions")}`}</td>}
-                  {columns[2] && <td className="commit-files-volume"><FileVolume file={file} /></td>}
-                  <td><FilePath file={file} /></td>
-                </tr>
-              ))}
+              {pageFiles.map((file) => {
+                const identity = commitFileIdentity(file);
+                const sourceOpen = sourceFile === identity;
+                return <Fragment key={identity}>
+                  <tr>
+                    <td><input type="checkbox" aria-label={`${file.path} を選択`} checked={selected.has(identity)} onChange={() => toggleFile(file)} /></td>
+                    {columns[0] && <td className="additions" aria-label={lineLabel(file, "additions")}>{displayCommitFileCount(file, "additions") === "不明" ? <span className="commit-files-unknown">不明</span> : `+${displayCommitFileCount(file, "additions")}`}</td>}
+                    {columns[1] && <td className="deletions" aria-label={lineLabel(file, "deletions")}>{displayCommitFileCount(file, "deletions") === "不明" ? <span className="commit-files-unknown">不明</span> : `−${displayCommitFileCount(file, "deletions")}`}</td>}
+                    {columns[2] && <td className="commit-files-volume"><FileVolume file={file} /></td>}
+                    <td>
+                      <FilePath file={file} />
+                      {renderFileSource && <button className="subtle-button commit-files-source-button" type="button" aria-expanded={sourceOpen} aria-label={`${file.path} の両版の原文`} onClick={() => setSourceFile(sourceOpen ? null : identity)}>両版の原文</button>}
+                    </td>
+                  </tr>
+                  {renderFileSource && sourceOpen && <tr><td className="commit-files-source-cell" colSpan={2 + columns.filter(Boolean).length}>{renderFileSource(file)}</td></tr>}
+                </Fragment>;
+              })}
             </tbody>
           </table>
         </ScrollShadow>

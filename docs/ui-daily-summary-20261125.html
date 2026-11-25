@@ -1,0 +1,55 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-25</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>差分・blame・stash・タグの読み解きを追加、壊れたworktreeと実行先の誤案内を修正 — 2026-11-25</h1>
+<p>「再起動直後のfetch殺到」は 2026-11-21 に解消済みのため、通常の改善を行いました。開始時30点 + 検証済み加点76点 = <b>100点</b>（上限到達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+
+<h2>機能追加（+5 × 11）</h2>
+<table><thead><tr><th>内容</th><th>実画面での確認</th></tr></thead><tbody>
+<tr><td>ホームの絞り込みに「Git状態の取得失敗」</td><td>111件中4プロジェクトに絞られる</td></tr>
+<tr><td>オープンPRを取り込み先で絞り込み、「Draftを除く」と併用</td><td>thinkplatform 89 → develop宛て78 → Draft除外46</td></tr>
+<tr><td>マージ済みPRから「取り込みコミットを開く」</td><td>design_db PR #137 → コミット詳細、第1親との差分へ</td></tr>
+<tr><td>差分の「ハンク目次」でファイル内の変更箇所へ移動</td><td>worktree-explorer.tsx 9ハンク、第9 → 第8へ移動</td></tr>
+<tr><td>大きな比較でも選んだファイルの「両版の原文」を開く</td><td>267ファイル比較で test_github.py の変更前後、追加ファイルは「この版にファイルはありません」</td></tr>
+<tr><td>blameの行から「当時の原文」を読む</td><td>repo-detail.tsx 300行目 → bb4e6675fa の236行目を強調</td></tr>
+<tr><td>Gitに保存されたsymlinkから同じ版の参照先を開く</td><td>design_db@68b02e6b26 の .agents/skills/control-valve-design → skills/control-valve-design/SKILL.md</td></tr>
+<tr><td>stashと適用先worktreeの「同じパスの未コミット変更」を照合</td><td>86490a129f × feat/personal-bot-p37-routines で3パス</td></tr>
+<tr><td>同じHEADから作った2つのstashを比較</td><td>3121731bb2 → d440109a98 で1ファイル +46 / −0、未追跡は各1パス</td></tr>
+<tr><td>グラフで「HEADの第1親履歴」を強調</td><td>git-manager で97件（取得範囲の端）</td></tr>
+<tr><td>タグ一覧で2つのタグを選んで版間の変更を読む</td><td>thinkplatform-lib v0.6.130 → v0.6.131 で15ファイル</td></tr>
+</tbody></table>
+
+<h2>UIリッチ化（+2 × 4）</h2>
+<ul>
+<li>agentタイムラインの同名プロジェクトに親パスを併記（選択欄・判断カード・コピー結果）。</li>
+<li>コミット検索の作者日時とコミッター日時を同じタイムゾーン・書式で表示。</li>
+<li>同名のPR履歴行にPR番号と作成元を表示（langchain の bot/refresh-model-profiles）。</li>
+<li>ホーム「Git操作の途中」で同名プロジェクトのパスを併記（git-manager が2つある）。</li>
+</ul>
+
+<h2>バグ修正（+1 × 11）</h2>
+<ul>
+<li>「チェックアウト中」絞り込みが通常ブランチとdetachedで食い違っていた（台帳のパス一致で判定、prunableは除外）。</li>
+<li><code>.git</code> の参照先が消えたworktreeを「利用可能」と表示していた（thinkplatformで19件 → 「Git管理ディレクトリなし」）。</li>
+<li>初回コミット前の全ゼロSHAを実在HEADとして表示・集計していた。</li>
+<li>ホームの「次に確認」がdetached HEADのレーンを開けなかった（<code>next_lane_id</code> を追加）。</li>
+<li>linked worktreeのURLで開くとタイムラインの「このプロジェクトのみ」が効かなかった。</li>
+<li>判断待ちのコピーが報告要約を捨てて「質問なし」としていた。</li>
+<li>消えたworktreeの報告カードに <code>cd</code> のコピーを出していた（「現在の台帳にない」と表示）。</li>
+<li>開始日つきコミット検索が、コミッター日時の逆転した履歴で取りこぼしていた（<code>--since-as-filter</code>）。</li>
+<li>初回コミット前のリポジトリで復旧候補が502になっていた。</li>
+<li>フローと操作途中パネルのコマンドが実行先を固定していなかった（<code>git -C &lt;path&gt;</code> と実行先を表示）。</li>
+<li>大きなリポジトリを「全期間」で開くと画面全体が落ちていた（約26万件の日時を <code>Math.min</code> に展開。既存の不具合）。</li>
+</ul>
+<p>検証はAPIまで（加点なし）：戻り先のないdetached HEADに <code>git switch -</code> を案内しない修正（thinkplatformの3件が <code>git branch --contains HEAD</code> に変わったことをAPIで確認）。</p>
+
+<h2>文言修正（+1 × 2）</h2>
+<ul>
+<li>「既定との差が最大」→「チェックアウト中で既定との差が最大（ahead + behind）」。</li>
+<li>「追跡先削除済み」→「追跡参照がローカルにない」（観測できた事実に合わせる）。</li>
+</ul>
+
+<h2>不採用：ホーム <code>/api/projects</code> の高速化（加点なし）</h2>
+<p>ブランチ数・既定ブランチ・最大差を状態更新時に保持し、GETからGit起動（1回あたり約290回）を外す案は、プロセス内で中央値 267ms → 59ms でした。しかし本番に入れると、ブランチ追加の反映に約18秒、直後の削除は60秒以上たっても古い件数のままでした。原因は、集計の再計算がプロジェクト全worktreeの状態更新の完了を待つことです。数秒以内の収束を小さな変更で保証できなかったため取り下げ、GETごとに数える従来の方式（HTTP 0.30〜0.32秒、追加・削除は即時反映）に戻しています。</p>
+
+<h2>確認</h2>
+<p>backend 480件、frontend 516件、型チェックが通過。Codexレビュー9件のうち6件を採用して修正（3件は範囲外・実測のない懸念として不採用）。再ビルド後の <code>http://localhost:4412</code> で上記を実データで確認しました。</p>
+</html>

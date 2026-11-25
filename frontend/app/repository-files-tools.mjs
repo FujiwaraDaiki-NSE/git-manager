@@ -23,6 +23,46 @@ export function repositoryFileQuery(path, revision, file) {
   return new URLSearchParams({ path, revision, file }).toString();
 }
 
+/**
+ * Show complete Git lines around the requested line, even from a bounded prefix.
+ * @param {string} text
+ * @param {boolean} truncated
+ * @param {number} line
+ */
+export function repositoryFileLineContext(text, truncated, line) {
+  const lines = text.split("\n");
+  if (truncated || lines.at(-1) === "") lines.pop();
+  if (line < 1 || line > lines.length) return null;
+  const surroundingLines = 5;
+  const start = Math.max(0, line - 1 - surroundingLines);
+  return lines.slice(start, line + surroundingLines).map((content, index) => ({
+    number: start + index + 1,
+    content,
+  }));
+}
+
+/** Look up one relative symlink target in the retrieved Git tree. */
+export function findRepositorySymlinkTarget(entries, linkPath, linkText) {
+  if (!linkText || /^(?:[a-z]:)?[\\/]/iu.test(linkText)) return null;
+
+  const parts = linkPath.split("/").slice(0, -1);
+  for (const part of linkText.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      const directory = parts.join("/");
+      if (!entries.some((entry) => entry.path === directory && entry.type === "tree")) return null;
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+  const path = parts.join("/");
+  const target = entries.find((entry) => entry.path === path);
+  const requiresDirectory = linkText.endsWith("/") || linkText.endsWith("/.");
+  if (!target || (requiresDirectory && target.type !== "tree")) return null;
+  return target;
+}
+
 function normalizedDirectory(directory) {
   requiredString(directory, "directory");
   if (directory === "" || directory === ".") return "";

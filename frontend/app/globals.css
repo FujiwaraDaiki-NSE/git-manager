@@ -1855,6 +1855,8 @@ body {
   text-decoration: underline;
 }
 
+.home-git-operation-path { overflow-wrap: anywhere; }
+
 .project-card-facts {
   border-bottom: 1px solid var(--control-border);
   border-top: 1px solid var(--control-border);
@@ -4456,8 +4458,11 @@ html[data-theme="dark"] {
 .flow-row.is-compact .flow-lane-title { min-width: 0; flex: 1; }
 .flow-row.is-compact .flow-lane-meta { margin: 0; height: auto; }
 .flow-row.is-compact .lane-state { font-size: 9px; }
+.flow-lane-title .flow-lane-button > span,
+.flow-lane-title .flow-lane-button > small { display: block; overflow: hidden; text-overflow: ellipsis; line-height: 12px; }
+.flow-lane-title .flow-lane-button > small { color: var(--control-muted); font-size: 10px; }
 .flow-state-help { position: relative; }
-.flow-state-explanation { display: none; position: absolute; left: 0; top: 100%; width: 260px; white-space: normal; background: var(--control-panel); color: var(--control-ink); padding: 10px; border: 1px solid var(--control-border); box-shadow: 0 4px 12px #0002; z-index: 30; }
+.flow-state-explanation { display: none; position: absolute; left: 0; top: 100%; width: 260px; white-space: normal; overflow-wrap: anywhere; background: var(--control-panel); color: var(--control-ink); padding: 10px; border: 1px solid var(--control-border); box-shadow: 0 4px 12px #0002; z-index: 30; }
 .flow-state-explanation > span, .flow-state-explanation code, .flow-state-explanation small { display: block; }
 .flow-state-help:hover .flow-state-explanation, .flow-state-help:focus-within .flow-state-explanation { display: block; }
 .flow-agent-report { position: relative; z-index: 2; display: inline-block; margin: 2px 4px; padding: 1px 5px; border: 1px solid var(--control-blue); border-radius: 4px; background: var(--control-panel); color: var(--control-blue); font-size: 10px; }
@@ -4473,6 +4478,7 @@ html[data-theme="dark"] {
 .flow-lane-meta, .flow-lane-meta > .flow-state-help:last-child { overflow: visible; }
 .flow-row:focus-visible, .flow-state-help:focus-visible { outline: 2px solid var(--control-blue); outline-offset: -2px; }
 .flow-selected-command { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0; font-size: 12px; }
+.flow-selected-command > code, .flow-selected-command > small { overflow-wrap: anywhere; }
 
 .branch-relations-pagination { align-items: center; color: var(--control-muted); display: flex; flex-wrap: wrap; font: 10px var(--control-mono); gap: 8px 12px; padding-top: 6px; }
 

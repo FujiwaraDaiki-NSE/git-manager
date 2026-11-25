@@ -341,6 +341,21 @@
 
 .tag-explorer-navigation .tag-explorer-export { margin: 0; }
 
+.tag-explorer-comparison {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tag-explorer-comparison-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-explorer-comparison-controls button { margin: 0; }
+
 .tag-explorer-navigation button:disabled,
 .tag-explorer-filter-actions button:disabled {
   cursor: not-allowed;

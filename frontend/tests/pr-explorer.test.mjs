@@ -11,7 +11,7 @@ import * as prTools from "../app/pr-tools.mjs";
 
 const source = readFileSync(new URL("../app/pr-explorer.tsx", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, {
-  compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS },
+  compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 });
 const exports = {};
 const require = createRequire(import.meta.url);
@@ -21,7 +21,9 @@ runInNewContext(compiled.outputText, {
     if (id === "./pr-tools.mjs") return prTools;
     if (id === "./project-flow.mjs") return projectFlow;
     if (id === "next/navigation") return { useSearchParams: () => new URLSearchParams("path=%2Frepo&tab=info&event=old") };
-    if (id === "./scroll-shadow" || id === "./copy-button") return {};
+    if (id === "./repo-detail") return {};
+    if (id === "./scroll-shadow") return ({ children }) => children;
+    if (id === "./copy-button") return () => null;
     return require(id);
   },
 });
@@ -62,6 +64,8 @@ test("オープンPRの取得結果から件数と照会時刻を表示する", 
   assert.match(attention, /href="\/project\?path=%2Frepo&amp;tab=lanes&amp;lane=local%3Aready"><code>ready<\/code>/);
   assert.deepEqual(prNumbers(all), ["PR #1", "PR #2", "PR #3", "PR #4"]);
   assert.match(all, /すべてのオープンPR（4件）.*オープンPRを検索.*4 \/ 4 件表示/);
+  assert.match(all, /取り込み先.*<option value="main">main<\/option>.*type="checkbox".*Draftを除く/);
+  assert.equal(all.match(/<option value="main">/g).length, 1);
   assert.match(all, /確認済み.*<code>example\/first-fork:ready<\/code> → <code>main<\/code>.*<dt>レビュー<\/dt><dd>レビュー承認<\/dd>.*<dt>CI<\/dt><dd>CI 成功<\/dd>/);
   assert.match(all, /下書き.*作成元リポジトリ未取得 · <code>ready<\/code>/);
   assert.match(all, /レビュー待ち.*下書き<\/strong> <span>Draft<\/span>.*<dt>CI<\/dt><dd>CI なし<\/dd>/);
@@ -81,7 +85,7 @@ test("オープンPRを番号・題名・作成元で絞り込み、検索を空
     { number: 34, title: "設定を追加", headRepository: "bob/tool", headRefName: "shared" },
     { number: 56, title: "README", headRepository: null, headRefName: "docs" },
   ];
-  const find = (query) => prTools.filterOpenPullRequests(pulls, query).map(({ number }) => number);
+  const find = (query) => prTools.filterOpenPullRequests(pulls, { query, target: "", excludeDraft: false }).map(({ number }) => number);
   assert.deepEqual(find("12"), [12]);
   assert.deepEqual(find("#34"), [34]);
   assert.deepEqual(find(" FIX "), [12]);
@@ -91,6 +95,42 @@ test("オープンPRを番号・題名・作成元で絞り込み、検索を空
   assert.deepEqual(find("docs"), [56]);
   assert.deepEqual(find("absent"), []);
   assert.deepEqual(find(""), [12, 34, 56]);
+});
+
+test("オープンPRの取り込み先は完全一致で判定し、Draft除外と文字検索を併用する", () => {
+  const ready = { number: 1, title: "Fix timeout", headRepository: "alice/tool", headRefName: "fix", baseRefName: "develop", isDraft: false };
+  const pulls = [
+    ready,
+    { ...ready, number: 2, isDraft: true },
+    { ...ready, number: 3, baseRefName: "develop-next" },
+    { ...ready, number: 4, baseRefName: "Develop" },
+    { ...ready, number: 5, title: "README", headRefName: "docs" },
+  ];
+  const find = (options) => prTools.filterOpenPullRequests(pulls, options).map(({ number }) => number);
+  assert.deepEqual(find({ query: "", target: "develop", excludeDraft: false }), [1, 2, 5]);
+  assert.deepEqual(find({ query: "", target: "", excludeDraft: true }), [1, 3, 4, 5]);
+  assert.deepEqual(find({ query: "timeout", target: "develop", excludeDraft: true }), [1]);
+  assert.deepEqual(find({ query: "#2", target: "develop", excludeDraft: true }), []);
+});
+
+test("マージ済みPRのカードと表から取り込みSHAを渡す", () => {
+  const hash = "12ca410b22791d4e91d505d9e3e85e5caa9be190";
+  const record = { number: 137, url: "https://github.com/example/repo/pull/137", source: "feature", target: "main", commit_hash: hash, merged_at: null };
+  const opened = [];
+  const onOpenCommit = (value) => opened.push(value);
+  const renderCard = (entry) => exports.PullRequestCard({ record: entry, onOpenCommit });
+  const renderTable = (entry) => exports.PullRequestTable({ records: [entry], onOpenCommit });
+  function findAction(element) {
+    if (Array.isArray(element)) return element.map(findAction).find(Boolean);
+    if (element?.type === "button" && element.props.children === "取り込みコミットを開く") return element;
+    if (typeof element?.type === "function") return findAction(element.type(element.props));
+    return element?.props ? findAction(element.props.children) : undefined;
+  }
+  for (const render of [renderCard, renderTable]) {
+    findAction(render(record)).props.onClick();
+    assert.equal(findAction(render({ ...record, commit_hash: null })), undefined);
+  }
+  assert.deepEqual(opened, [hash, hash]);
 });
 
 test("上限に達したPR履歴は照会件数を表示し、空の結果も照会範囲に限定する", () => {

@@ -8,7 +8,7 @@ import { agentDecisionReportTimes, agentStateLabel, agentTaskState } from "../ap
 import { laneUpstreamState } from "../app/lane-explorer-tools.mjs";
 import { openPullRequestLabels, validHttpUrl } from "../app/pr-tools.mjs";
 import { parseProjectUrl, updateProjectUrl } from "../app/project-flow.mjs";
-import { upstreamLabel } from "../app/upstream-label.mjs";
+import { missingLocalTrackingRefLabel, upstreamLabel } from "../app/upstream-label.mjs";
 
 const source = readFileSync(new URL("../app/project-control.tsx", import.meta.url), "utf8");
 const agentHelpers = source.slice(source.indexOf("function currentLaneAgent("), source.indexOf("function agentElapsed("));
@@ -17,7 +17,7 @@ const compiled = ts.transpileModule(`${agentHelpers}\nexport ${detailSource}`, {
   compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS },
 });
 const dependencies = {
-  agentDecisionReportTimes, agentStateLabel, agentTaskState, laneUpstreamState, openPullRequestLabels, updateProjectUrl, upstreamLabel, validHttpUrl,
+  agentDecisionReportTimes, agentStateLabel, agentTaskState, laneUpstreamState, missingLocalTrackingRefLabel, openPullRequestLabels, updateProjectUrl, upstreamLabel, validHttpUrl,
   useSearchParams: () => new URLSearchParams("path=/repo&flowSection=history&range=all&lane=topic"),
   Link: "a",
   laneRecordedMerges: () => ({ incoming: [], outgoing: [] }),
@@ -51,6 +51,12 @@ test("lane comparison uses fixed tips and offers merge-base only when the upstre
   assert.match(render(), /&quot;supportsMergeBase&quot;:true/);
   assert.match(render({ upstream_behind: 0 }), /&quot;supportsMergeBase&quot;:false/);
   assert.match(render({ upstream_ahead: null }), /&quot;supportsMergeBase&quot;:false/);
+});
+
+test("lane detail describes a missing tracking ref as a local observation", () => {
+  const html = render({ destinations: { ...lane.destinations, upstream_head: null, upstream_gone: true } });
+  assert.match(html, /<small>追跡参照がローカルにない<\/small>/);
+  assert.doesNotMatch(html, /削除/);
 });
 
 test("the lane relation link selects relations and preserves the exact local ref", () => {

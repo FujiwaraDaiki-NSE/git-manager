@@ -38,6 +38,7 @@ function home(search = "") {
       };
       if (name.endsWith(".mjs") || name === "react/jsx-runtime") return require(name);
       if (name === "next/link") return { default: ({ prefetch, ...props }) => require("react").createElement("a", props) };
+      if (name === "./agent-decision") return { AgentDecisionDetails: () => null };
       if (name === "./git-state-facts") return { FetchFacts: () => null };
       return { default: () => null };
     },
@@ -57,6 +58,53 @@ const project = (id, failures) => ({
   id, name: id.slice(1), main_path: id, lane_count: 3, remote: null, remote_status: "unset",
   git: { conflict: 0, dirty: 1, ahead: 0, behind: 0, merged: 0 },
   git_status_available: true, git_status_failed: failures,
+  next_lane: null, next_lane_id: null,
+});
+
+test("Git next-check links use lane IDs and omit selection when the ID is null", () => {
+  const render = home("?q=alpha");
+  for (const [label, id, display] of [
+    ["main", "branch:main", "main"],
+    ["(detached)", "worktree:/worktrees/alpha detached", "HEAD切り離し（ブランチなし）"],
+    ["main", null, "main"],
+  ]) {
+    const html = render({
+      projectSummaries: [{ ...project("/alpha", 0), next_lane: label, next_lane_id: id }],
+      projectsLoading: false, projectsError: null,
+    });
+    const [, href, linkLabel] = html.match(/次に確認 <a href="([^"]+)"><strong>([^<]+)<\/strong>/);
+    const url = new URL(href.replaceAll("&amp;", "&"), "http://localhost");
+    assert.equal(linkLabel, display);
+    assert.equal(url.pathname, "/project");
+    assert.deepEqual(Object.fromEntries(url.searchParams), {
+      path: "/alpha", tab: "lanes", range: "current", ...(id === null ? {} : { lane: id }), home: "q=alpha",
+    });
+  }
+});
+
+test("Home filters for Git status failures independently of fetch failures", () => {
+  const render = home("?git=git-status-failure");
+  const html = render({
+    projectSummaries: [
+      project("/alpha", 2),
+      { ...project("/beta", 1), git_status_available: false },
+      { ...project("/gamma", 0), fetch_status: { result: "failure" } },
+    ],
+    projectsLoading: false, projectsError: null,
+  });
+  assert.match(html, /aria-pressed="true">Git状態の取得失敗<span class="filter-count">2<\/span>/);
+  assert.match(html, /aria-pressed="false">fetch失敗<span class="filter-count">1<\/span>/);
+  assert.match(html, /<article[^>]*aria-label="alpha"/);
+  assert.match(html, /<article[^>]*aria-label="beta"/);
+  assert.doesNotMatch(html, /<article[^>]*aria-label="gamma"/);
+});
+
+test("Home describes the largest default-branch difference among checked-out branches", () => {
+  const html = home()({
+    projectSummaries: [{ ...project("/design_db", 0), largest_difference_lane: "feature" }],
+    projectsLoading: false, projectsError: null,
+  });
+  assert.match(html, /<dt>チェックアウト中で既定との差が最大（ahead \+ behind）<\/dt><dd>feature<\/dd>/);
 });
 
 test("Git status failure details follow common_dir and remove recovered paths", () => {
@@ -119,6 +167,16 @@ test("Home lists observed operations per worktree and links to the current lane"
     { label: "beta / main · merge", path: "/worktrees/beta", lane: "branch:main" },
     { label: "git-manager / detached HEAD · rebase", path: "/worktrees/alpha detached", lane: "worktree:/worktrees/alpha detached" },
   ]);
+  assert.doesNotMatch(section(repos), /home-git-operation-path/);
+  snapshot.projectSummaries = [
+    { ...project("/projects/git-manager", 0), name: "git-manager" },
+    { ...project("/other/git-manager", 0), name: "git-manager" },
+    { ...project("/projects/beta", 0), name: "beta" },
+  ];
+  const withDuplicates = section(repos);
+  assert.match(withDuplicates, /git-manager \/ main · cherry-pick、merge<\/a> · <code class="home-git-operation-path">\/projects\/git-manager<\/code>/);
+  assert.match(withDuplicates, /git-manager \/ detached HEAD · rebase<\/a> · <code class="home-git-operation-path">\/projects\/git-manager<\/code>/);
+  assert.match(withDuplicates, /beta \/ main · merge<\/a><\/li>/);
   const updated = new Map(repos);
   for (const [path, repo] of repos) {
     if (repo.operations?.length) updated.set(path, { ...repo, operations: [] });

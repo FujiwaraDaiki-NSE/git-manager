@@ -31,3 +31,9 @@ export function rowAgentReports(row, tasks) {
 export function isUnpushedCommit(row, hash) {
   return row.locals.some((lane) => lane.upstream !== null && lane.upstream === row.tracking_ref && lane.unpushed_commits !== null && lane.unpushed_commits.includes(hash));
 }
+export function historicalPullRequestLabel(row) {
+  if (!row.historical || row.pull_requests.length === 0) return null;
+  const numbers = row.pull_requests.map(({ number }) => `#${number}`).join(", ");
+  const repository = row.pull_requests[0].source_repository;
+  return `PR ${numbers} · 作成元 ${repository === null ? "不明" : repository}`;
+}

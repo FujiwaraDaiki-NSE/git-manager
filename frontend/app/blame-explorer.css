@@ -289,6 +289,11 @@
   overflow-wrap: anywhere;
 }
 
+.blame-row-actions {
+  display: grid;
+  gap: 4px;
+}
+
 .blame-empty {
   margin: 0;
   padding: 18px 12px;
@@ -322,6 +327,67 @@
 
 .blame-commit-meta strong {
   color: var(--control-ink);
+}
+
+.blame-original-source {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  overflow: auto;
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--control-panel);
+  color: var(--control-ink);
+}
+
+.blame-original-source::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+
+.blame-original-source-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.blame-original-source-heading h4 {
+  margin: 0;
+}
+
+.blame-original-source p {
+  overflow-wrap: anywhere;
+}
+
+.blame-original-source-lines {
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  padding: 4px 0;
+}
+
+.blame-original-source-line {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 12px;
+  padding: 2px 10px;
+}
+
+.blame-original-source-line[aria-current="true"] {
+  background: color-mix(in srgb, var(--control-blue) 18%, var(--control-panel));
+  box-shadow: inset 3px 0 var(--control-blue);
+}
+
+.blame-original-source-line > span {
+  min-width: 6ch;
+  color: var(--control-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.blame-original-source-line code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 @media (max-width: 760px) {

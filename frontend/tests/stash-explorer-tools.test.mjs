@@ -7,11 +7,13 @@ import {
   searchStashes,
   sortStashes,
   stashCommand,
+  stashComparison,
   stashDateRangeError,
   stashHashList,
   stashInventoryCsv,
   stashInvestigationMarkdown,
   stashPartLabel,
+  stashWorktreeOverlap,
 } from "../app/stash-explorer-tools.mjs";
 
 const stashes = [
@@ -120,5 +122,59 @@ test("stash investigation Markdown carries exact handoff facts and escapes displ
   assert.match(markdown, /## untracked[\s\S]*available: false[\s\S]*file_count: 0[\s\S]*patch_truncated: false/);
   assert.equal(markdown.includes("<unsafe>"), false);
   assert.throws(() => stashInvestigationMarkdown(detail, ""), /path/);
+});
+
+test("stash overlap returns exact paths and current statuses from both saved parts", () => {
+  const stash = {
+    tracked: { files: [{ path: "a.txt" }, { path: "old.txt" }, { path: "ignored-copy-source.txt" }] },
+    untracked: { files: [{ path: "new.txt" }, { path: "dir/saved.txt" }] },
+  };
+  const worktree = {
+    entries: [
+      { path: "a.txt", original_path: null, xy: ".M" },
+      { path: "renamed.txt", original_path: "old.txt", xy: "R." },
+      { path: "old.txt", original_path: null, xy: "??" },
+      { path: "copy.txt", original_path: "ignored-copy-source.txt", xy: "C." },
+      { path: "new.txt", original_path: null, xy: "??" },
+      { path: "dir/", original_path: null, xy: "??" },
+      { path: "other/new.txt", original_path: null, xy: ".M" },
+    ],
+  };
+  assert.deepEqual(stashWorktreeOverlap(stash, worktree, false), {
+    matches: [
+      { path: "a.txt", statuses: [".M"] },
+      { path: "old.txt", statuses: ["R.", "??"] },
+      { path: "new.txt", statuses: ["??"] },
+    ],
+    hasUnexpandedPaths: true,
+  });
+});
+
+test("stash overlap distinguishes unavailable status from a known empty worktree", () => {
+  const stash = { tracked: { files: [{ path: "a.txt" }] }, untracked: { files: [] } };
+  assert.equal(stashWorktreeOverlap(stash, null, false), null);
+  assert.equal(stashWorktreeOverlap(stash, {}, false), null);
+  assert.equal(stashWorktreeOverlap(stash, { entries: [], pending: true }, false), null);
+  assert.equal(stashWorktreeOverlap(stash, { entries: [], error: "status failed" }, false), null);
+  const worktree = { entries: [], error: null };
+  assert.equal(stashWorktreeOverlap(stash, worktree, true), null);
+  assert.deepEqual(stashWorktreeOverlap(stash, worktree, false), { matches: [], hasUnexpandedPaths: false });
+});
+
+test("stash comparison requires the same HEAD and preserves full hashes in either direction", () => {
+  const head = "c".repeat(40);
+  const base = { ...stashes[0], head_parent: head };
+  const target = { ...stashes[1], head_parent: head };
+  assert.deepEqual(stashComparison(base, target), {
+    base: base.hash,
+    target: target.hash,
+    baseLabel: "aaaaaaaaaa → bbbbbbbbbb",
+    directLabel: "追跡済みの変更を比較",
+    supportsMergeBase: false,
+  });
+  assert.equal(stashComparison(target, base).base, target.hash);
+  assert.equal(stashComparison(target, base).target, base.hash);
+  assert.equal(stashComparison(base, { ...target, head_parent: "d".repeat(40) }), null);
+  assert.equal(stashComparison(base, base), null);
 });
 

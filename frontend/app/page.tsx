@@ -54,7 +54,7 @@ const summaryCards: Array<{ key: AgentSummaryKey; label: string }> = [
 
 type AgentFilter = "all" | "unknown" | AgentSummaryKey;
 type LaneGitFilter = "all" | "dirty" | "conflict" | "ahead" | "behind";
-type GitFilter = LaneGitFilter | "fetch-failure";
+type GitFilter = LaneGitFilter | "fetch-failure" | "git-status-failure";
 type ProjectSort = "priority" | "name" | "latest";
 type CardDensity = "comfortable" | "compact";
 type GitStatusFailure = { path: string; error: string };
@@ -84,6 +84,7 @@ const gitFilters: Array<{ key: Exclude<GitFilter, "all">; label: string }> = [
   { key: "ahead", label: "未push" },
   { key: "behind", label: "未pull" },
   { key: "fetch-failure", label: "fetch失敗" },
+  { key: "git-status-failure", label: "Git状態の取得失敗" },
 ];
 
 function relativeTime(iso: string | null | undefined) {
@@ -134,11 +135,11 @@ function ProjectCard({
 }) {
   const target = project.main_path;
   const href = target === null ? null : `/project?path=${encodeURIComponent(target)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`;
-  const workHref = (filter: LaneGitFilter, query: string | null = null) => {
+  const workHref = (filter: LaneGitFilter, lane: string | null) => {
     if (target === null) return null;
     const params = new URLSearchParams({ path: target, tab: "lanes", range: "current" });
     if (filter !== "all") params.set("laneFilter", filter);
-    if (query !== null) params.set("laneQuery", query);
+    if (typeof lane === "string") params.set("lane", lane);
     if (homeQuery) params.set("home", homeQuery);
     return `/project?${params}`;
   };
@@ -232,7 +233,7 @@ function ProjectCard({
           { key: "behind", label: "↓ 未pull", color: "warn", title: "追跡先からの未pullコミットがある作業ディレクトリ数（behind > 0）" },
         ] as const).map(({ key, label, color, title }) => {
           const count = project.git[key];
-          const targetHref = workHref(key);
+          const targetHref = workHref(key, null);
           return !project.git_status_available ? <span key={key} className="fact" title={title}>{label} <strong>未取得</strong></span> : count > 0 && targetHref ? <Link key={key} className={`fact fact-${color} fact-link`} prefetch={false} href={targetHref} title={`${title}。クリックして該当する作業を表示`} aria-label={`${project.name}の${label} ${count}件の作業を表示`}>{label} <strong>{count}</strong><span className="fact-arrow" aria-hidden="true">↗</span></Link> : <span key={key} className={count > 0 ? `fact fact-${color}` : "fact"} title={title}>{label} <strong>{count}</strong></span>;
         })}
       </div>
@@ -247,7 +248,7 @@ function ProjectCard({
         const task = nextAgentCheck(project, acknowledgements);
         const branch = task ? task.branch : project.next_lane;
         if (!branch) return null;
-        const nextHref = task ? homeBranchHref(target, branch, homeQuery) : workHref("all", branch);
+        const nextHref = task ? homeBranchHref(target, branch, homeQuery) : workHref("all", project.next_lane_id);
         const label = branch === "(detached)" ? "HEAD切り離し（ブランチなし）" : branch;
         return <div className="project-card-footer"><span>次に確認 {nextHref ? <Link href={nextHref} prefetch={false}><strong>{label}</strong><span aria-hidden="true"> →</span></Link> : <strong>{label}</strong>}{task && <span title={task.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined}> · {task.status === "waiting_for_user" ? "agentが入力待ち" : task.status === "blocked" ? "agentが問題を報告" : task.status === "review_required" ? "agentがレビュー待ち" : task.status === "merge_ready" ? "agentがマージ準備完了を報告" : null}</span>}</span><AgentDecisionDetails decision={task?.decision} compact /></div>;
       })()}
@@ -257,7 +258,7 @@ function ProjectCard({
         <FetchFacts fetchedAt={project.fetched_at} status={project.fetch_status} />
         <dl>
           <div><dt>作業パス</dt><dd><code>{project.main_path ?? "未取得"}</code></dd></div>
-          <div><dt>既定との差が最大</dt><dd>{project.largest_difference_lane ?? "未取得"}</dd></div>
+          <div><dt>チェックアウト中で既定との差が最大（ahead + behind）</dt><dd>{project.largest_difference_lane ?? "未取得"}</dd></div>
           <div><dt>統合済み</dt><dd>{project.git.merged}</dd></div>
           <div><dt title="agent報告・コミット・観測時刻のうち最新の時刻">最新の活動・観測</dt><dd>{projectLatestTime(project) ? relativeTime(new Date(projectLatestTime(project)).toISOString()) : "未取得"}</dd></div>
           {unknownLabels && <div><dt>agent件数未取得</dt><dd>{unknownLabels}</dd></div>}
@@ -532,6 +533,7 @@ export default function Page() {
             if (lane !== null) params.set("lane", lane);
             return <li key={path} title={path}>
               {lane === null ? label : <Link className="open-project" href={`/project?${params}`} prefetch={false}>{label}</Link>}
+              {duplicateNames.has(projectName) && <> · <code className="home-git-operation-path">{projectPath}</code></>}
             </li>;
           })}
         </ul>

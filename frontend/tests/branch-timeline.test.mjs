@@ -1,5 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
 import {
   eventLeaderGeometry,
   graphTimeTicks,
@@ -7,6 +12,99 @@ import {
   recentTimeAt,
   recentTimePosition,
 } from "../app/project-flow.mjs";
+
+const timelineSource = new URL("../app/branch-timeline.tsx", import.meta.url);
+const compiled = ts.transpileModule(readFileSync(timelineSource, "utf8"), {
+  compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+});
+const localModuleIds = new Set(Array.from(compiled.outputText.matchAll(/require\("(\.\/[^"]+\.mjs)"\)/g), ([, id]) => id));
+const localModules = new Map(await Promise.all(Array.from(localModuleIds, async (id) => [id, await import(new URL(id, timelineSource))])));
+const requireTimeline = createRequire(timelineSource);
+const exports = {};
+const copyButton = ({ value }) => createElement("button", { "data-copy": value }, "コピー");
+new Function("require", "exports", compiled.outputText)(
+  (id) => id === "./copy-button" ? { default: copyButton } : localModules.get(id) ?? requireTimeline(id), exports,
+);
+
+function renderTimeline(rows, selection = {}) {
+  return renderToStaticMarkup(createElement(exports.default, {
+    project: {
+      id: "repo", main_path: "/repo/main", default_branch: "main", observed_at: 1788220800, fetched_at: null,
+      branch_rows: rows, branch_connections: null, agent_tasks: [], github: {},
+    },
+    range: "current", timeline: 100, showMerged: true, selectedKey: null, selectedRowId: null,
+    selectedLane: null, renderSections: () => null, ...selection,
+  }));
+}
+
+const timelineRow = (id, name, fields = {}) => ({
+  id, name, locals: [], pull_requests: [], tip_commits: [], history_heads: [], history_cursor: null,
+  history_available: true, historical: false, status: "local_only", ...fields,
+});
+
+test("same-name history rows and jump options show their PR numbers and source repositories", () => {
+  const name = "bot/refresh-model-profiles";
+  const history = (number, source_repository, branch = name) => timelineRow(`history-${number}`, branch, {
+    historical: true, status: "historical_deleted", pull_requests: [{ number, source_repository }],
+  });
+  const html = renderTimeline([history(35477, "langchain-ai/langchain"), history(35593, null), history(35594, "fork/langchain", "unique")]);
+  for (const [number, source] of [[35477, "langchain-ai/langchain"], [35593, "不明"]]) {
+    const pr = `PR #${number} · 作成元 ${source}`;
+    assert.ok(html.includes(`<option value="history-${number}">${name} · ${pr}</option>`));
+    assert.ok(html.includes(`<span>${name}</span><small>${pr}</small>`));
+  }
+  assert.ok(html.includes('<option value="history-35594">unique</option>'));
+});
+
+test("flow describes a missing local tracking ref without asserting deletion", () => {
+  const html = renderTimeline([timelineRow("topic", "topic", { status: "upstream_deleted" })]);
+  assert.match(html, /lane-state[^"]*">追跡参照がローカルにない<\/span>/);
+  assert.match(html, /<span>追跡参照がローカルにない状態です。<\/span>/);
+  assert.doesNotMatch(html, /削除/);
+});
+
+test("flow copies lane commands for their checkout and selected commit commands for the project", () => {
+  const hash = "1234567890abcdef";
+  const path = "/repo/linked checkout";
+  const row = timelineRow("development", "development", {
+    status: "remote_ahead",
+    tip_commits: [{ hash, short: "12345678", subject: "tip", date: "2026-09-01T00:00:00Z", parents: [] }],
+    locals: [{ id: "development", branch: "development", path, unpushed_commits: null,
+      next_command: { command: "git pull --ff-only", reason: "上流が進んでいます" } }],
+  });
+  const html = renderTimeline([row], { selectedKey: hash, selectedRowId: row.id });
+  for (const [command, target] of [
+    [`git -C &#x27;${path}&#x27; pull --ff-only`, path],
+    ["git -C &#x27;/repo/main&#x27; show 12345678", "/repo/main"],
+  ]) {
+    assert.ok(html.includes(`<code>${command}</code>`), `displayed command: ${command}`);
+    assert.ok(html.includes(`data-copy="${command}"`), `copied command: ${command}`);
+    assert.ok(html.includes(`実行先: ${target}`), `target: ${target}`);
+  }
+});
+
+test("full history finds the earliest commit across large branch histories", () => {
+  const commits = Array.from({ length: 20_000 }, (_, index) => ({
+    hash: index.toString(16).padStart(40, "0"), subject: "Later commit",
+    date: "2026-09-01T00:00:00Z", parents: [],
+  }));
+  commits.at(-1).date = "2026-08-01T00:00:00Z";
+  commits.at(-1).subject = "Earliest commit";
+  const commitIndices = commits.map((_, index) => index);
+  const rows = Array.from({ length: 10 }, (_, index) => (
+    timelineRow(`row-${index}`, `branch-${index}`, { commit_indices: commitIndices })
+  ));
+
+  const html = renderTimeline(rows, {
+    project: {
+      id: "repo", main_path: "/repo/main", default_branch: "main", observed_at: 1788220800, fetched_at: null,
+      branch_rows: rows, branch_commits: commits, branch_connections: null, agent_tasks: [], github: {},
+    },
+    range: "all", timeline: 0,
+  });
+  assert.match(html, /aria-label="branch-0 [0-9a-f]+ Earliest commit"/);
+  assert.doesNotMatch(html, /Later commit/);
+});
 
 test("timeline time scale round trips the non-linear observation point", () => {
   const min = Date.parse("2026-01-01T00:00:00Z");

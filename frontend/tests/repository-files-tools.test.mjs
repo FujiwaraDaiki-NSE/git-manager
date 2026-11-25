@@ -5,8 +5,10 @@ import {
   boundedRepositoryText,
   buildRepositoryFileHistoryHref,
   filterRepositoryFileEntries,
+  findRepositorySymlinkTarget,
   listRepositoryDirectoryEntries,
   repositoryBase64ToBytes,
+  repositoryFileLineContext,
   repositoryFilesQuery,
   repositoryFileQuery,
   searchRepositoryFileEntries,
@@ -25,6 +27,35 @@ test("repository API helpers keep all required filters explicit", () => {
   assert.equal(repositoryFileQuery("/repo", "abc", "src/a [x].ts"), "path=%2Frepo&revision=abc&file=src%2Fa+%5Bx%5D.ts");
   assert.throws(() => repositoryFilesQuery("/repo", "HEAD", ""), /query/);
   assert.throws(() => repositoryFileQuery("/repo", "HEAD"), /file/);
+});
+
+test("blame excerpts keep Git line numbers and five surrounding lines", () => {
+  const text = Array.from({ length: 20 }, (_, index) => `row ${index + 1}`).join("\n");
+  const excerpt = repositoryFileLineContext(text, false, 8);
+  assert.deepEqual(excerpt.map(({ number }) => number), [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.deepEqual(excerpt[5], { number: 8, content: "row 8" });
+  assert.deepEqual(repositoryFileLineContext("\tfirst\r\n\nlast", false, 1), [
+    { number: 1, content: "\tfirst\r" }, { number: 2, content: "" }, { number: 3, content: "last" },
+  ]);
+});
+
+test("blame excerpts omit an incomplete final line and never invent a line after LF", () => {
+  assert.deepEqual(repositoryFileLineContext("first\npartial", true, 1), [{ number: 1, content: "first" }]);
+  assert.equal(repositoryFileLineContext("first\npartial", true, 2), null);
+  assert.equal(repositoryFileLineContext("first\n", false, 2), null);
+  assert.equal(repositoryFileLineContext("first\n", true, 3), null);
+});
+
+test("symlink targets resolve to the exact file or directory in the retrieved tree", () => {
+  assert.equal(findRepositorySymlinkTarget(entries, "src/deep/link", "../.././README.md"), entries[0]);
+  assert.equal(findRepositorySymlinkTarget(entries, "src/link", "./deep/"), entries[3]);
+  assert.equal(findRepositorySymlinkTarget(entries, "link", "src//deep/value.ts"), entries[4]);
+});
+
+test("symlink targets stay unavailable when the retrieved tree cannot confirm them", () => {
+  for (const target of ["/README.md", "C:\\README.md", "../../README.md", "missing", "gone/../example.ts", "example.ts/", "example.ts "]) {
+    assert.equal(findRepositorySymlinkTarget(entries, "src/link", target), null, target);
+  }
 });
 
 test("directory browsing creates only immediate children and breadcrumbs stay local", () => {

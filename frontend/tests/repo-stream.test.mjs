@@ -56,6 +56,24 @@ function createStream(storage) {
   return { requests, timers, stream, current, cleanup, updates };
 }
 
+test("repository registry is loading until a snapshot arrives, including after reconnect", () => {
+  const { stream, current, cleanup, updates } = createStream();
+  assert.equal(current.reposLoading, true);
+  const beforeOpen = updates.length;
+  stream.onopen();
+  assert.equal(updates.slice(beforeOpen).includes(false), false);
+  stream.emit("snapshot", []);
+  assert.equal(updates.at(-2).size, 0);
+  assert.equal(updates.at(-1), false);
+  stream.onerror();
+  assert.deepEqual(updates.slice(-2), [false, true]);
+  stream.onopen();
+  stream.emit("snapshot", [{ path: "/repo" }]);
+  assert.equal(updates.at(-2).get("/repo").path, "/repo");
+  assert.equal(updates.at(-1), false);
+  cleanup();
+});
+
 test("stream fetches once initially, replays append cursors and pages history without aborting project work", async () => {
   const { requests, timers, stream, current, cleanup } = createStream();
   stream.onopen();

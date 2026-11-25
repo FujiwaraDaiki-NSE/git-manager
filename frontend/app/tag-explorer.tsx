@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
+import CommitCompare from "./commit-compare";
 import CopyButton from "./copy-button";
 import type { CommitDetail } from "./types";
 import {
@@ -60,6 +61,10 @@ type TagDetail = TagSummary & {
 type LoadState = "idle" | "loading" | "ready" | "error";
 type TagCreatorDatePresence = "all" | "known" | "unknown";
 
+function isCommitTag(tag: TagSummary | undefined): tag is TagSummary & { peeled_hash: string } {
+  return tag?.peeled_type === "commit" && Boolean(tag.peeled_hash);
+}
+
 function exactDate(value: string | null) {
   if (!value) return "日付未取得";
   const date = new Date(value);
@@ -112,6 +117,7 @@ export default function TagExplorer({ path }: { path: string }) {
   const [collapseTargets, setCollapseTargets] = useState(false);
   const [inventory, setInventory] = useState<TagInventory | null>(null);
   const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [comparisonBaseName, setComparisonBaseName] = useState<string | null>(null);
   const [inventoryState, setInventoryState] = useState<LoadState>("idle");
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [detail, setDetail] = useState<TagDetail | null>(null);
@@ -138,6 +144,7 @@ export default function TagExplorer({ path }: { path: string }) {
       const response = await fetch(`/api/repo/tags?${params.toString()}`, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(await responseError(response));
       const result = await response.json() as TagInventory;
+      if (controller.signal.aborted) return;
       if (!Array.isArray(result.tags)) throw new Error("タグ一覧の形式が不正です。");
       // A refresh can replace a tag object while keeping its exact name.  Do
       // not leave the old annotation or target commit attached to that name;
@@ -147,6 +154,7 @@ export default function TagExplorer({ path }: { path: string }) {
       detailControllerRef.current = null;
       setInventory(result);
       setSelectedName(null);
+      setComparisonBaseName(null);
       setDetail(null);
       setDetailState("idle");
       setDetailError(null);
@@ -169,6 +177,7 @@ export default function TagExplorer({ path }: { path: string }) {
     inventoryAttemptRef.current = null;
     setInventory(null);
     setSelectedName(null);
+    setComparisonBaseName(null);
     setInventoryState("idle");
     setInventoryError(null);
     setDetail(null);
@@ -264,6 +273,10 @@ export default function TagExplorer({ path }: { path: string }) {
   const navigation = useMemo(() => adjacentTags(visible, selectedName), [selectedName, visible]);
   const selectionVisibility = useMemo(() => tagSelectionVisibility(filtered, visible, selectedName), [filtered, selectedName, visible]);
   const tagReport = useMemo(() => detail ? tagInvestigationMarkdown(detail, path, commit) : null, [commit, detail, path]);
+  const selectedTag = inventory?.tags.find((tag) => tag.name === selectedName);
+  const comparisonBase = inventory?.tags.find((tag) => tag.name === comparisonBaseName);
+  const canSetBase = isCommitTag(selectedTag) && selectedTag.name !== comparisonBaseName;
+  const canCompare = canSetBase && isCommitTag(comparisonBase);
 
   useEffect(() => {
     setDownloadStatus("idle");
@@ -360,6 +373,26 @@ export default function TagExplorer({ path }: { path: string }) {
             <span role="status">{navigation.index >= 0 ? `選択 ${navigation.index + 1} / ${navigation.count}` : selectedName ? selectionVisibility === "collapsed" ? "選択中タグは同一対象に集約されています" : "選択中タグは現在の条件外です" : "タグを選択してください"}</span>
             <button type="button" className="tag-explorer-export" onClick={() => navigation.next && setSelectedName(navigation.next.name)} disabled={navigation.next === null} aria-label="次の表示中タグを選択">次のタグ →</button>
           </div>
+          {(canSetBase || comparisonBase) && <section className="tag-explorer-comparison" aria-label="タグ間の比較">
+            <div className="tag-explorer-comparison-controls">
+              {comparisonBase && <>
+                <span role="status">比較元 <code>{comparisonBase.name}</code></span>
+                <button type="button" className="tag-explorer-export" onClick={() => setComparisonBaseName(null)}>比較元を解除</button>
+              </>}
+              {canSetBase && <button type="button" className="tag-explorer-export" onClick={() => setComparisonBaseName(selectedTag.name)} aria-label={`${selectedTag.name} を比較元にする`}>比較元にする</button>}
+            </div>
+            {canCompare && <CommitCompare
+              key={JSON.stringify([path, comparisonBase.name, comparisonBase.peeled_hash, selectedTag.name, selectedTag.peeled_hash])}
+              path={path}
+              laneComparison={{
+                base: comparisonBase.peeled_hash,
+                target: selectedTag.peeled_hash,
+                baseLabel: `${comparisonBase.name} → ${selectedTag.name}`,
+                directLabel: "このタグまで比較",
+                supportsMergeBase: false,
+              }}
+            />}
+          </section>}
         </>}
 
         {detailState === "loading" && <p className="tag-explorer-state" role="status">選択したタグを読み込んでいます…</p>}

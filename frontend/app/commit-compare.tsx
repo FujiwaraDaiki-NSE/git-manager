@@ -5,6 +5,7 @@ import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
 import PatchView from "./patch-view";
 import InvestigationPresets, { type ComparisonPresetValues } from "./investigation-presets";
+import { repositoryFileQuery } from "./repository-files-tools.mjs";
 import type { Numstat } from "./types";
 import {
   buildComparisonFilesCsv,
@@ -47,6 +48,67 @@ type ComparisonResponse = {
 
 type CommitCompareProps = { path: string; laneComparison: { base: string; target: string; baseLabel: string; directLabel: string; supportsMergeBase: boolean } | null };
 const mergeBaseLabel = "共通祖先 → ローカル先端の差分";
+
+type FileSourceContent = { binary: boolean; text: string | null; truncated: boolean };
+type FileSource =
+  | { state: "loading" | "missing" }
+  | { state: "error"; message: string }
+  | { state: "ready"; content: FileSourceContent };
+
+async function fetchFileSource(path: string, revision: string, file: string, signal: AbortSignal): Promise<FileSource> {
+  const params = repositoryFileQuery(path, revision, file);
+  const response = await fetch(`/api/repo/file?${params}`, { cache: "no-store", signal });
+  if (response.status === 404) {
+    // A missing repository can also return 404. Only these file results mean the side is absent.
+    const body = await response.json().catch(() => null);
+    if (body?.detail === "指定したrevisionにファイルがありません" || body?.detail === "指定したパスはファイルではありません") {
+      return { state: "missing" };
+    }
+  }
+  if (!response.ok) return { state: "error", message: `原文を取得できませんでした（HTTP ${response.status}）。` };
+  const content = await response.json();
+  if (content?.path !== file || content.pinned_hash !== revision || typeof content.truncated !== "boolean"
+    || typeof content.binary !== "boolean" || (content.binary ? content.text !== null : typeof content.text !== "string")) {
+    return { state: "error", message: "原文の応答を確認できませんでした。" };
+  }
+  return { state: "ready", content };
+}
+
+function ComparisonFileSource({ label, path, revision, file }: { label: string; path: string; revision: string; file: string }) {
+  const [source, setSource] = useState<FileSource>({ state: "loading" });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchFileSource(path, revision, file, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setSource(result);
+    }).catch(() => {
+      if (!controller.signal.aborted) setSource({ state: "error", message: "原文を取得できませんでした。" });
+    });
+    return () => controller.abort();
+  }, [path, revision, file]);
+
+  return <section aria-label={`${label}の原文`}>
+    <h5>{label}</h5>
+    <p><code>{file}</code><br /><code>{revision}</code></p>
+    {source.state === "loading" && <p role="status">原文を取得中…</p>}
+    {source.state === "missing" && <p role="status">この版にファイルはありません。</p>}
+    {source.state === "error" && <p role="alert">{source.message}</p>}
+    {source.state === "ready" && <>
+      {source.content.truncated && <p role="status">原文は取得上限で省略されています。</p>}
+      {source.content.binary ? <p>バイナリのためテキスト表示できません。</p>
+        : source.content.text === "" ? <p>空のファイルです。</p>
+        : <pre tabIndex={0} role="region" aria-label={`${label}のテキスト`}>{source.content.text}</pre>}
+    </>}
+  </section>;
+}
+
+function ComparisonFileSources({ path, comparison, file }: { path: string; comparison: ComparisonResponse; file: Numstat }) {
+  const oldPath = file.old_path === undefined ? file.path : file.old_path;
+  return <div className="commit-compare-file-sources">
+    <ComparisonFileSource label="変更前" path={path} revision={comparison.comparison_base} file={oldPath} />
+    <ComparisonFileSource label="変更後" path={path} revision={comparison.target} file={file.path} />
+  </div>;
+}
 
 function apiQuery(path: string, request: ComparisonRequest) {
   return buildComparisonQuery(path, request.base, request.target, request.mode);
@@ -342,7 +404,12 @@ export default function CommitCompare({ path, laneComparison }: CommitComparePro
               <CopyButton value={comparisonReproductionCommand(path, data.command)} label="比較の再現コマンドをコピー" />
             </div>
             {downloadStatus && <p className="commit-compare-download-status" role="status" aria-live="polite">{downloadStatus}</p>}
-            <CommitFiles key={`${data.comparison_base}:${data.target}:${data.mode}`} files={data.files} downloadName={`${data.base.slice(0, 12)}-${data.target.slice(0, 12)}-files.tsv`} />
+            <CommitFiles
+              key={JSON.stringify([path, data.comparison_base, data.target, data.mode])}
+              files={data.files}
+              downloadName={`${data.base.slice(0, 12)}-${data.target.slice(0, 12)}-files.tsv`}
+              renderFileSource={(file) => <ComparisonFileSources path={path} comparison={data} file={file} />}
+            />
             <PatchView key={`${data.comparison_base}:${data.target}`} patch={data.patch} />
             {data.patch_truncated && <p className="commit-compare-truncated" role="status">パッチ本文は上限で切り詰められています。保存したファイルも部分的な内容です。</p>}
           </section>

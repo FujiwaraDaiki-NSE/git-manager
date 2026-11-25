@@ -30,6 +30,21 @@ type PatchReviewEntry = { section: PatchSection; index: number };
 
 const EMPTY_REVIEWED = new Set<number>();
 
+function hunkLabel(text: string) {
+  const match = text.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/);
+  if (match === null) return text;
+  const context = match[3].trim();
+  return `旧 ${match[1]}行 / 新 ${match[2]}行${context ? ` · ${context}` : ""}`;
+}
+
+function scrollToPatchRow(container: HTMLDivElement | null, lineIndex: number, focus: boolean) {
+  const row = container?.querySelector<HTMLElement>(`[data-patch-row="${lineIndex}"]`);
+  if (!container || !row) return;
+  row.scrollIntoView({ block: "nearest", inline: "nearest" });
+  container.scrollTop += row.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  if (focus) row.focus({ preventScroll: true });
+}
+
 function PatchText({ text, matches, activeMatchId }: { text: string; matches: PatchMatch[]; activeMatchId: string | null }) {
   if (matches.length === 0) return <>{text}</>;
   const pieces: React.ReactNode[] = [];
@@ -48,6 +63,9 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBy
   const containerRef = useRef<HTMLDivElement>(null);
   const focusRow = useRef<number | null>(null);
   const selectedLines = useMemo(() => selectPatchRows(section.lines, changedOnly), [section.lines, changedOnly]);
+  const hunks = useMemo(() => selectedLines.flatMap(({ line, lineIndex }, position) =>
+    line.kind === "hunk" ? [{ label: hunkLabel(line.text), lineIndex, position }] : [],
+  ), [selectedLines]);
   const lineMatches = useMemo(() => {
     const grouped = new Map<number, PatchMatch[]>();
     for (const match of matches) {
@@ -71,15 +89,8 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBy
     const rowIndex = focusRow.current;
     focusRow.current = null;
     const activeRowIndex = activePosition >= 0 && activePosition < count ? activeMatch?.lineIndex ?? null : null;
-    if (rowIndex === null && activeRowIndex === null) return;
     const targetRowIndex = rowIndex ?? activeRowIndex;
-    const row = containerRef.current?.querySelector<HTMLElement>(`[data-patch-row="${targetRowIndex}"]`);
-    const container = containerRef.current;
-    if (row && container) {
-      row.scrollIntoView({ block: "nearest", inline: "nearest" });
-      container.scrollTop += row.getBoundingClientRect().top - container.getBoundingClientRect().top;
-      if (rowIndex !== null) row.focus({ preventScroll: true });
-    }
+    if (targetRowIndex !== null) scrollToPatchRow(containerRef.current, targetRowIndex, rowIndex !== null);
   }, [activeMatch, activePosition, count, limit, selectedLines.length]);
 
   const show = (next: number) => {
@@ -90,6 +101,24 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBy
   };
 
   return <>
+    {hunks.length > 0 && <label className="patch-hunk-index">
+      ハンク目次
+      <select value="" onChange={(event) => {
+        const hunk = hunks.find(({ lineIndex }) => String(lineIndex) === event.target.value);
+        if (!hunk) return;
+        if (hunk.position < count) {
+          scrollToPatchRow(containerRef.current, hunk.lineIndex, true);
+        } else {
+          focusRow.current = hunk.lineIndex;
+          setLimit(Math.ceil((hunk.position + 1) / PATCH_PAGE_LINES) * PATCH_PAGE_LINES);
+        }
+      }}>
+        <option value="" disabled>移動先を選択</option>
+        {hunks.map(({ label, lineIndex }, index) => <option key={lineIndex} value={lineIndex}>
+          {label.startsWith("@@@") ? label : `${index + 1}. ${label}`}
+        </option>)}
+      </select>
+    </label>}
     <div ref={containerRef} className={`patch-lines${sideBySide ? " patch-lines-side-by-side" : ""}${wrap ? " patch-wrap" : ""}${changedOnly ? " patch-lines-changed-only" : ""}`} tabIndex={0} role="region" aria-label={`${section.title} の差分（左: 変更前、右: 変更後の行番号）`}>
       {sideBySide ? <div className="patch-side-by-side">
         <div className="patch-side-heading"><span>変更前</span><span>変更後</span></div>

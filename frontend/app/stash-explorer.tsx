@@ -1,23 +1,35 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type SyntheticEvent } from "react";
 import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
 import CommitCompare from "./commit-compare";
 import PatchView from "./patch-view";
-import type { Numstat } from "./types";
-import {
+import { fileStatusDescription } from "./file-status.mjs";
+import { useRepoStream } from "./repo-stream";
+import type { Numstat, Repo } from "./types";
+import * as stashTools from "./stash-explorer-tools.mjs";
+import "./stash-explorer.css";
+
+const {
   adjacentStashes,
   filterStashes,
   stashCommand,
+  stashComparison,
   stashDateRangeError,
   stashHashList,
   stashInventoryCsv,
   stashInvestigationMarkdown,
   stashPartLabel,
+  stashWorktreeOverlap,
   sortStashes,
-} from "./stash-explorer-tools.mjs";
-import "./stash-explorer.css";
+} = stashTools as typeof stashTools & {
+  stashComparison(base: StashDetail, target: StashDetail): ComponentProps<typeof CommitCompare>["laneComparison"];
+  stashWorktreeOverlap(stash: StashDetail, worktree: Repo, reposLoading: boolean): {
+    matches: { path: string; statuses: string[] }[];
+    hasUnexpandedPaths: boolean;
+  } | null;
+};
 
 type StashSummary = {
   hash: string;
@@ -68,6 +80,92 @@ function responseError(status: number, scope: "inventory" | "detail") {
     : "stashの内容を取得できませんでした。Gitの状態を確認して再試行してください。";
 }
 
+async function fetchStash(path: string, hash: string, signal: AbortSignal): Promise<StashDetail> {
+  const params = new URLSearchParams({ path, hash });
+  const response = await fetch(`/api/repo/stash?${params.toString()}`, { cache: "no-store", signal });
+  if (!response.ok) throw new Error(responseError(response.status, "detail"));
+  return await response.json() as StashDetail;
+}
+
+function StashComparisonResult({ path, baseHash, targetHash }: { path: string; baseHash: string; targetHash: string }) {
+  const [details, setDetails] = useState<[StashDetail, StashDetail] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    void Promise.all([fetchStash(path, baseHash, signal), fetchStash(path, targetHash, signal)])
+      .then((pair) => {
+        if (!signal.aborted) setDetails(pair);
+      })
+      .catch((caught: unknown) => {
+        if (!signal.aborted) setError(caught instanceof Error ? caught.message : "比較するstashを取得できませんでした。");
+      });
+    return () => controller.abort();
+  }, [path, baseHash, targetHash]);
+
+  if (error !== null) return <p className="stash-explorer-error" role="alert">{error}</p>;
+  if (details === null) return <p className="stash-explorer-state" role="status">比較するstashを読み込んでいます…</p>;
+
+  const [base, target] = details;
+  const comparison = stashComparison(base, target);
+  if (comparison === null) {
+    return <p className="stash-explorer-state" role="status">同じHEADから作られた2つのstashを選んでください。</p>;
+  }
+  return (
+    <>
+      <CommitCompare path={path} laneComparison={comparison} />
+      <div className="stash-explorer-untracked-comparison">
+        {details.map((stash, index) => (
+          <div key={stash.hash} className="stash-explorer-paths">
+            <h5>{index === 0 ? "比較元" : "比較先"}の未追跡ファイル · {stash.untracked.files.length}パス</h5>
+            {stash.untracked.files.length > 0 && (
+              <ul>{stash.untracked.files.map(({ path: file }) => <li key={file}><code>{file}</code></li>)}</ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function StashPairComparison({ path, stashes }: { path: string; stashes: StashSummary[] }) {
+  const [baseHash, setBaseHash] = useState<string | null>(null);
+  const [targetHash, setTargetHash] = useState<string | null>(null);
+  const base = stashes.find((stash) => stash.hash === baseHash);
+  const target = stashes.find((stash) => stash.hash === targetHash);
+  const options = stashes.map((stash) => (
+    <option key={stash.hash} value={stash.hash}>{shortHash(stash.hash)} · {stash.selector} · {stash.subject}</option>
+  ));
+
+  return (
+    <details className="stash-explorer-part">
+      <summary>2つのstashを比較</summary>
+      <div className="stash-explorer-tools">
+        <label>
+          <span>比較元のstash</span>
+          <select value={base ? base.hash : ""} onChange={(event) => setBaseHash(event.target.value === "" ? null : event.target.value)}>
+            <option value="">比較元を選択</option>
+            {options}
+          </select>
+        </label>
+        <label>
+          <span>比較先のstash</span>
+          <select value={target ? target.hash : ""} onChange={(event) => setTargetHash(event.target.value === "" ? null : event.target.value)}>
+            <option value="">比較先を選択</option>
+            {options}
+          </select>
+        </label>
+      </div>
+      {base && target && (base.hash === target.hash ? (
+        <p className="stash-explorer-state" role="status">異なる2つのstashを選んでください。</p>
+      ) : (
+        <StashComparisonResult key={`${base.hash}:${target.hash}`} path={path} baseHash={base.hash} targetHash={target.hash} />
+      ))}
+    </details>
+  );
+}
+
 function StashPartView({
   hash,
   path,
@@ -109,6 +207,7 @@ function StashPartView({
 }
 
 export default function StashExplorer({ path }: { path: string }) {
+  const { repos, reposLoading } = useRepoStream();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [startDate, setStartDate] = useState<string | null>(null);
@@ -116,6 +215,7 @@ export default function StashExplorer({ path }: { path: string }) {
   const [order, setOrder] = useState<StashOrder>("git");
   const [inventory, setInventory] = useState<StashInventory | null>(null);
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
+  const [worktreePath, setWorktreePath] = useState<string | null>(null);
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [detail, setDetail] = useState<StashDetail | null>(null);
@@ -159,6 +259,7 @@ export default function StashExplorer({ path }: { path: string }) {
     inventoryAttemptRef.current = null;
     setInventory(null);
     setSelectedHash(null);
+    setWorktreePath(null);
     setInventoryError(null);
     setDetail(null);
     setDetailError(null);
@@ -189,10 +290,8 @@ export default function StashExplorer({ path }: { path: string }) {
     setDetailLoading(true);
     void (async () => {
       try {
-        const params = new URLSearchParams({ path, hash: selectedHash });
-        const response = await fetch(`/api/repo/stash?${params.toString()}`, { cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error(responseError(response.status, "detail"));
-        setDetail(await response.json() as StashDetail);
+        const result = await fetchStash(path, selectedHash, controller.signal);
+        if (!controller.signal.aborted) setDetail(result);
       } catch (caught) {
         if (controller.signal.aborted) return;
         setDetailError(caught instanceof Error ? caught.message : "stashの内容を取得できませんでした。");
@@ -214,6 +313,13 @@ export default function StashExplorer({ path }: { path: string }) {
   const visibleStashes = useMemo(() => sortStashes(filteredStashes, order), [filteredStashes, order]);
   const navigation = useMemo(() => adjacentStashes(visibleStashes, selectedHash), [selectedHash, visibleStashes]);
   const detailCommand = detail ? stashCommand(path, detail.command) : null;
+  const worktrees = useMemo(() => {
+    const commonDir = repos.get(path)?.common_dir;
+    if (!commonDir) return [];
+    return [...repos.values()].filter((repo) => repo.common_dir === commonDir);
+  }, [path, repos]);
+  const worktree = worktrees.find((repo) => repo.path === worktreePath);
+  const overlap = detail && worktree ? stashWorktreeOverlap(detail, worktree, reposLoading) : null;
 
   useEffect(() => {
     setExportStatus("");
@@ -340,6 +446,7 @@ export default function StashExplorer({ path }: { path: string }) {
               <button type="button" className="subtle-button" onClick={() => navigation.previous && setSelectedHash(navigation.previous.hash)} disabled={navigation.previous === null} aria-label="前の表示中stashを選択">← 前のstash</button>
               <button type="button" className="subtle-button" onClick={() => navigation.next && setSelectedHash(navigation.next.hash)} disabled={navigation.next === null} aria-label="次の表示中stashを選択">次のstash →</button>
             </div>
+            {inventory.stashes.length > 1 && <StashPairComparison key={path} path={path} stashes={inventory.stashes} />}
           </>
         )}
 
@@ -357,6 +464,42 @@ export default function StashExplorer({ path }: { path: string }) {
                 <CopyButton value={stashInvestigationMarkdown(detail, path)} label="選択したstashの調査レポートをコピー" />
               </div>
             </div>
+            <section className="stash-explorer-part" aria-labelledby="stash-worktree-overlap-title">
+              <div className="stash-explorer-part-heading">
+                <h4 id="stash-worktree-overlap-title">同じパスの未コミット変更</h4>
+              </div>
+              <div className="stash-explorer-tools">
+                <label>
+                  <span>適用先worktree</span>
+                  <select value={worktreePath === null ? "" : worktreePath} onChange={(event) => setWorktreePath(event.target.value === "" ? null : event.target.value)} disabled={worktrees.length === 0 && worktreePath === null}>
+                    <option value="">適用先を選択</option>
+                    {worktreePath !== null && !worktree && <option value={worktreePath}>{worktreePath}（未取得）</option>}
+                    {worktrees.map((repo) => (
+                      <option key={repo.path} value={repo.path}>{repo.branch ? `${repo.branch} · ${repo.path}` : repo.path}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="stash-explorer-paths" role="status">
+                {worktreePath === null ? (
+                  worktrees.length === 0 && <p className="stash-explorer-state">同じリポジトリのworktree一覧は未取得です。</p>
+                ) : overlap === null ? (
+                  <p className="stash-explorer-state">適用先worktreeの未コミット変更は未取得です。</p>
+                ) : (
+                  <>
+                    {(!overlap.hasUnexpandedPaths || overlap.matches.length > 0) && (
+                      <p className="stash-explorer-state">{overlap.hasUnexpandedPaths ? "確認できた一致" : "一致"}{overlap.matches.length}件</p>
+                    )}
+                    {overlap.hasUnexpandedPaths && <p className="stash-explorer-state">未追跡ディレクトリ配下の該当ファイルは個別の状態が未取得です。</p>}
+                    {overlap.matches.length > 0 && (
+                      <ul>{overlap.matches.map(({ path: file, statuses }) => (
+                        <li key={file}><code>{file}</code> · {statuses.map(fileStatusDescription).join(" / ")}</li>
+                      ))}</ul>
+                    )}
+                  </>
+                )}
+              </div>
+            </section>
             {detailCommand && (
               <div className="stash-explorer-command">
                 <span>trackedを再現</span>

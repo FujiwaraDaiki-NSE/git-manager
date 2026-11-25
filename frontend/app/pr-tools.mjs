@@ -326,11 +326,19 @@ export function openPullRequestSource(pr) {
   return pr.headRepository === null ? null : `${pr.headRepository}:${pr.headRefName}`;
 }
 
-/** @param {import("./types").OpenPullRequest[]} pulls @param {string} query */
-export function filterOpenPullRequests(pulls, query) {
+/**
+ * @param {import("./types").OpenPullRequest[]} pulls
+ * @param {{query: string, target: string, excludeDraft: boolean}} options
+ */
+export function filterOpenPullRequests(pulls, { query, target, excludeDraft }) {
+  if (target === undefined || excludeDraft === undefined) {
+    throw new TypeError("target and excludeDraft must be provided explicitly");
+  }
   const term = query.trim().toLowerCase();
-  if (term === "") return pulls;
   return pulls.filter((pr) => {
+    if (target !== "" && pr.baseRefName !== target) return false;
+    if (excludeDraft && pr.isDraft) return false;
+    if (term === "") return true;
     const source = openPullRequestSource(pr);
     return `#${pr.number}`.includes(term)
       || pr.title.toLowerCase().includes(term)

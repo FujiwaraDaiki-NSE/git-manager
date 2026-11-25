@@ -263,3 +263,36 @@ export function stashPartLabel(part) {
   return part === "tracked" ? "追跡済みの変更" : "未追跡ファイル";
 }
 
+/** Match exact saved paths against a worktree's reported status entries. */
+export function stashWorktreeOverlap(stash, worktree, reposLoading) {
+  if (reposLoading || worktree === null || worktree.pending || worktree.error || !Array.isArray(worktree.entries)) return null;
+
+  const savedPaths = new Set([...stash.tracked.files, ...stash.untracked.files].map((file) => file.path));
+  const matches = new Map();
+  const addMatch = (path, xy) => {
+    if (!matches.has(path)) matches.set(path, new Set());
+    matches.get(path).add(xy);
+  };
+  let hasUnexpandedPaths = false;
+  for (const { path, original_path, xy } of worktree.entries) {
+    if (savedPaths.has(path)) addMatch(path, xy);
+    if (xy.includes("R") && savedPaths.has(original_path)) addMatch(original_path, xy);
+    if (xy === "??" && path.endsWith("/") && [...savedPaths].some((savedPath) => savedPath.startsWith(path))) {
+      hasUnexpandedPaths = true;
+    }
+  }
+  return { matches: Array.from(matches, ([path, statuses]) => ({ path, statuses: [...statuses] })), hasUnexpandedPaths };
+}
+
+/** Compare the two stash trees in selection order when they share a HEAD. */
+export function stashComparison(base, target) {
+  if (!base.head_parent || base.head_parent !== target.head_parent || base.hash === target.hash) return null;
+  return {
+    base: base.hash,
+    target: target.hash,
+    baseLabel: `${base.hash.slice(0, 10)} → ${target.hash.slice(0, 10)}`,
+    directLabel: "追跡済みの変更を比較",
+    supportsMergeBase: false,
+  };
+}
+

@@ -113,6 +113,29 @@ async function investigationHarness(kind, initial, fetchResult, props = {}) {
 }
 const searchFields = { scope: "--all", mode: "message", grep: "", author: "", since: "", until: "", file: "" };
 
+test("search results display both timestamps in the browser timezone and preserve their ISO values", async () => {
+  const originalZone = process.env.TZ;
+  try {
+    process.env.TZ = "Asia/Tokyo";
+    const date = "2026-01-02T10:33:43+00:00";
+    const committer_date = "2026-01-02T05:40:38-05:00";
+    const result = { commits: [{ hash: "abc", subject: "commit", date, committer_date, author: "author" }], offset: 0 };
+    const h = await investigationHarness("CommitSearch", [searchFields, result, searchFields, null, false, "abc"]);
+    const times = h.nodes(h.render(), "time");
+    assert.deepEqual(times.map(t => [t.props.dateTime, t.props.children]), [
+      [committer_date, "2026/1/2 19:40:38 JST"],
+      [date, "2026/1/2 19:33:43 JST"],
+    ]);
+    const html = h.html();
+    assert.match(html, /期間判定に使うコミッター日時 <time/);
+    assert.ok(html.includes(`>${committer_date}</time>`));
+    assert.ok(html.includes(`>${date}</time>`));
+  } finally {
+    if (originalZone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalZone;
+  }
+});
+
 test("date validation describes both date inputs and blocks only reversed ranges", async () => {
   for (const [since, until, invalid] of [["2026-02-02", "2026-02-01", true], ["2026-02-01", "2026-02-01", false], ["2026-02-01", "", false], ["", "2026-02-01", false], ["", "", false]]) {
     const h = await investigationHarness("CommitSearch", [{ ...searchFields, since, until }, null, null, null, false, null], async () => ({ ok: true, json: async () => ({ commits: [], offset: 0 }) }));

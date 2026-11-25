@@ -3,9 +3,13 @@ import test from "node:test";
 
 import {
   applyBufferedAgentEvents,
+  createTimelineProjectLabel,
   currentAgentTasks,
   hasUnknownCurrentTasks,
   mergeAgentEvents,
+  timelineDecisionCopy,
+  timelineProjectId,
+  timelineWorktreeLocation,
 } from "../app/agent-timeline-tools.mjs";
 
 const event = (event_id, occurred_at, extra = {}) => ({
@@ -104,4 +108,59 @@ test("missing and invalid report timestamps remain unknown rather than recent or
   assert.deepEqual(groups.unknown, [rows[1]]);
   assert.deepEqual(groups.active, []);
   assert.deepEqual(groups.old, []);
+});
+
+test("main and linked worktree URLs resolve to the same canonical project scope", () => {
+  const main = "/workspace/thinkplatform";
+  const linked = "/worktrees/thinkplatform-feature";
+  const repos = new Map([[main, { common_dir: main }], [linked, { common_dir: main }]]);
+
+  assert.equal(timelineProjectId(main, repos), main);
+  assert.equal(timelineProjectId(linked, repos), main);
+  assert.equal(timelineProjectId("/workspace/unknown", repos), null);
+});
+
+test("only duplicate project names include the canonical parent path", () => {
+  const names = new Map([
+    ["/workspace/thinkplatform", "thinkplatform"],
+    ["/archives/thinkplatform", "thinkplatform"],
+    ["/workspace/design_db", "design_db"],
+  ]);
+  const label = createTimelineProjectLabel(names);
+
+  assert.equal(label("/workspace/thinkplatform", "thinkplatform"), "thinkplatform（/workspace）");
+  assert.equal(label("/archives/thinkplatform", "thinkplatform"), "thinkplatform（/archives）");
+  assert.equal(label("/workspace/design_db", "design_db"), "design_db");
+});
+
+test("decision copy preserves the summary and includes only explicit questions", () => {
+  const header = "design_db / feature · 入力待ち";
+  const summary = "確認結果を保存済み\n次の報告を待機中";
+  const withSummary = `${header}\n報告要約: ${summary}`;
+
+  assert.equal(timelineDecisionCopy(header, { summary, decision: null }), withSummary);
+  assert.equal(timelineDecisionCopy(header, { summary, decision: { question: " " } }), withSummary);
+  assert.equal(timelineDecisionCopy(header, { summary, decision: { question: "承認しますか？" } }),
+    `${withSummary}\n質問: 承認しますか？`);
+  assert.equal(timelineDecisionCopy(header, { summary: null, decision: null }), header);
+});
+
+test("worktree copy requires the exact reported path in the current project registry", () => {
+  const project = "/workspace/design_db";
+  const path = "/worktrees/design_db feature";
+  const repos = new Map([
+    [path, { common_dir: project, worktree_state: "ok" }],
+    ["/worktrees/reused", { common_dir: "/archives/design_db", worktree_state: "ok" }],
+    ["/worktrees/gone", { common_dir: project, worktree_state: "prunable" }],
+  ]);
+
+  assert.deepEqual(timelineWorktreeLocation(path, project, null), { command: null, note: "現在の台帳を取得中…" });
+  const missing = { command: null, note: "現在の台帳にない" };
+  assert.deepEqual(timelineWorktreeLocation(path, project, new Map()), missing);
+  assert.deepEqual(timelineWorktreeLocation("/worktrees/removed", project, repos), missing);
+  assert.deepEqual(timelineWorktreeLocation("/worktrees/reused", project, repos), missing);
+  assert.deepEqual(timelineWorktreeLocation("/worktrees/gone", project, repos), {
+    command: null, note: "作業ディレクトリが存在しないため移動できません",
+  });
+  assert.deepEqual(timelineWorktreeLocation(path, project, repos), { command: "cd '/worktrees/design_db feature'", note: null });
 });

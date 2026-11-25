@@ -10,6 +10,7 @@ import type { AgentEvent, AgentEventEnvelope, ProjectSummary, Repo } from "./typ
 export type RepoStreamState = {
   subscribeAgentAttention: (listener: (event: AgentEvent) => void) => () => void;
   repos: Map<string, Repo>;
+  reposLoading: boolean;
   scanning: boolean;
   fetching: import("./fetch-progress.mjs").FetchProgress | null;
   connected: boolean;
@@ -56,6 +57,7 @@ function parseAgentEvent(payload: unknown): AgentEvent | null {
 /** Shared read-only SSE snapshot used by home and the project control page. */
 function useRepoStreamState(): RepoStreamState {
   const [repos, setRepos] = useState<Map<string, Repo>>(new Map());
+  const [reposLoading, setReposLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [fetching, setFetching] = useState<import("./fetch-progress.mjs").FetchProgress | null>(null);
   const [connected, setConnected] = useState(false);
@@ -232,10 +234,14 @@ function useRepoStreamState(): RepoStreamState {
       if (opened) loadProjects();
       opened = true;
     };
-    es.onerror = () => setConnected(false);
+    es.onerror = () => {
+      setConnected(false);
+      setReposLoading(true);
+    };
     es.addEventListener("snapshot", (event) => {
       const list: Repo[] = JSON.parse((event as MessageEvent).data);
       setRepos(new Map(list.map((repo) => [repo.path, repo])));
+      setReposLoading(false);
     });
     es.addEventListener("repo", (event) => {
       const repo = JSON.parse((event as MessageEvent).data) as Repo;
@@ -312,7 +318,7 @@ function useRepoStreamState(): RepoStreamState {
     };
   }, []);
 
-  return { subscribeAgentAttention, subscribeAgentEvents, subscribeProjectsLiveUpdates, repos, scanning, fetching, connected, agentEvents, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsCachedAt, projectsError, refreshProjects, loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
+  return { subscribeAgentAttention, subscribeAgentEvents, subscribeProjectsLiveUpdates, repos, reposLoading, scanning, fetching, connected, agentEvents, projectSummaries, projectUpdates, agentDataLoading: agentDataLoading || projectsLoading, agentDataError: [agentDataError, projectsError].filter((value) => value !== null).join(" / ") || null, projectsLoading, projectsCachedAt, projectsError, refreshProjects, loadOlderEvents: () => olderRef.current(), historyHasMore, historyLoading, historyError };
 }
 
 const RepoStreamContext = createContext<RepoStreamState | null>(null);

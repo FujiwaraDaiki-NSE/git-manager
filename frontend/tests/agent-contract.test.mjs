@@ -48,6 +48,7 @@ const summaryPayload = {
   latest_observed_at: 0,
   priority: 0,
   next_lane: "feature",
+  next_lane_id: "branch:feature",
   largest_difference_lane: null,
   agent_counts: counts,
   agent_priority_counts: priorityCounts,
