@@ -331,11 +331,13 @@ def _worktree_rows(
             candidate = state_rows.get(host_path)
             if not candidate or candidate.get("is_worktree") is not False:
                 continue
+        state = item.get("state")
         record = {
             "path": host_path,
             "branch": item.get("branch"),
             "head": item.get("head"),
-            "state": item.get("state"),
+            "state": state,
+            "git_dir_missing": state != "prunable" and scanner.has_missing_git_dir(container_path),
             "lock_reason": item["lock_reason"],
             "detached": bool(item.get("detached", False)),
             "is_main": _key(host_path) == _key(project_id),
@@ -1216,6 +1218,15 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
         if attention_row
         else None
     )
+    next_lane_id = None
+    if attention_row is not None:
+        branch = attention_row.get("branch")
+        path = attention_row.get("path")
+        if attention_row.get("detached") or branch == "(detached)":
+            if isinstance(path, str) and path:
+                next_lane_id = f"worktree:{path}"
+        elif isinstance(branch, str) and branch:
+            next_lane_id = f"branch:{branch}"
     merged = len(main.get("merged_branches") or []) + sum(
         1 for row in rows if row.get("is_worktree") and row.get("merged")
     )
@@ -1298,6 +1309,7 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
             ),
             "priority": issue_rank,
             "next_lane": next_lane,
+            "next_lane_id": next_lane_id,
             "largest_difference_lane": largest_difference_lane,
             # Never interpret a worktree as an agent being active.
             "agent_counts": agent_counts,

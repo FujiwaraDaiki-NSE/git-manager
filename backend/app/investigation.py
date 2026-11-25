@@ -127,7 +127,7 @@ def search(repo, scope, grep, author, since_at, until_at, file, offset, mode, fi
     if author:
         args.append(f"--author={author}")
     if since is not None:
-        args.append(f"--since={since.isoformat()}")
+        args.append(f"--since-as-filter={since.isoformat()}")
     if until is not None:
         args.append(f"--until={until.isoformat()}")
     # Git applies --skip before -S filters the history. Slice the matches instead.
@@ -149,7 +149,15 @@ def search(repo, scope, grep, author, since_at, until_at, file, offset, mode, fi
 
 
 def recovery(repo):
-    candidates = set(run(repo, ["rev-list", "--reflog", "--all"]).splitlines()) - set(run(repo, ["rev-list", "--all", "HEAD"]).splitlines())
+    reachable_args = ["rev-list", "--all"]
+    head_ref = gitinfo._run(repo, ["symbolic-ref", "--quiet", "HEAD"])
+    unborn = False
+    if head_ref is not None:
+        _, status = gitinfo._run_with_status(repo, ["show-ref", "--verify", "--quiet", head_ref.strip()])
+        unborn = status == 1
+    if not unborn:
+        reachable_args.append("HEAD")
+    candidates = set(run(repo, ["rev-list", "--reflog", "--all"]).splitlines()) - set(run(repo, reachable_args).splitlines())
     sources = defaultdict(list)
     raw = run(repo, ["log", "-g", "--all", "--format=%H%x00%gD%x00%gs%x00"])
     fields = raw.split("\0")

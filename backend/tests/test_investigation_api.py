@@ -56,6 +56,40 @@ def test_unknown_repository_and_required_parameters(investigation):
     assert client.get('/api/repo/file-history', params={'path': path, 'revision': target, 'file': '../outside', 'follow': False, 'offset': 0}).status_code == 422
 
 
+def test_recovery_candidates_with_unborn_head(tmp_path, monkeypatch):
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(tmp_path), *args], text=True).strip()
+
+    git('init', '-b', 'main')
+    git('config', 'user.name', 'API Test')
+    git('config', 'user.email', 'api@example.invalid')
+    git('config', 'core.hooksPath', '/dev/null')
+    path = str(tmp_path)
+    monkeypatch.setattr(main, 'STATE', {path: {}})
+    monkeypatch.setattr(main.paths, 'to_container', lambda value: value)
+    client = TestClient(main.app)
+    endpoint = '/api/repo/recovery-candidates'
+
+    response = client.get(endpoint, params={'path': path})
+    assert response.status_code == 200
+    assert response.json() == {'commits': []}
+
+    git('commit', '--allow-empty', '-m', 'reachable from main')
+    git('commit', '--allow-empty', '-m', 'retained only in reflog')
+    lost = git('rev-parse', 'HEAD')
+    git('reset', '--hard', 'HEAD^')
+    git('symbolic-ref', 'HEAD', 'refs/heads/unborn')
+
+    response = client.get(endpoint, params={'path': path})
+    assert response.status_code == 200
+    candidates = response.json()['commits']
+    assert [candidate['hash'] for candidate in candidates] == [lost]
+    assert candidates[0]['sources']
+
+    (tmp_path / '.git/refs/heads/unborn').write_text(f"{'f' * 40}\n")
+    assert client.get(endpoint, params={'path': path}).status_code == 502
+
+
 def test_commit_content_search_pages_matching_changes_at_fixed_shas(investigation):
     from pathlib import Path
 

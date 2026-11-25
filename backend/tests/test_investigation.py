@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import subprocess
 import pytest
 from app import investigation
@@ -82,6 +83,22 @@ def test_search_returns_committer_date_used_for_period(repo, monkeypatch):
         'hash': sha, 'subject': 'different dates', 'date': author_date,
         'author': 'Investigator', 'committer_date': committer_date,
     }]
+
+
+def test_search_since_walks_past_a_child_with_an_older_committer_date(repo, monkeypatch):
+    monkeypatch.setenv('GIT_COMMITTER_DATE', '2023-09-06T00:14:08+09:00')
+    git(repo, 'commit', '--allow-empty', '-m', 'match after start')
+    parent = git(repo, 'rev-parse', 'HEAD')
+    monkeypatch.setenv('GIT_COMMITTER_DATE', '2023-09-05T23:59:59+09:00')
+    git(repo, 'commit', '--allow-empty', '-m', 'match before start')
+    child = git(repo, 'rev-parse', 'HEAD')
+
+    start = '2023-09-06T00:00:00+09:00'
+    result = investigation.search(str(repo), child, 'match', '', start, '', '', 0, 'message')
+    assert [commit['hash'] for commit in result['commits']] == [parent]
+    command = shlex.split(result['command'])
+    assert f'--since-as-filter={start}' in command
+    assert git(repo, *command[1:]).split()[0] == git(repo, 'rev-parse', '--short', parent)
 
 
 def test_recovery_sources_and_reachable_exclusion(repo):

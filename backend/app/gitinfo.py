@@ -353,6 +353,15 @@ def default_branch(repo: str) -> str | None:
     return value[len(prefix):] if value.startswith(prefix) else None
 
 
+def _can_switch_back(repo: str) -> bool:
+    previous = _run(repo, ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", "@{-1}"])
+    if previous is None or not previous.startswith("refs/heads/"):
+        return False
+    ref = previous.rstrip("\n")
+    checkout = _run(repo, ["for-each-ref", "--format=%(refname)%00%(worktreepath)", "--", ref])
+    return checkout == f"{ref}\0\n"
+
+
 def next_command_without_status(worktree_state: str | None) -> dict[str, str] | None:
     if worktree_state == "prunable":
         return {"command": "git worktree prune", "reason": "prunable な worktree があります"}
@@ -365,6 +374,7 @@ def next_command(
     context: Mapping[str, Any] | None = None,
     *,
     resolve_destinations: Callable[[], dict[str, Any] | None] | None = None,
+    can_switch_back: Callable[[], bool] | None = None,
     worktree_state: str | None = None,
     merged: bool | None = None,
     worktree: str | None = None,
@@ -398,7 +408,9 @@ def next_command(
     if staged:
         return {"command": "git commit", "reason": "ステージ済みの変更があります"}
     if info["detached"]:
-        return {"command": "git switch -", "reason": "detached HEAD です"}
+        if can_switch_back is not None and can_switch_back():
+            return {"command": "git switch -", "reason": "detached HEAD です"}
+        return {"command": "git branch --contains HEAD", "reason": "detached HEAD の戻り先を確認できないため、現在のコミットを含むブランチを表示します"}
     if worktree_state == "prunable":
         return next_command_without_status(worktree_state)
     if worktree_state == "locked" and merged and worktree:
@@ -856,18 +868,19 @@ def collect(
         result["remote_status"] = "configured"
     elif remote_code == 1:
         result["remote_status"] = "unset"
-    result["next_command"] = next_command(
-        info,
-        result["remote"],
-        context,
-        resolve_destinations=lambda: branch_destinations(repo, info["branch"]),
-        worktree_state=resolved_worktree_state,
-        merged=resolved_merged,
-        worktree=resolved_worktree,
-    )
-
     if result["operations"]:
         result["next_command"] = {"command": "git status", "reason": "進行中のGit操作と競合を確認します"}
+    else:
+        result["next_command"] = next_command(
+            info,
+            result["remote"],
+            context,
+            resolve_destinations=lambda: branch_destinations(repo, info["branch"]),
+            can_switch_back=lambda: _can_switch_back(repo),
+            worktree_state=resolved_worktree_state,
+            merged=resolved_merged,
+            worktree=resolved_worktree,
+        )
 
     log = _run(repo, ["log", "-1", "--format=%h%x1f%s%x1f%an%x1f%cI"])
     if log:

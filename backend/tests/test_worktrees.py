@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -584,6 +585,7 @@ def test_failed_worktree_status_only_suggests_pruning_when_git_marks_it_prunable
     status = subprocess.run(["git", "-C", str(worktree), "status"], capture_output=True, text=True)
     assert status.returncode != 0
     reason = status.stderr.splitlines()[0]
+    assert scanner.has_missing_git_dir(str(worktree)) is False
 
     for state in ("ok", "locked", "prunable"):
         result = gitinfo.collect(str(worktree), context={
@@ -605,6 +607,70 @@ def test_failed_worktree_status_only_suggests_pruning_when_git_marks_it_prunable
     clean = gitinfo.collect(str(worktree), worktree_state="ok", merged=True)
     assert clean["error"] is None
     assert clean["next_command"]["command"] == f"git worktree remove {worktree}"
+
+
+def test_inventory_confirms_missing_gitdir_without_reclassifying_permission_errors_or_prunable(
+    repo_with_worktree: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, worktree = repo_with_worktree
+    target = worktree.parent / "missing-gitdir "
+    (worktree / ".git").write_text(f"gitdir: ../{target.name}\n")
+
+    def linked_row():
+        rows, _, _ = project._worktree_rows(str(repo), str(repo), {})
+        return next(row for row in rows if row["path"] == str(worktree))
+
+    target.mkdir()
+    assert linked_row()["git_dir_missing"] is False
+    target.rmdir()
+    assert linked_row()["state"] == "ok"
+    assert linked_row()["git_dir_missing"] is True
+
+    stat = os.stat
+
+    def denied(path, *args, **kwargs):
+        if path == str(worktree / ".." / target.name):
+            raise PermissionError(path)
+        return stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(scanner.os, "stat", denied)
+        assert linked_row()["git_dir_missing"] is False
+
+    shutil.rmtree(worktree)
+    assert linked_row()["state"] == "prunable"
+    assert linked_row()["git_dir_missing"] is False
+
+
+def test_gitdir_pointer_reads_only_the_first_line(tmp_path: Path) -> None:
+    (tmp_path / ".git").write_bytes(b"gitdir: missing\r\n\x00ignored")
+    assert scanner.has_missing_git_dir(str(tmp_path)) is True
+
+
+def test_detached_checkout_suggests_switch_back_only_to_an_available_local_branch(
+    repo_with_worktree: tuple[Path, Path],
+) -> None:
+    repo, worktree = repo_with_worktree
+    detached = worktree.parent / "detached"
+    git(repo, "worktree", "add", "-q", "--detach", str(detached))
+
+    assert gitinfo.collect(str(detached))["next_command"]["command"] == "git branch --contains HEAD"
+
+    git(detached, "switch", "-c", "return-target")
+    git(detached, "switch", "--detach")
+    assert gitinfo.collect(str(detached))["next_command"]["command"] == "git switch -"
+
+    git(worktree, "switch", "return-target")
+    assert gitinfo.collect(str(detached))["next_command"]["command"] == "git branch --contains HEAD"
+    git(worktree, "switch", "feature")
+
+    git(repo, "branch", "-d", "return-target")
+    assert gitinfo.collect(str(detached))["next_command"]["command"] == "git branch --contains HEAD"
+
+    git(repo, "commit", "--allow-empty", "-qm", "second")
+    git(detached, "switch", "--detach", "main")
+    git(detached, "rev-parse", "--verify", "@{-1}^{commit}")
+    assert gitinfo.collect(str(detached))["next_command"]["command"] == "git branch --contains HEAD"
 
 
 def test_worktree_states_and_next_command_precedence() -> None:

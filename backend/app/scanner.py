@@ -45,20 +45,38 @@ class RepoLayout(NamedTuple):
 
 
 def _gitdir_from_file(dot_git: str, repo: str) -> str | None:
-    """Resolve the ``gitdir:`` pointer used by linked worktrees."""
+    """Read the target path of the ``gitdir:`` pointer used by linked worktrees."""
     try:
-        with open(dot_git, encoding="utf-8", errors="replace") as f:
-            line = f.readline().strip()
+        with open(dot_git, "rb") as f:
+            pointer = f.readline().rstrip(b"\r\n")
     except OSError:
         return None
-    if not line.lower().startswith("gitdir:"):
+    prefix = b"gitdir: "
+    if not pointer.startswith(prefix) or b"\x00" in pointer:
         return None
-    value = line[len("gitdir:"):].strip()
+    value = os.fsdecode(pointer[len(prefix):])
     if not value:
         return None
     if not os.path.isabs(value):
         value = os.path.join(repo, value)
-    return os.path.realpath(value)
+    return value
+
+
+def has_missing_git_dir(repo: str) -> bool:
+    """Confirm that a readable .git pointer refers to a missing path."""
+    dot_git = os.path.join(repo, ".git")
+    if not os.path.isfile(dot_git):
+        return False
+    target = _gitdir_from_file(dot_git, repo)
+    if target is None:
+        return False
+    try:
+        os.stat(target)
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return False
 
 
 def git_dir(repo: str) -> str | None:
@@ -68,7 +86,8 @@ def git_dir(repo: str) -> str | None:
     if os.path.isdir(dot_git):
         actual = os.path.realpath(dot_git)
     elif os.path.isfile(dot_git):
-        actual = _gitdir_from_file(dot_git, repo)
+        target = _gitdir_from_file(dot_git, repo)
+        actual = os.path.realpath(target) if target is not None else None
     else:
         return None
     if actual is None or not os.path.isfile(os.path.join(actual, "HEAD")):
