@@ -11,6 +11,7 @@ import {
   historyHashList,
   historyLogCommand,
   historyRequestKey,
+  indexCommitEvents,
   localCalendarDate,
   sortHistory,
   UNKNOWN_AUTHOR_FILTER,
@@ -21,6 +22,20 @@ const commits = [
   { hash: "def456", subject: "Merge feature", author: "Ren", date: "2026-09-30T10:00:00Z", isMerge: true },
   { hash: "ghi789", subject: null, author: null, date: null, isMerge: false },
 ];
+
+test("commit event index keeps the first commit event for each SHA", () => {
+  const first = { type: "commit", commit_hash: "abc123", id: "first" };
+  const other = { type: "commit", commit_hash: "def456", id: "other" };
+  const index = indexCommitEvents([
+    { type: "agent", commit_hash: first.commit_hash },
+    first,
+    { ...first, id: "duplicate" },
+    { type: "commit", commit_hash: null },
+    other,
+  ]);
+  assert.deepEqual([...index], [[first.commit_hash, first], [other.commit_hash, other]]);
+});
+
 test("history search intersects words across subject, author and hash", () => {
   assert.deepEqual(filterHistory(commits, "FIX aki ABC", "all", null, null, null), [commits[0]]);
   assert.deepEqual(filterHistory(commits, "null", "all", null, null, null), []);

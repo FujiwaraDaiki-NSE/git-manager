@@ -16,6 +16,7 @@ import {
   contentSearchFileQuery,
   contentSearchInvestigationMarkdown,
   contentSearchJson,
+  contentSearchOutsidePreviewCommand,
   contentSearchPathLineList,
   contentSearchPaths,
   contentSearchQuery,
@@ -99,6 +100,24 @@ test('content context returns line numbers and highlights only the selected line
     ],
   });
   assert.throws(() => contentSearchContext('one', 1, undefined), TypeError);
+});
+
+test('content search quotes the pinned command and offers it only for matching lines cut off by the preview', () => {
+  const repo = "/tmp/it's repo";
+  const file = "doc's $(example).txt";
+  const preview = 'first\nmatched prefix';
+  const outside = { path: file, line: 3, text: 'matched outside' };
+  const partial = { path: file, line: 2, text: 'matched prefix and suffix' };
+  const complete = { path: file, line: 1, text: 'first' };
+  const command = (match, radius, truncated) => contentSearchOutsidePreviewCommand(
+    repo, HASH, match, radius, truncated, contentSearchContext(preview, match.line, radius),
+  );
+
+  assert.equal(command(outside, 1, true), `git -C '/tmp/it'\\''s repo' cat-file -p '${HASH}:doc'\\''s $(example).txt' | sed -n '2,4p'`);
+  assert.match(command(partial, 3, true), /sed -n '1,5p'$/);
+  assert.equal(command(complete, 3, true), null);
+  assert.equal(command({ ...partial, text: 'matched prefix' }, 3, true), null);
+  assert.equal(command(outside, 1, false), null);
 });
 
 test('content CSV escapes formula-like matching text and preserves newlines', () => {

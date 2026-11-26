@@ -9,6 +9,42 @@ import * as patchTools from '../app/patch-tools.mjs';
 import * as patchReviewTools from '../app/patch-review-tools.mjs';
 import * as sideBySideTools from '../app/side-by-side.mjs';
 
+test('diff, file and conflict stage searches leave IME Enter to the input and keep match navigation', () => {
+  for (const [file, navigate] of [
+    ['patch-view', 'goToMatch'],
+    ['repository-text-view', 'navigateMatch'],
+    ['conflict-inspector', 'goToMatch'],
+  ]) {
+    const source = readFileSync(new URL(`../app/${file}.tsx`, import.meta.url), 'utf8');
+    const tree = ts.createSourceFile(`${file}.tsx`, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    function findSearchHandler(node) {
+      if (ts.isJsxSelfClosingElement(node) && node.tagName.getText() === 'input') {
+        const attributes = node.attributes.properties;
+        const type = attributes.find((attribute) => attribute.name?.getText() === 'type');
+        if (type?.initializer?.getText() === '"search"') {
+          return attributes.find((attribute) => attribute.name?.getText() === 'onKeyDown')?.initializer?.expression;
+        }
+      }
+      return ts.forEachChild(node, findSearchHandler);
+    }
+    const handler = findSearchHandler(tree);
+    assert.ok(handler, file);
+    const moves = [];
+    let prevented = 0;
+    const onKeyDown = new Function(navigate, `return (${handler.getText()});`)((direction) => moves.push(direction));
+    const pressEnter = (isComposing, shiftKey) => onKeyDown({
+      key: 'Enter', nativeEvent: { isComposing }, shiftKey, preventDefault: () => { prevented += 1; },
+    });
+    pressEnter(true, false);
+    assert.deepEqual(moves, [], file);
+    assert.equal(prevented, 0, file);
+    pressEnter(false, false);
+    pressEnter(false, true);
+    assert.deepEqual(moves, [1, -1], file);
+    assert.equal(prevented, 2, file);
+  }
+});
+
 test('unified hunks retain exact text and map old/new line numbers', () => {
   const patch = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -4,2 +4,3 @@ title\n same\n-old\n+new\n+added\n\\ No newline at end of file';
   const [section] = parsePatch(patch);

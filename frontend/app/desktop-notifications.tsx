@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRepoStream } from "./repo-stream";
 import { agentStateLabel } from "./agent-overview.mjs";
+import { agentReportLaneId } from "./agent-timeline-tools.mjs";
 
 const STORAGE_KEY = "gitdash.desktop-notifications";
 
 export default function DesktopNotifications() {
-  const { subscribeAgentAttention, projectSummaries } = useRepoStream();
+  const { subscribeAgentAttention, projectSummaries, repos, reposLoading } = useRepoStream();
   const router = useRouter();
   const [enabled, setEnabled] = useState(false);
   const [available, setAvailable] = useState(false);
@@ -17,6 +18,8 @@ export default function DesktopNotifications() {
   const enabledRef = useRef(false);
   const projectsRef = useRef(projectSummaries);
   projectsRef.current = projectSummaries;
+  const reposRef = useRef(reposLoading ? null : repos);
+  reposRef.current = reposLoading ? null : repos;
 
   useEffect(() => {
     setAvailable("Notification" in window && window.isSecureContext);
@@ -40,7 +43,8 @@ export default function DesktopNotifications() {
       notification.onclick = () => {
         window.focus();
         const params = new URLSearchParams({ path, tab: "lanes" });
-        if (event.branch !== null) params.set("lane", `branch:${event.branch}`);
+        const lane = agentReportLaneId(project.id, event, reposRef.current);
+        if (lane !== null) params.set("lane", lane);
         router.push(`/project?${params}`);
         notification.close();
       };

@@ -2,6 +2,16 @@ import { decodeAuthorFilter, LANE_UPSTREAM_FILTERS, LANE_AGENT_FILTERS } from ".
 const CONTROL_TABS = new Set(["flow", "lanes", "activity", "files", "info"]);
 const TIME_RANGES = new Set(["current", "24h", "7d", "all"]);
 
+/**
+ * @param {{gitPath: string | null, gitTab: import("./repo-detail").DetailTab | null}} state
+ * @param {import("./types").ProjectWorktree[]} worktrees
+ */
+export function resolveGitDetail({ gitPath, gitTab }, worktrees) {
+  return gitPath !== null && gitTab !== null && worktrees.some(({ path }) => path === gitPath)
+    ? { path: gitPath, tab: gitTab }
+    : null;
+}
+
 export function projectRequestRange({ tab, range, event }) {
   return tab === "flow" || (tab === "files" && event === null) ? "current" : range;
 }
@@ -46,6 +56,9 @@ export function parseProjectUrl(search) {
   if (atParam !== null && (atParam.trim() === "" || !Number.isFinite(at) || at < 0 || at > 100)) invalidParams.push("at");
   const mergedParam = params.get("merged");
   if (mergedParam !== null && mergedParam !== "true" && mergedParam !== "false") invalidParams.push("merged");
+  const gitTab = params.get("gitTab");
+  /** @type {import("./repo-detail").DetailTab | null} */
+  const detailTab = gitTab === "status" || gitTab === "graph" || gitTab === "branches" ? gitTab : null;
   return {
     path: params.get("path"),
     tab: values.tab,
@@ -61,6 +74,8 @@ export function parseProjectUrl(search) {
     lane: params.get("lane"),
     branchRow: params.get("branchRow"),
     relationRef: params.get("relationRef"),
+    gitPath: params.get("gitPath"),
+    gitTab: detailTab,
     at,
     laneQuery: params.get("laneQuery") ?? "",
     activityQuery: params.get("activityQuery") ?? "",

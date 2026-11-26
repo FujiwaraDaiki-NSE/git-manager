@@ -34,9 +34,10 @@ function Command({ command, reason, path }: { command: string; reason: string; p
 export function OperationFacts({ operations, path }: { operations: GitOperation[] | null | undefined; path: string | null }) {
   return <section className="git-state-facts" aria-label="Git操作の途中状態">
     <strong>Git操作の途中状態</strong>
-    {operations == null ? <p>未取得</p> : operations.length === 0 ? <p>進行中の操作なし</p> : operations.map(({ kind, marker, step, total, commands }) => (
+    {operations == null ? <p>未取得</p> : operations.length === 0 ? <p>進行中の操作なし</p> : operations.map(({ kind, marker, step, total, commands, todo_first }) => (
       <div key={marker}>
         <p><strong>{kind}途中{step !== null && total !== null ? `（${step}/${total}）` : ""}</strong> · {marker}</p>
+        {todo_first && <p>todo先頭 <code>{todo_first.hash}</code> {todo_first.subject}</p>}
         {(kind === "rebase" || kind === "am") && step !== null && total !== null
           && Number.isInteger(step) && Number.isInteger(total) && step >= 1 && step <= total && (
           <div className="git-operation-progress">

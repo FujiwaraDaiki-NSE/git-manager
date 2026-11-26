@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, execSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,8 @@ import {
   STATUS_FILE_EXTENSION_NONE,
   buildStatusDiffCommands,
   buildStatusStageCommands,
+  buildStatusUnstageCommand,
+  buildUntrackedDirectoryCommand,
   filterStatusFilesByDirectory,
   filterStatusFilesByExtension,
   listStatusFileDirectories,
@@ -29,6 +31,64 @@ const entries = [
   { xy: "UU", path: "src/conflict.js" },
   { xy: "M.", path: "docs/read me.md" },
 ].map((entry) => ({ ...entry, original_path: null }));
+
+test("untracked directory command lists only unignored files under the literal directory", (t) => {
+  const repo = mkdtempSync(join(tmpdir(), "status other '"));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  execFileSync("git", ["-C", repo, "init", "-q"]);
+  for (const directory of ["dir[1]", "dir1"]) {
+    mkdirSync(join(repo, directory));
+    writeFileSync(join(repo, directory, "visible.txt"), "");
+    writeFileSync(join(repo, directory, "ignored.log"), "");
+  }
+  writeFileSync(join(repo, ".gitignore"), "*.log\n");
+  const buildCommand = (xy, path) => buildUntrackedDirectoryCommand(repo, { xy, path, original_path: null });
+  assert.equal(execSync(buildCommand("??", "dir[1]/"), { encoding: "utf8" }), "dir[1]/visible.txt\n");
+  assert.equal(buildCommand("??", ".gitignore"), null);
+  assert.equal(buildCommand(".M", "dir[1]/"), null);
+});
+
+test("unstage command restores only the selected regular file's index and keeps worktree edits", (t) => {
+  const repo = mkdtempSync(join(tmpdir(), "status unstage '"));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  const path = "literal[ab].txt";
+  git("init", "-q");
+  for (const name of [path, "literala.txt"]) writeFileSync(join(repo, name), "base\n");
+  git("add", ".");
+  git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base");
+  for (const name of [path, "literala.txt"]) writeFileSync(join(repo, name), "staged\n");
+  git("add", ".");
+  writeFileSync(join(repo, path), "worktree\n");
+
+  const selected = { xy: "MM", path, original_path: null, regular_file: true };
+  assert.equal(buildStatusUnstageCommand(repo, false, [selected], [selected]), null);
+  const excluded = [
+    { ...selected, xy: ".M", path: "unstaged" },
+    { ...selected, xy: "UU", path: "conflict" },
+    { ...selected, xy: "R.", path: "rename", original_path: "old" },
+    { ...selected, xy: "C.", path: "copy", original_path: "old" },
+    { ...selected, path: "submodule", regular_file: false },
+    { ...selected, path: "unknown type", regular_file: undefined },
+  ];
+  const all = [selected, ...excluded];
+  assert.equal(buildStatusUnstageCommand(repo, true, excluded, all), null);
+  execSync(buildStatusUnstageCommand(repo, true, all, all));
+  assert.equal(git("diff", "--cached", "--name-only"), "literala.txt\n");
+  assert.equal(git("show", `:${path}`), "base\n");
+  assert.equal(readFileSync(join(repo, path), "utf8"), "worktree\n");
+});
+
+test("unstage excludes both sides of a file/directory collision in the full status list", () => {
+  const parent = { xy: "D.", path: "foo", original_path: null, regular_file: true };
+  const child = { ...parent, xy: "A.", path: "foo/bar" };
+  const unrelated = { ...child, path: "foobar" };
+  const all = [parent, child, unrelated];
+
+  assert.equal(buildStatusUnstageCommand("/repo", true, [parent], all), null);
+  assert.equal(buildStatusUnstageCommand("/repo", true, [child], all), null);
+  assert.equal(buildStatusUnstageCommand("/repo", true, all, all), "git -C '/repo' restore --staged -- ':(literal)foobar'");
+});
 
 test("stage commands target exactly the selected literal paths", (t) => {
   const repo = mkdtempSync(join(tmpdir(), "status stage '"));

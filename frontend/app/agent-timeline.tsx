@@ -19,6 +19,7 @@ import {
 } from "./agent-overview.mjs";
 import {
   AGENT_DECISION_STATUSES,
+  agentReportLaneId,
   classifyCurrentAgentRows,
   agentReportFreshness,
   createTimelineProjectLabel,
@@ -109,20 +110,6 @@ function statusClass(status: string | null | undefined) {
   return (status || "unknown").replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
-function projectPath(project: TimelineProject | null | undefined) {
-  return project && typeof project.main_path === "string" && project.main_path.length > 0
-    ? project.main_path
-    : null;
-}
-
-function projectHref(project: TimelineProject | null | undefined, branch: string | null | undefined) {
-  const path = projectPath(project);
-  if (!path) return null;
-  const params = new URLSearchParams({ path, tab: "flow", range: "7d" });
-  if (branch) params.set("lane", `branch:${branch}`);
-  return `/project?${params.toString()}`;
-}
-
 function projectLabel(project: TimelineProject | null | undefined, projectId: string | null | undefined) {
   if (project?.name) return project.name;
   if (projectId) return projectId.split("/").filter(Boolean).at(-1) || "プロジェクト未取得";
@@ -138,17 +125,21 @@ function TimeValue({ value }: { value: string | null | undefined }) {
   return <time className="agent-timeline-time" dateTime={value ?? undefined} title={exactTime(value)}>{relativeTime(value)} · {exactTime(value)}</time>;
 }
 
-function ProjectBranch({ project, name, branch, children }: {
+function ProjectBranch({ project, name, report, repos, children }: {
   project: TimelineProject | null;
   name: string;
-  branch: string | null | undefined;
+  report: AgentTask;
+  repos: ReadonlyMap<string, Repo> | null;
   children: ReactNode;
 }) {
-  const href = projectHref(project, branch);
-  const label = `${name} / ${branchLabel(branch)}`;
-  return href
-    ? <Link className="agent-timeline-project-link" href={href} prefetch={false} aria-label={`${label}を開く`}>{children}</Link>
-    : <span tabIndex={0} className="agent-timeline-project-link is-unavailable" title="プロジェクトの作業パス未取得">{children}</span>;
+  if (!project?.main_path) {
+    return <span tabIndex={0} className="agent-timeline-project-link is-unavailable" title="プロジェクトの作業パス未取得">{children}</span>;
+  }
+  const params = new URLSearchParams({ path: project.main_path, tab: "flow", range: "7d" });
+  const lane = agentReportLaneId(project.id, report, repos);
+  if (lane !== null) params.set("lane", lane);
+  const label = `${name} / ${branchLabel(report.branch)}`;
+  return <Link className="agent-timeline-project-link" href={`/project?${params}`} prefetch={false} aria-label={`${label}を開く`}>{children}</Link>;
 }
 
 function currentStatus(task: AgentTask) {
@@ -171,7 +162,7 @@ function CurrentRow({ project, name, task, repos, oldDecision = false, acknowled
   const branch = task.branch;
   return (
     <li className={`agent-timeline-current-row status-${statusClass(agentTaskState(task))}${decision ? ` report-age-${freshness}` : ""}`}>
-      <ProjectBranch project={project} name={name} branch={task.branch}>
+      <ProjectBranch project={project} name={name} report={task} repos={repos}>
         <span className="agent-timeline-row-head"><strong>{name}</strong><span>{branchLabel(task.branch)}</span></span>
         <span className="agent-timeline-status-line"><span title={agentTaskState(task) === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{currentStatus(task)}</span>{task.attention && <span className="agent-timeline-attention">注意: {agentStateLabel(task.attention)}</span>}</span>
         {decision && <span className={`agent-timeline-age age-${freshness}`}>{freshness === "old" ? "古い · 24時間以上" : freshness === "recent" ? "直近 · 24時間未満" : "報告時刻未取得"}</span>}
@@ -217,15 +208,16 @@ function DecisionComparisonValue({ value }: { value: TimelineDecisionChange["bef
   return <ul>{value.map((item, index) => <li key={index}>{item}</li>)}</ul>;
 }
 
-function HistoryRow({ event, project, decisionChanges }: {
+function HistoryRow({ event, project, repos, decisionChanges }: {
   event: AgentEvent;
   project: TimelineProject | null;
+  repos: ReadonlyMap<string, Repo> | null;
   decisionChanges: TimelineDecisionChange[] | undefined;
 }) {
   const name = projectLabel(project, event.project_id);
   return (
     <li className={`agent-timeline-history-row ${event.kind === "lifecycle" ? "is-lifecycle" : "is-status"} status-${statusClass(event.status)}`}>
-      <ProjectBranch project={project} name={name} branch={event.branch}>
+      <ProjectBranch project={project} name={name} report={event} repos={repos}>
         <span className="agent-timeline-row-head"><strong>{name}</strong><span>{branchLabel(event.branch)}</span></span>
         <span className="agent-timeline-status-line"><span title={event.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{historicalStatus(event)}</span></span>
         <span className="agent-timeline-summary">{historicalSummary(event)}</span>
@@ -248,9 +240,10 @@ function HistoryRow({ event, project, decisionChanges }: {
   );
 }
 
-function HistoryList({ events, projectById, decisionChanges }: {
+function HistoryList({ events, projectById, repos, decisionChanges }: {
   events: AgentEvent[];
   projectById: Map<string, ProjectSummary>;
+  repos: ReadonlyMap<string, Repo> | null;
   decisionChanges: Map<string, TimelineDecisionChange[]>;
 }) {
   const groups: { date: string | null; events: AgentEvent[] }[] = [];
@@ -264,7 +257,7 @@ function HistoryList({ events, projectById, decisionChanges }: {
     <div key={date === null ? events[0].event_id : date}>
       <h4 className="agent-timeline-history-date">{date === null ? "日付未取得" : <time dateTime={date}>{date}</time>}</h4>
       <ol className="agent-timeline-list agent-timeline-history-list">
-        {events.map((event) => <HistoryRow key={event.event_id} event={event} project={event.project_id ? projectById.get(event.project_id) || null : null} decisionChanges={decisionChanges.get(event.event_id)} />)}
+        {events.map((event) => <HistoryRow key={event.event_id} event={event} project={event.project_id ? projectById.get(event.project_id) || null : null} repos={repos} decisionChanges={decisionChanges.get(event.event_id)} />)}
       </ol>
     </div>
   ));
@@ -577,7 +570,7 @@ export default function AgentTimelineSidebar({
           {history.length === 0 && !displaySnapshot.loading && displaySnapshot.error && <p className="agent-timeline-empty agent-timeline-error" role="alert">履歴を取得できませんでした。</p>}
           {history.length === 0 && !displaySnapshot.loading && !displaySnapshot.error && !historyDetails.dateWindow.error && events.length === 0 && <p className="agent-timeline-empty" role="status">保存されたagentイベントはありません。</p>}
           {history.length === 0 && !displaySnapshot.loading && !displaySnapshot.error && !historyDetails.dateWindow.error && events.length > 0 && <p className="agent-timeline-empty" role="status">条件に一致する取得済み履歴はありません。</p>}
-          {history.length > 0 && <HistoryList events={history} projectById={projectById} decisionChanges={decisionChanges} />}
+          {history.length > 0 && <HistoryList events={history} projectById={projectById} repos={reposLoading ? null : repos} decisionChanges={decisionChanges} />}
           {historyError && <p className="agent-timeline-empty agent-timeline-error" role="alert">古い履歴を取得できませんでした。{historyError}</p>}
           {historyHasMore && <button type="button" disabled={historyLoading || isPaused} onClick={loadOlderEvents}>{historyLoading ? "履歴を取得中…" : "さらに読み込む"}</button>}
           <div className="agent-timeline-history-actions">

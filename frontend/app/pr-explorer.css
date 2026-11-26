@@ -385,6 +385,8 @@
 .pr-explorer-card-title a:hover { text-decoration: underline; }
 .pr-explorer-card-head time { flex: 0 0 auto; color: var(--pr-muted); font: 10px var(--mono); }
 
+.pr-explorer-merged-title { margin-top: 6px; overflow-wrap: anywhere; white-space: normal; }
+
 .pr-explorer-merged-label {
   padding: 2px 6px;
   border: 1px solid color-mix(in srgb, var(--c-index) 45%, var(--pr-border));

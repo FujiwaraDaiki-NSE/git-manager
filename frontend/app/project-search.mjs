@@ -13,6 +13,7 @@ export function laneMatchesSearch(lane, query) {
 
 export function activityMatchesSearch(event, query) {
   if (!query) return true;
+  if (event.source === "git" && event.commit_hash?.toLowerCase().startsWith(query)) return true;
   return [
     event.subject,
     event.summary,

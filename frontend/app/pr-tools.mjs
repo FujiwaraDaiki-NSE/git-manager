@@ -81,6 +81,7 @@ function normalizePullRequest(value) {
   return {
     number: value.number,
     url: value.url,
+    title: value.title ?? null,
     source: value.source,
     target: value.target,
     commit_hash: value.commit_hash,
@@ -118,6 +119,7 @@ function queryText(record) {
     String(record.number),
     `#${record.number}`,
     record.url,
+    record.title,
     record.source,
     record.target,
     record.commit_hash,
@@ -314,6 +316,16 @@ export function buildPullRequestExplorerData(project, options) {
 const changesRequestedLabel = "変更要求";
 const ciFailureLabel = "CI 失敗";
 
+/** @param {import("./types").OpenPullRequest} pr */
+function githubChecksUrl(pr) {
+  if (validHttpUrl(pr.url) === null) return null;
+  const url = new URL(pr.url);
+  if (url.origin !== "https://github.com" || url.username || url.password) return null;
+  const path = url.pathname.replace(/\/$/u, "");
+  const match = /^\/[a-z\d-]+\/[\w.-]+\/pull\/([1-9]\d*)$/iu.exec(path);
+  return match?.[1] === String(pr.number) ? `${url.origin}${path}/checks` : null;
+}
+
 /** @param {import("./types").ProjectResponse["github"]} github */
 export function limitedMergedPullRequestCoverage(github) {
   return github.status === "available" && github.complete === false
@@ -375,14 +387,15 @@ export function openPullRequestLocalLanes(rows, number) {
 
 /** @param {import("./types").OpenPullRequest[]} pulls */
 export function openPullRequestsNeedingAttention(pulls) {
-  /** @type {Map<number, {number: number, url: string, title: string, reasons: string[]}>} */
+  /** @type {Map<number, {number: number, url: string, title: string, reasons: string[], checksUrl: string | null}>} */
   const matches = new Map();
   for (const pr of pulls) {
     const reasons = [];
-    if (pr.ciState === "FAILURE" || pr.ciState === "ERROR") reasons.push(ciFailureLabel);
+    const ciFailed = pr.ciState === "FAILURE" || pr.ciState === "ERROR";
+    if (ciFailed) reasons.push(ciFailureLabel);
     if (pr.reviewDecision === "CHANGES_REQUESTED") reasons.push(changesRequestedLabel);
     if (reasons.length > 0 && !matches.has(pr.number)) {
-      matches.set(pr.number, { number: pr.number, url: pr.url, title: pr.title, reasons });
+      matches.set(pr.number, { number: pr.number, url: pr.url, title: pr.title, reasons, checksUrl: ciFailed ? githubChecksUrl(pr) : null });
     }
   }
   return [...matches.values()];

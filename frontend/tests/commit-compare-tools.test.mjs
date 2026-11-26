@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   buildComparisonFilesCsv,
   buildComparisonMarkdown,
+  comparisonPathChanges,
   comparisonStatChanges,
+  comparisonTextLineCounts,
   pinnedComparisonUrl,
   buildComparisonQuery,
   comparisonModeLabel,
@@ -95,4 +97,23 @@ test("comparison reports preserve unknowns and escape fence characters without c
   assert.equal(context.command, comparisonReproductionCommand(path, "git diff c b"));
   assert.equal(comparisonStatChanges(stats, { ...stats, additions: 3, binary: 2 })[1].delta, null);
   assert.equal(comparisonStatChanges(stats, { ...stats, binary: 2 })[3].delta, 1);
+  assert.equal(comparisonStatChanges(stats, { ...stats, renamed: 1 })[4].label, "名前変更・コピー");
+});
+
+test("the text subtotal counts measured rows and excludes each unmeasured file once", () => {
+  assert.deepEqual(comparisonTextLineCounts([
+    { path: "README.md", additions: 5, deletions: 2, binary: false },
+    { path: "empty.txt", additions: 0, deletions: 0, binary: false },
+    { path: "logo.png", additions: "-", deletions: "-", binary: true },
+    { path: "unknown.txt", additions: 3, deletions: "-", binary: false },
+  ]), { additions: 5, deletions: 2, excluded: 2 });
+});
+
+test("comparison path changes use unique file paths, including rename or copy destinations", () => {
+  const previous = [{ path: "same.txt" }, { path: "source.txt" }];
+  const current = [{ path: "same.txt" }, { path: "new.txt", old_path: "source.txt" }, { path: "new.txt" }];
+  assert.deepEqual(comparisonPathChanges(previous, current), {
+    currentOnly: ["new.txt"], previousOnly: ["source.txt"],
+  });
+  assert.deepEqual(comparisonPathChanges(current, current), { currentOnly: [], previousOnly: [] });
 });

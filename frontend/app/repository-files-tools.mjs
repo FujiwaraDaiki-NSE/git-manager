@@ -169,6 +169,43 @@ export function repositoryBase64ToBytes(value) {
   return result;
 }
 
+/** @param {{kind: string, truncated: boolean, size: number | null, content_base64: string}} file */
+export function repositoryImagePreviewSrc(file) {
+  if (file.kind !== "blob" || file.truncated || file.size === null) return null;
+  let bytes;
+  try {
+    bytes = repositoryBase64ToBytes(file.content_base64);
+  } catch {
+    return null;
+  }
+  if (bytes.byteLength !== file.size) return null;
+  const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (pngSignature.every((byte, index) => bytes[index] === byte)) {
+    return `data:image/png;base64,${file.content_base64}`;
+  }
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return `data:image/jpeg;base64,${file.content_base64}`;
+  }
+  return null;
+}
+
+/**
+ * @param {string | null} remote
+ * @param {string} revision
+ * @param {string} file
+ * @param {{start: number, end: number} | null} range
+ */
+export function buildRepositoryGitHubRangeHref(remote, revision, file, range) {
+  if (remote === null || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(revision) || !range) return null;
+  const match = /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/iu.exec(remote.trim());
+  if (!match) return null;
+  const [, owner, repository] = match;
+  const parts = file.split("/");
+  if ([owner, repository, ...parts].some((part) => part === "" || part === "." || part === "..")) return null;
+  if (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 1 || range.end < range.start) return null;
+  return `https://github.com/${owner}/${repository}/blob/${revision}/${parts.map(encodeURIComponent).join("/")}#L${range.start}-L${range.end}`;
+}
+
 /** Create the existing file-history investigation link without starting the investigation. */
 export function buildRepositoryFileHistoryHref(href, path, revision, file, follow) {
   requiredString(href, "href");

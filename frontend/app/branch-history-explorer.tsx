@@ -14,6 +14,7 @@ import {
   historyHashList,
   historyLogCommand,
   historyRequestKey,
+  indexCommitEvents,
   sortHistory,
   UNKNOWN_AUTHOR_FILTER,
 } from "./branch-history-tools.mjs";
@@ -62,9 +63,9 @@ function commitEvent(
   hash: string,
   metadata: ProjectBranchCommit | null,
   parents: string[] | null,
+  existing: ProjectEvent | undefined,
 ): ProjectEvent {
   const local = uniqueLocalForCommit(row.locals, hash) as ProjectLane | null;
-  const existing = project.events.find((event) => event.type === "commit" && event.commit_hash === hash);
   return {
     ...(existing ?? {}),
     id: existing?.id ?? `branch-history:${row.id}:${hash}`,
@@ -87,7 +88,12 @@ function commitEvent(
   };
 }
 
-function recordsForRow(project: ProjectResponse, row: ProjectBranchRow, commits: ProjectBranchCommit[]): HistoryRecord[] {
+function recordsForRow(
+  project: ProjectResponse,
+  row: ProjectBranchRow,
+  commits: ProjectBranchCommit[],
+  eventsByHash: ReadonlyMap<string, ProjectEvent>,
+): HistoryRecord[] {
   const metadata = new Map([...commits, ...row.tip_commits].map((commit) => [commit.hash, commit]));
   const hashes = Array.from(new Set([
     ...commits.map((commit) => commit.hash),
@@ -95,7 +101,7 @@ function recordsForRow(project: ProjectResponse, row: ProjectBranchRow, commits:
   ]));
   return hashes.map((hash) => {
     const detail = metadata.get(hash) ?? null;
-    const existing = project.events.find((event) => event.type === "commit" && event.commit_hash === hash);
+    const existing = eventsByHash.get(hash);
     // Parent metadata is the only source used to classify a row. If neither
     // source has parents, keep the kind unknown instead of calling it regular.
     const parents = Array.isArray(detail?.parents)
@@ -110,7 +116,7 @@ function recordsForRow(project: ProjectResponse, row: ProjectBranchRow, commits:
       date: detail?.date ?? existing?.occurred_at ?? null,
       parents,
       isMerge: parents === null ? null : parents.length > 1,
-      event: commitEvent(project, row, hash, detail, parents),
+      event: commitEvent(project, row, hash, detail, parents, existing),
     };
   });
 }
@@ -196,10 +202,11 @@ export default function BranchHistoryExplorer({
 
   const records = useMemo(() => {
     if (!selectedRow) return [];
-    const initial = recordsForRow(project, selectedRow, selectedCommits);
+    const eventsByHash = indexCommitEvents(project.events);
+    const initial = recordsForRow(project, selectedRow, selectedCommits, eventsByHash);
     const known = new Set(initial.map((commit) => commit.hash));
     const extras = extraCommits.filter((commit) => !known.has(commit.hash));
-    return [...initial, ...recordsForRow(project, { ...selectedRow, tip_commits: [] }, extras)];
+    return [...initial, ...recordsForRow(project, { ...selectedRow, tip_commits: [] }, extras, eventsByHash)];
   }, [extraCommits, project, selectedCommits, selectedRow]);
 
   const dateRangeError = useMemo(() => historyDateRangeError(startDate, endDate), [endDate, startDate]);

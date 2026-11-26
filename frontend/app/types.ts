@@ -1,5 +1,5 @@
 export type FetchStatus = { attempted_at: number; result: "success" | "failure"; category: "authentication" | "connection" | "timeout" | "other" | null; reason: string | null };
-export type GitOperation = { kind: string; marker: string; step: number | null; total: number | null; commands: NextCommand[] };
+export type GitOperation = { kind: string; marker: string; step: number | null; total: number | null; commands: NextCommand[]; todo_first?: { hash: string; subject: string } | null };
 export type PushRemoteConfig = {
   selected_key: string | null;
   keys: {
@@ -9,7 +9,7 @@ export type PushRemoteConfig = {
   }[];
 };
 export type BranchDestinations = { upstream_state: "unset" | "configured"; upstream_gone: boolean; upstream_head: string | null; push_ref_reason: string | null; push_refspecs: string[] | null; fetch_remote: string | null; fetch_urls: string[] | null; upstream: string | null; upstream_ref: string | null; push_remote: string | null; push_remote_config: PushRemoteConfig; push_urls: string[] | null; push_ref: string | null; push_default: string | null };
-export type Entry = { xy: string; path: string; original_path: string | null };
+export type Entry = { xy: string; path: string; original_path: string | null; regular_file?: boolean };
 export type Count = { xy: string; count: number };
 export type Commit = { hash: string; subject: string; author: string; date: string };
 export type NextCommand = { command: string; reason: string };
@@ -234,6 +234,7 @@ export type ProjectLane = {
 export type ProjectBranchPullRequest = {
   number: number;
   url: string;
+  title: string | null;
   source: string;
   target: string;
   source_repository: string | null;
@@ -511,6 +512,7 @@ export type Repo = {
   activity?: number;
   error?: string | null;
   branch?: string | null;
+  head?: string | null;
   detached?: boolean;
   upstream?: string | null;
   ahead?: number;

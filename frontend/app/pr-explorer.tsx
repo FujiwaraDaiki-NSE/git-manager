@@ -28,6 +28,7 @@ type PrView = "cards" | "table";
 type PullRequestRecord = {
   number: number;
   url: string;
+  title: string | null;
   source: string;
   target: string;
   commit_hash: string | null;
@@ -117,7 +118,7 @@ function OpenPullRequestAttention({ open, branchRows }: {
           </p>
           {result.matches.length > 0 && (
             <ul className="pr-explorer-open-list">
-              {result.matches.map(({ number, url, title, reasons }) => {
+              {result.matches.map(({ number, url, title, reasons, checksUrl }) => {
                 const href = validHttpUrl(url);
                 const lanes = openPullRequestLocalLanes(branchRows, number);
                 return (
@@ -125,6 +126,7 @@ function OpenPullRequestAttention({ open, branchRows }: {
                     {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(number)}</strong>}
                     <strong>{title}</strong>
                     <span>{reasons.join(" · ")}</span>
+                    {checksUrl !== null && <a href={checksUrl} target="_blank" rel="noreferrer">Checksを開く <span aria-hidden="true">↗</span></a>}
                     {lanes.map((lane) => (
                       <Link key={lane.id} href={updateProjectUrl(`/project?${searchParams.toString()}`, {
                         tab: "lanes", lane: lane.id, event: null, branchRow: null, relationRef: null,
@@ -214,6 +216,7 @@ function PullRequestCard({ record, onOpenCommit }: { record: PullRequestRecord; 
           </div>
           <time dateTime={date}>{exactDate(record.merged_at)}</time>
         </header>
+        {record.title !== null && <div className="pr-explorer-merged-title">{record.title}</div>}
         <div className="pr-explorer-route">
         <div className="pr-explorer-endpoint">
             <span className="pr-explorer-endpoint-label">マージ元</span>
@@ -254,6 +257,7 @@ function PullRequestTable({ records, onOpenCommit }: { records: PullRequestRecor
                   {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(record.number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(record.number)}</strong>}
                   <span className="pr-explorer-merged-label">マージ済み</span>
                   {!href && <span className="pr-explorer-table-missing">リンク未取得</span>}
+                  {record.title !== null && <div className="pr-explorer-merged-title">{record.title}</div>}
                 </th>
                 <td><time dateTime={date}>{exactDate(record.merged_at)}</time></td>
                 <td><code title={record.source}>{record.source}</code></td>
@@ -368,7 +372,7 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
       <div className="pr-explorer-toolbar" role="search" aria-label="マージ済みPRを絞り込む">
         <label className="pr-explorer-search">
           <span>検索</span>
-          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="番号・マージ元・マージ先・コミット" aria-label="マージ済みPRを検索" />
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="番号・題名・マージ元・マージ先・コミット" aria-label="マージ済みPRを検索" />
         </label>
         <label className="pr-explorer-select">
           <span>マージ先</span>

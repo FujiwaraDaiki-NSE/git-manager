@@ -15,6 +15,7 @@ import IgnoreInspector from "./ignore-inspector";
 import FileAttributes from "./file-attributes";
 import ConflictInspector from "./conflict-inspector";
 import CommitContainment from "./commit-containment";
+import { isContainmentHash } from "./commit-containment-tools.mjs";
 import TreeSizes from "./tree-sizes";
 import ReflogExplorer from "./reflog-explorer";
 import CommitCompare from "./commit-compare";
@@ -47,7 +48,7 @@ import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
 import { fetchCommitDetail } from "./repo-detail-tools.mjs";
 import { agentDecisionReportTimes, agentReportKey, agentStateLabel, agentTaskState, mergeProjectAgentEvent } from "./agent-overview.mjs";
-import { canDisplayProject, parseProjectUrl, projectRequestRange, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { canDisplayProject, parseProjectUrl, projectRequestRange, resolveGitDetail, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
 import { activityMatchesSearch, checkedOutWorktreePaths, compareActivityEvents, laneMatchesFilter, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import {
   activityAuthors,
@@ -247,6 +248,8 @@ function projectFromSearch(search: string) {
     lane: parsed.lane,
     branchRow: parsed.branchRow,
     relationRef: parsed.relationRef,
+    gitPath: parsed.gitPath,
+    gitTab: parsed.gitTab,
     at: parsed.at,
     laneQuery: parsed.laneQuery,
     laneFilter: parsed.laneFilter as LaneFilter,
@@ -279,12 +282,15 @@ function useProjectUrl() {
   }, [search]);
   const update = useCallback((changes: ProjectUrlChanges, historyMode: "push" | "replace" = "push") => {
     const nextHref = updateProjectUrl(window.location.href, changes);
+    const nextState = projectFromSearch(new URL(nextHref, window.location.origin).search);
     // Keep tab/range/selection navigable with browser back/forward. Slider
     // drags are the high-frequency exception and replace only the observation
     // point until the user chooses another URL-level control.
     const replace = historyMode === "replace" || (Object.keys(changes).length === 1 && Object.prototype.hasOwnProperty.call(changes, "at"));
-    window.history[replace ? "replaceState" : "pushState"]({}, "", nextHref);
-    setState(projectFromSearch(new URL(nextHref, window.location.origin).search));
+    const gitDetailPushed = nextState.gitPath !== null && nextState.gitTab !== null
+      && (replace ? window.history.state?.gitDetailPushed === true : typeof changes.gitPath === "string");
+    window.history[replace ? "replaceState" : "pushState"](gitDetailPushed ? { gitDetailPushed } : {}, "", nextHref);
+    setState(nextState);
   }, []);
   return { state, update };
 }
@@ -570,7 +576,7 @@ function ActivityView({
       <div className="project-search-toolbar activity-explorer-toolbar" role="search" aria-label="アクティビティを絞り込む">
         <label>
           <span>検索</span>
-          <input aria-label="アクティビティを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="件名・概要・担当者・ブランチ" />
+          <input aria-label="アクティビティを検索" type="search" value={searchQuery} onChange={(event) => onSearch(event.target.value)} placeholder="件名・概要・担当者・ブランチ・コミットSHA（前方一致）" />
         </label>
         <button className="subtle-button" type="button" disabled={!searchQuery} onClick={() => onSearch("")}>クリア</button>
         <label>
@@ -664,7 +670,7 @@ function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectRes
         <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
       <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent報告なし</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><AgentDecisionDetails decision={task.decision} /><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
-      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} projectWorktrees={project.worktrees} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} laneComparison={null} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
+      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} initialRevision={null} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} projectWorktrees={project.worktrees} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} laneComparison={null} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
       <WorktreeExplorer project={project} onOpenGit={onOpenGit} onSelectLane={onSelectLane} />
       <PrExplorer project={project} />
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
@@ -810,6 +816,7 @@ function CommitDetail({
       <div className="selection-kicker">Git コミット</div>
       <h3>{header.subject ?? "コミット詳細"}</h3>
       <div className="selection-commit-meta"><code>{hash ?? "未取得"}</code>{hash && <CopyButton value={hash} label="コミットIDをコピー" />}<span>{header.author ?? "author 未取得"}</span><time dateTime={header.date ?? undefined}>{exactDate(header.date)}</time></div>
+      {typeof hash === "string" && isContainmentHash(hash) && <CommitContainment path={path} initialRevision={hash} />}
       {state === "loading" && <div className="selection-loading" role="status">完全なコミット詳細を取得中…</div>}
       {state === "error" && <div className="selection-error" role="alert">{error}<button className="subtle-button" type="button" onClick={() => setRetryToken((value) => value + 1)}>再試行</button></div>}
       {state === "ready" && detail && <>
@@ -934,7 +941,9 @@ function LegacyGitModal({
   copyError,
   onClose,
   onCopy,
+  onCopyUrl,
   onTabChange,
+  urlCopyState,
 }: {
   repos: ReadonlyMap<string, Repo>;
   onOpenWorktree: (path: string) => void;
@@ -944,7 +953,9 @@ function LegacyGitModal({
   copyError: string | null;
   onClose: () => void;
   onCopy: (value: string) => void;
+  onCopyUrl: () => void;
   onTabChange: (tab: DetailTab) => void;
+  urlCopyState: CopyStatus;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -953,7 +964,14 @@ function LegacyGitModal({
     <div className="legacy-overlay">
       <div ref={panelRef} className="legacy-panel" role="dialog" aria-modal="true" aria-label="Git詳細" tabIndex={-1}>
         <div className="legacy-panel-head">
-          <div><span className="eyebrow">GIT DETAIL</span><strong>{repo.branch ?? repo.name}</strong></div>
+          <div>
+            <span className="eyebrow">GIT DETAIL</span>
+            <strong>{repo.branch ?? repo.name}</strong>
+            <button className="subtle-button" type="button" onClick={onCopyUrl}>
+              {urlCopyState === "success" ? "URLをコピーしました" : "この画面のURLをコピー"}
+            </button>
+            {urlCopyState === "error" && <span>URLをコピーできませんでした。</span>}
+          </div>
           <button ref={closeRef} className="icon-close" type="button" aria-label="Git詳細を閉じる" onClick={onClose}>×</button>
         </div>
         <RepoDetail repos={repos} onOpenWorktree={onOpenWorktree} activeTab={tab} copied={copied} onCopy={onCopy} onTabChange={onTabChange} repo={repo} />
@@ -1015,15 +1033,8 @@ export default function ProjectControl() {
   const setLaneOrder = (value: LaneOrder) => updateUrl({ laneOrder: value === "name" ? null : value });
   const setActivityQuery = (value: string) => updateUrl({ activityQuery: value }, "replace");
   const setActivityOrder = (value: ActivityOrder) => updateUrl({ activityOrder: value === "newest" ? null : value });
-  const projectId = project?.id;
-  const projectPath = urlState.path;
-  const [gitSelection, setGitSelection] = useState<{ projectId: string; projectPath: string; path: string } | null>(null);
-  const gitPath = gitSelection !== null && gitSelection.projectId === projectId && gitSelection.projectPath === projectPath
-    ? gitSelection.path : null;
-  useEffect(() => {
-    setGitSelection((current) => current !== null && current.projectId === projectId && current.projectPath === projectPath ? current : null);
-  }, [projectId, projectPath]);
-  const [gitTab, setGitTab] = useState<DetailTab>("status");
+  const gitDetail = project && canDisplayProject(urlState, loadedRequest) ? resolveGitDetail(urlState, project.worktrees) : null;
+  const gitPath = gitDetail === null ? null : gitDetail.path;
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [projectUrlCopyState, setProjectUrlCopyState] = useState<CopyStatus>("idle");
@@ -1046,7 +1057,7 @@ export default function ProjectControl() {
 
   useEffect(() => {
     setProjectUrlCopyState("idle");
-  }, [urlState.at, urlState.branchRow, urlState.relationRef, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, laneQuery, laneFilter, laneOrder, laneAuthorFilter, laneUpstreamFilter, laneAgentFilter, activityQuery, activityFilter, activityOrder]);
+  }, [urlState.at, urlState.branchRow, urlState.relationRef, urlState.event, urlState.lane, urlState.merged, urlState.path, urlState.range, urlState.tab, urlState.gitPath, urlState.gitTab, laneQuery, laneFilter, laneOrder, laneAuthorFilter, laneUpstreamFilter, laneAgentFilter, activityQuery, activityFilter, activityOrder]);
 
 
   const projectUpdateToken = project ? projectUpdates.get(project.id) : undefined;
@@ -1184,22 +1195,21 @@ export default function ProjectControl() {
     updateUrl({ event: hash, lane: lane?.id ?? null, branchRow: branchRowId ?? null, relationRef: null });
   }, [project?.lanes, updateUrl]);
   const selectLane = useCallback((lane: ProjectLane) => updateUrl({ lane: lane.id, event: null, branchRow: null, relationRef: null }), [updateUrl]);
-  const selectGitPath = useCallback((path: string) => {
-    if (projectId === undefined || projectPath === null) return;
-    setCopyError(null);
-    setGitSelection({ projectId, projectPath, path });
-  }, [projectId, projectPath]);
-  const openGit = useCallback((lane: ProjectLane) => {
-    if (lane.path) selectGitPath(lane.path);
-  }, [selectGitPath]);
   const openWorktreeGit = useCallback((path: string) => {
-    selectGitPath(path);
-    setGitTab("status");
-  }, [selectGitPath]);
+    setCopyError(null);
+    updateUrl({ gitPath: path, gitTab: "status" }, gitPath === null ? "push" : "replace");
+  }, [gitPath, updateUrl]);
+  const openGit = useCallback((lane: ProjectLane) => {
+    if (lane.path) openWorktreeGit(lane.path);
+  }, [openWorktreeGit]);
   const closeGit = useCallback(() => {
     setCopyError(null);
-    setGitSelection(null);
-  }, []);
+    if (window.history.state?.gitDetailPushed === true) {
+      window.history.back();
+    } else {
+      updateUrl({ gitPath: null, gitTab: null }, "replace");
+    }
+  }, [updateUrl]);
   const closeSelection = useCallback(() => updateUrl({ event: null, lane: null, branchRow: null }), [updateUrl]);
   if (urlState.invalidParams.length) {
     return <main className="control-shell" id="main-content" tabIndex={-1}>
@@ -1244,15 +1254,16 @@ export default function ProjectControl() {
           {urlState.tab === "flow" && <><BranchTimeline onOpenGit={openGit} onRangeChange={(range) => updateUrl({ range, at: 100 })} onSelect={selectEvent} onSelectLane={selectLane} onShowMergedChange={setShowMerged} onTimelineChange={(value) => updateUrl({ at: value }, "replace")} project={project} range={urlState.range} renderSections={(notes) => <BranchFlowSections key={project.main_path} project={project} section={urlState.flowSection} onSectionChange={(flowSection) => updateUrl({ flowSection })} relationRef={urlState.relationRef} selectedLane={selectedLane} selectedRowId={urlState.branchRow} onSelect={selectEvent}>{notes}</BranchFlowSections>} selectedKey={selectedHash} selectedLane={selectedLane} selectedRowId={urlState.branchRow} showMerged={urlState.merged} timeline={urlState.at} /></>}
           {urlState.tab === "lanes" && <><WorktreeOverlaps path={project.main_path} agentTasks={project.agent_tasks} onOpenWorktree={openWorktreeGit} /><WorkLanes authorFilter={laneAuthorFilter} onAuthorFilter={(value) => updateUrl({ laneAuthorFilter: value })} upstreamFilter={laneUpstreamFilter} onUpstreamFilter={(value) => updateUrl({ laneUpstreamFilter: value === "all" ? null : value })} agentFilter={laneAgentFilter} onAgentFilter={(value) => updateUrl({ laneAgentFilter: value === "all" ? null : value })} onResetFilters={() => updateUrl({ laneQuery: null, laneFilter: null, laneAuthorFilter: null, laneUpstreamFilter: null, laneAgentFilter: null })} searchQuery={laneQuery} onSearch={setLaneQuery} filter={laneFilter} onFilter={setLaneFilter} order={laneOrder} onOrder={setLaneOrder} onOpenGit={openGit} onSelectLane={selectLane} onShowMergedChange={setShowMerged} project={project} selectedLane={selectedLane} showMerged={urlState.merged} /></>}
           {urlState.tab === "activity" && <><div className="activity-toolbar-spacer" /> <ActivityView searchQuery={activityQuery} onSearch={setActivityQuery} order={activityOrder} onOrder={setActivityOrder} filter={activityFilter} onFilter={(filter) => updateUrl({ activityFilter: filter === "all" ? null : filter, event: null })} onSelect={selectEvent} project={project} /></>}
-          {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルを調べる</h3><p className="section-copy">指定した版の内容や変更元を確認し、無視ルール・改行・Git属性の扱いを調べられます。</p></div></div><ConflictInspector key={`conflicts:${project.main_path}`} path={project.main_path} /><TreeSizes key={`sizes:${project.main_path}`} path={project.main_path} /><ContentSearch key={`content:${project.main_path}`} path={project.main_path} /><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /><IgnoreInspector key={`ignore:${project.main_path}`} path={project.main_path} /><FileAttributes key={`attributes:${project.main_path}`} path={project.main_path} /></section>}
+          {urlState.tab === "files" && <section className="info-section" aria-labelledby="project-files-title"><div className="section-heading-row"><div><h3 id="project-files-title">ファイルを調べる</h3><p className="section-copy">指定した版の内容や変更元を確認し、無視ルール・改行・Git属性の扱いを調べられます。</p></div></div><ConflictInspector key={`conflicts:${project.main_path}`} path={project.main_path} /><TreeSizes key={`sizes:${project.main_path}`} path={project.main_path} /><ContentSearch key={`content:${project.main_path}`} path={project.main_path} /><RepositoryFiles key={`files:${project.main_path}`} path={project.main_path} remote={project.remote} /><BlameExplorer key={`blame:${project.main_path}`} path={project.main_path} /><IgnoreInspector key={`ignore:${project.main_path}`} path={project.main_path} /><FileAttributes key={`attributes:${project.main_path}`} path={project.main_path} /></section>}
           {urlState.tab === "info" && <ProjectInfo project={project} onOpenGit={openGit} onSelectLane={selectLane} />}
         </section>
         {(selectedEvent || selectedLane) && <PaneSeparator width={detailWidth} onChange={setDetailWidth} minimum={320} label="選択詳細の幅" />}
         {(selectedEvent || selectedLane) && <SelectionPane onClose={closeSelection} onOpenGit={openGit} project={project} selectedEvent={selectedEvent} selectedHash={selectedHash} selectedLane={selectedLane} />}
       </div>
       <GitGuide key={project.main_path} path={project.main_path} />
-      {gitPath && legacyRepo && <LegacyGitModal repos={repos} onOpenWorktree={openWorktreeGit} copied={copied} copyError={copyError} onClose={closeGit} onCopy={copy} onTabChange={setGitTab} repo={legacyRepo} tab={gitTab} />}
-      {gitPath && !legacyRepo && <LegacyUnavailableModal onClose={closeGit} />}
+      {gitDetail && (legacyRepo
+        ? <LegacyGitModal repos={repos} onOpenWorktree={openWorktreeGit} copied={copied} copyError={copyError} onClose={closeGit} onCopy={copy} onCopyUrl={copyCurrentProjectUrl} onTabChange={(gitTab) => updateUrl({ gitTab }, "replace")} repo={legacyRepo} tab={gitDetail.tab} urlCopyState={projectUrlCopyState} />
+        : <LegacyUnavailableModal onClose={closeGit} />)}
     </main>
   );
 }

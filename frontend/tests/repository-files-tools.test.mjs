@@ -4,6 +4,7 @@ import {
   REPOSITORY_FILES_MAX_PREVIEW_BYTES,
   boundedRepositoryText,
   buildRepositoryFileHistoryHref,
+  buildRepositoryGitHubRangeHref,
   filterRepositoryFileEntries,
   findRepositorySymlinkTarget,
   listRepositoryDirectoryEntries,
@@ -11,6 +12,7 @@ import {
   repositoryFileLineContext,
   repositoryFilesQuery,
   repositoryFileQuery,
+  repositoryImagePreviewSrc,
   searchRepositoryFileEntries,
 } from "../app/repository-files-tools.mjs";
 
@@ -90,4 +92,32 @@ test("binary base64 decoding preserves every byte and text previews are bounded"
   const bounded = boundedRepositoryText(text);
   assert.ok(new TextEncoder().encode(bounded).byteLength <= REPOSITORY_FILES_MAX_PREVIEW_BYTES);
   assert.throws(() => repositoryBase64ToBytes("not base64!"), /base64/);
+});
+
+test("image previews require complete PNG or JPEG bytes regardless of file name", () => {
+  const png = { kind: "blob", path: "image.bin", truncated: false, size: 8, content_base64: "iVBORw0KGgo=" };
+  const jpeg = { ...png, size: 4, content_base64: "/9j/4A==" };
+  assert.equal(repositoryImagePreviewSrc(png), "data:image/png;base64,iVBORw0KGgo=");
+  assert.equal(repositoryImagePreviewSrc(jpeg), "data:image/jpeg;base64,/9j/4A==");
+  assert.equal(repositoryImagePreviewSrc({ ...png, truncated: true }), null);
+  assert.equal(repositoryImagePreviewSrc({ ...jpeg, size: 5 }), null);
+  assert.equal(repositoryImagePreviewSrc({ ...png, size: 3, path: "unknown.png", content_base64: "AAH/" }), null);
+  assert.equal(repositoryImagePreviewSrc({ ...png, content_base64: "invalid!" }), null);
+});
+
+test("GitHub range links encode the file path and keep the full commit and selected lines", () => {
+  const sha = "a".repeat(40);
+  const file = "src/日本語 #%.ts";
+  const range = { start: 2, end: 4 };
+  const expected = `https://github.com/owner/repo/blob/${sha}/src/%E6%97%A5%E6%9C%AC%E8%AA%9E%20%23%25.ts#L2-L4`;
+  for (const remote of ["https://github.com/owner/repo", "git@github.com:owner/repo.git", "ssh://git@github.com/owner/repo.git"]) {
+    assert.equal(buildRepositoryGitHubRangeHref(remote, sha, file, range), expected);
+  }
+  const remote = "https://github.com/owner/repo";
+  assert.equal(buildRepositoryGitHubRangeHref(null, sha, file, range), null);
+  assert.equal(buildRepositoryGitHubRangeHref("https://github.com.example/owner/repo", sha, file, range), null);
+  assert.equal(buildRepositoryGitHubRangeHref(remote, sha.slice(0, 12), file, range), null);
+  assert.equal(buildRepositoryGitHubRangeHref(remote, sha, "", range), null);
+  assert.equal(buildRepositoryGitHubRangeHref(remote, sha, file, null), null);
+  assert.equal(buildRepositoryGitHubRangeHref(remote, sha, file, { start: 4, end: 2 }), null);
 });

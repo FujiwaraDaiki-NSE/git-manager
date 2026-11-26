@@ -13,6 +13,7 @@ import {
   contentSearchInvestigationMarkdown,
   contentSearchJson,
   contentSearchMatchKey,
+  contentSearchOutsidePreviewCommand,
   contentSearchPathLineList,
   contentSearchPaths,
   contentSearchQuery,
@@ -410,11 +411,12 @@ export default function ContentSearch({ path }: { path: string }) {
     setPreviewError(null);
     setPreview(null);
     const params = contentSearchFileQuery(path, pinnedHash, match.path);
-    void fetch(`/api/repo/file?${params}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
+    void fetch(`/api/repo/file-text?${params}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
       if (!response.ok) throw new Error(await responseError(response));
       const value: unknown = await response.json();
       if (!isFilePayload(value)) throw new Error("一致行のファイル応答形式が不正です。");
       if (value.pinned_hash !== pinnedHash) throw new Error("検索結果と異なる版のファイルが返されました。");
+      if (value.path !== match.path) throw new Error("検索結果と異なるパスのファイルが返されました。");
       return value;
     }).then((value) => {
       if (controller.signal.aborted || previewKeyRef.current !== key) return;
@@ -494,6 +496,9 @@ export default function ContentSearch({ path }: { path: string }) {
   const pathLineList = useMemo(() => contentSearchPathLineList(visibleMatches) as string, [visibleMatches]);
   const context = selectedMatch && preview?.text !== null && preview?.text !== undefined
     ? contentSearchContext(preview.text, selectedMatch.line, contextRadius) as ContentSearchContext
+    : null;
+  const outsidePreviewCommand = previewState === "ready" && preview && selectedMatch && pinnedHash
+    ? contentSearchOutsidePreviewCommand(path, pinnedHash, selectedMatch, contextRadius, preview.truncated, context)
     : null;
   const rawContext = context && context.lines.some((line) => line.highlight) ? contentSearchRawContext(context) as string : null;
   const investigationReport = exportMetadata && selectedMatch && previewState === "ready" && preview
@@ -634,7 +639,11 @@ export default function ContentSearch({ path }: { path: string }) {
           {previewState === "ready" && preview && <>
             {preview.binary ? <p className="content-search-note" role="status">このファイルはバイナリのため、テキスト前後を表示できません。</p> : preview.text === null ? <p className="content-search-empty" role="status">表示できる本文がありません。</p> : context && <div className="content-search-context" role="region" aria-label="一致行と前後のファイル内容" tabIndex={0}>{context.lines.map((line) => <div key={line.line} className={`content-search-context-line${line.highlight ? " is-match" : ""}`} data-line={line.line} data-highlighted={line.highlight ? "true" : "false"}><span className="content-search-context-number" aria-hidden="true">{line.line}</span><code>{line.text}</code>{line.highlight && <span className="content-search-highlight-label">一致</span>}</div>)}</div>}
             {preview.truncated && <p className="content-search-truncated" role="status">ファイル本文が {formatBytes(preview.download_limit)} を超えているため、先頭側のプレビューだけを表示しています。</p>}
-            {context && selectedMatch.line > context.end && <p className="content-search-note" role="status">一致行はプレビュー上限の外にあるため、前後を表示できません。</p>}
+            {outsidePreviewCommand !== null && <div className="content-search-note">
+              <p role="status">一致行の全文がプレビュー上限に収まりません。ターミナルで前後を確認できます。</p>
+              <code className="content-search-context-command">{outsidePreviewCommand}</code>
+              <CopyButton value={outsidePreviewCommand} label="前後を確認するコマンドをコピー" />
+            </div>}
           </>}
         </section>}
       </>}

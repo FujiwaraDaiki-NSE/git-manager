@@ -196,7 +196,7 @@
 .commit-files-paths { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; min-width: 0; }
 .commit-files-path { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .commit-files-path code { overflow-wrap: anywhere; }
-.commit-files-path-old code { color: var(--muted); text-decoration: line-through; }
+.commit-files-source-label, .commit-files-path-old code { color: var(--muted); }
 .commit-files-arrow { color: var(--muted); }
 .commit-files-path .copy-control { flex: 0 0 auto; }
 .commit-files-path .copy-button { min-height: 26px; padding: 3px 6px; font-size: 10px; }

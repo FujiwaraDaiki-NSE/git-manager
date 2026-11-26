@@ -36,13 +36,18 @@ const snapshot = {
 };
 
 test("default containment state is explicit and does not invent a revision", () => {
-  assert.deepEqual(defaultCommitContainment({ path: "/tmp/repo" }), {
+  assert.deepEqual(defaultCommitContainment({ path: "/tmp/repo", initialRevision: null }), {
     path: "/tmp/repo",
     revision: "",
     query: "",
     type: "all",
   });
-  assert.throws(() => defaultCommitContainment({ path: "" }), TypeError);
+  assert.throws(() => defaultCommitContainment({ path: "", initialRevision: null }), TypeError);
+});
+
+test("opening containment from a selected commit keeps its complete SHA as the revision", () => {
+  assert.equal(defaultCommitContainment({ path: "/tmp/repo", initialRevision: pinned }).revision, pinned);
+  assert.throws(() => defaultCommitContainment({ path: "/tmp/repo", initialRevision: pinned.slice(0, 7) }), TypeError);
 });
 
 test("revision validation accepts HEAD, refs, and complete hashes while rejecting expressions/options", () => {
@@ -66,8 +71,9 @@ test("name search and type selector operate only on the retrieved snapshot", () 
 });
 
 test("compare URL places the immutable investigated commit in base and ref tip in target without execution", () => {
-  const url = buildContainmentCompareUrl("/project?path=%2Ftmp%2Frepo&tab=info", pinned, target);
+  const url = buildContainmentCompareUrl("/project?path=%2Ftmp%2Frepo&tab=flow", pinned, target);
   const parsed = new URL(url, "http://localhost");
+  assert.equal(parsed.searchParams.get("tab"), "info");
   assert.equal(parsed.searchParams.get("investigation"), "compare");
   assert.equal(parsed.searchParams.get("investigationBase"), pinned);
   assert.equal(parsed.searchParams.get("investigationTarget"), target);

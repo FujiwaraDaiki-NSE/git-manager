@@ -200,7 +200,7 @@ function ConflictStageText({ text }: { text: string }) {
   return <div className="conflict-inspector-source">
     <div className="conflict-inspector-source-tools">
       <label>stage内容を検索<input ref={searchRef} type="search" value={query} aria-controls={regionId} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => {
-        if (event.key !== "Enter") return;
+        if (event.nativeEvent.isComposing || event.key !== "Enter") return;
         event.preventDefault();
         goToMatch(event.shiftKey ? -1 : 1);
       }} placeholder="読み込んだ内容の文字列" /></label>

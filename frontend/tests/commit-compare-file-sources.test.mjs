@@ -52,8 +52,8 @@ test("comparison sources load the two pinned file paths and show each response i
   assert.match(before.render(), /原文を取得中/);
   assert.match(after.render(), /原文を取得中/);
   assert.deepEqual(calls.map(({ url }) => [url.pathname, Object.fromEntries(url.searchParams)]), [
-    ["/api/repo/file", { path: "/tmp/repo + name", revision: "actual-base", file: "old/文 +?#.txt" }],
-    ["/api/repo/file", { path: "/tmp/repo + name", revision: "target", file: "new/文 +?#.txt" }],
+    ["/api/repo/file-text", { path: "/tmp/repo + name", revision: "actual-base", file: "old/文 +?#.txt" }],
+    ["/api/repo/file-text", { path: "/tmp/repo + name", revision: "target", file: "new/文 +?#.txt" }],
   ]);
   await respond(1, 200, { path: "new/文 +?#.txt", pinned_hash: "target", binary: false, text: "<after>\n", truncated: true });
   assert.match(after.render(), /取得上限.*&lt;after&gt;\n<\/pre>/);

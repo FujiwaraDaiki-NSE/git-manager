@@ -8,9 +8,12 @@ export const TAG_TYPES = [
 
 export const TAG_SORTS = [
   { key: "name", label: "名前順" },
+  { key: "name-numeric", label: "名前（数字は数値順）" },
   { key: "oldest", label: "作成日（古い順）" },
   { key: "newest", label: "作成日（新しい順）" },
 ];
+
+const numericNameCollator = new Intl.Collator("ja", { sensitivity: "base", numeric: true });
 
 function knownTag(tag) {
   return tag !== null && typeof tag === "object";
@@ -47,14 +50,17 @@ function compareNames(left, right) {
 export function sortTags(tags, order) {
   const nameAscending = order === "name" || order === "name-asc";
   const nameDescending = order === "name-desc";
+  const nameNumeric = order === "name-numeric";
   const dateAscending = order === "oldest" || order === "creator-date-asc" || order === "date-asc";
   const dateDescending = order === "newest" || order === "creator-date-desc" || order === "date-desc";
-  if (!nameAscending && !nameDescending && !dateAscending && !dateDescending) {
+  if (!nameAscending && !nameDescending && !nameNumeric && !dateAscending && !dateDescending) {
     return [];
   }
   return tags.filter(knownTag).map((tag, index) => ({ tag, index })).sort((left, right) => {
-    if (nameAscending || nameDescending) {
-      const result = compareNames(left.tag, right.tag);
+    if (nameAscending || nameDescending || nameNumeric) {
+      const result = nameNumeric
+        ? numericNameCollator.compare(String(left.tag.name), String(right.tag.name))
+        : compareNames(left.tag, right.tag);
       if (result !== 0) return nameDescending ? -result : result;
       return left.index - right.index;
     }

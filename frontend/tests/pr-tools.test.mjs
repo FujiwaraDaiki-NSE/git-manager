@@ -71,6 +71,19 @@ test("search matches number, source, target, and merge hash", () => {
   assert.deepEqual(filterPullRequests(records, filterOptions({ query: "deadbeef" })).map((item) => item.number), [8]);
 });
 
+test("merged PR explorer searches by title and keeps number search for cached rows with no title", () => {
+  const project = {
+    github: { status: "available" },
+    observed_at: observedAt,
+    branch_rows: [{ pull_requests: [pr(137, { title: "Add Invoice Export" }), pr(138)] }],
+  };
+  const options = { ...filterOptions(), sort: "newest" };
+  const byTitle = buildPullRequestExplorerData(project, { ...options, query: "invoice export" });
+  assert.deepEqual(byTitle.filtered.map(({ number, title }) => [number, title]), [[137, "Add Invoice Export"]]);
+  const byNumber = buildPullRequestExplorerData(project, { ...options, query: "#138" });
+  assert.deepEqual(byNumber.filtered.map(({ number, title }) => [number, title]), [[138, null]]);
+});
+
 test("target filter accepts the full target identity or its branch portion", () => {
   const records = [pr(1), pr(2, { target: "example:release" })];
   assert.equal(targetBranchName("example:release"), "release");
@@ -260,8 +273,22 @@ test("対応が必要なオープンPRを番号ごとに表示し、両方の理
     pr(5, { ciState: null, reviewDecision: null }),
   ];
   assert.deepEqual(openPullRequestsNeedingAttention([...pulls, pulls[2]]), [
-    { number: 1, url: pulls[0].url, title: "CI修正", reasons: ["CI 失敗"] },
-    { number: 2, url: pulls[1].url, title: "設定追加", reasons: ["変更要求"] },
-    { number: 3, url: pulls[2].url, title: "文書更新", reasons: ["CI 失敗", "変更要求"] },
+    { number: 1, url: pulls[0].url, title: "CI修正", reasons: ["CI 失敗"], checksUrl: `${pulls[0].url}/checks` },
+    { number: 2, url: pulls[1].url, title: "設定追加", reasons: ["変更要求"], checksUrl: null },
+    { number: 3, url: pulls[2].url, title: "文書更新", reasons: ["CI 失敗", "変更要求"], checksUrl: `${pulls[2].url}/checks` },
   ]);
+});
+
+test("Checks link requires a confirmed CI failure and a GitHub URL for the same PR", () => {
+  for (const url of [
+    "https://github.com.example/o/r/pull/1",
+    "https://github.com/o/r/issues/1",
+    "https://github.com/o/r/pull/2",
+    "invalid URL",
+  ]) {
+    assert.equal(openPullRequestsNeedingAttention([pr(1, { url, ciState: "FAILURE" })])[0].checksUrl, null);
+  }
+  for (const ciState of ["PENDING", "EXPECTED", null]) {
+    assert.equal(openPullRequestsNeedingAttention([pr(1, { ciState, reviewDecision: "CHANGES_REQUESTED" })])[0].checksUrl, null);
+  }
 });

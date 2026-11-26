@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import CommitFiles from "./commit-files";
 import CopyButton from "./copy-button";
 import PatchView from "./patch-view";
@@ -145,11 +145,12 @@ function CommitDetailPane({ path, snapshotKey, item }: { path: string; snapshotK
     };
   }, [item.peeled_commit, item.ref, path, retry, snapshotKey]);
 
+  const detailTitleId = useId();
   return (
-    <section className="commit-containment-detail" aria-labelledby="commit-containment-detail-title">
+    <section className="commit-containment-detail" aria-labelledby={detailTitleId}>
       <div className="commit-containment-detail-heading">
         <div>
-          <h4 id="commit-containment-detail-title">選択した参照の固定先コミット</h4>
+          <h4 id={detailTitleId}>選択した参照の固定先コミット</h4>
           <p><code>{item.ref}</code> · <code>{item.peeled_commit}</code></p>
         </div>
         <CopyButton value={item.peeled_commit} label="固定先コミットIDをコピー" />
@@ -177,10 +178,10 @@ function CommitDetailPane({ path, snapshotKey, item }: { path: string; snapshotK
   );
 }
 
-export type CommitContainmentProps = { path: string };
+export type CommitContainmentProps = { path: string; initialRevision: string | null };
 
-export default function CommitContainment({ path }: CommitContainmentProps) {
-  const defaults = useMemo(() => defaultCommitContainment({ path }), [path]);
+export default function CommitContainment({ path, initialRevision }: CommitContainmentProps) {
+  const defaults = useMemo(() => defaultCommitContainment({ path, initialRevision }), [path, initialRevision]);
   const [revision, setRevision] = useState(defaults.revision);
   const [query, setQuery] = useState(defaults.query);
   const [type, setType] = useState<FilterType>(defaults.type as FilterType);

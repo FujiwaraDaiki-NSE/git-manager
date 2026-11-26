@@ -24,6 +24,9 @@ import {
   shellQuote,
   buildStatusDiffCommands,
   buildStatusStageCommands,
+  buildStatusUnstageCommand,
+  buildUntrackedDirectoryCommand,
+  canUnstageStatusFile,
   filterStatusFilesByDirectory,
   filterStatusFilesByExtension,
   listStatusFileDirectories,
@@ -152,7 +155,7 @@ function StatusPane({ repo }: { repo: Repo }) {
   const [order, setOrder] = useState<StatusFileOrder>("asc");
   const [diffStage, setDiffStage] = useState<WorktreeDiffStage>("unstaged");
   const [selectedDiffFile, setSelectedDiffFile] = useState<string | null>(null);
-  const [selectedStageFiles, setSelectedStageFiles] = useState<Set<string>>(() => new Set());
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(() => new Set());
   const [downloadStatus, setDownloadStatus] = useState<"idle" | "success" | "error">("idle");
   const filters: { key: StatusFileFilter; label: string }[] = [
     { key: "all", label: "すべて" }, { key: "staged", label: "ステージ済み" },
@@ -179,10 +182,13 @@ function StatusPane({ repo }: { repo: Repo }) {
     () => entries === undefined ? null : buildStatusDiffCommands(repo.path, visible),
     [entries, repo.path, visible],
   );
-  const stageFileKey = (entry: NonNullable<Repo["entries"]>[number]) =>
+  const fileKey = (entry: NonNullable<Repo["entries"]>[number]) =>
     JSON.stringify([entry.path, entry.original_path, entry.xy]);
-  const stageFiles = visible.filter((entry) => statusStagePaths(entry).length > 0 && selectedStageFiles.has(stageFileKey(entry)));
+  const selectedVisibleFiles = visible.filter((entry) => selectedFiles.has(fileKey(entry)));
+  const stageFiles = selectedVisibleFiles.filter((entry) => statusStagePaths(entry).length > 0);
   const stageCommands = buildStatusStageCommands(repo.path, stageFiles);
+  const hasHead = Boolean(repo.head);
+  const unstageCommand = buildStatusUnstageCommand(repo.path, hasHead, selectedVisibleFiles, availableEntries);
   const excluded = diffCommands?.excluded;
   const hasMissingOriginalPath = visible.some((entry) => /[RC]/.test(entry.xy) && entry.original_path === null);
   const exclusionParts = excluded === undefined ? [] : [
@@ -243,21 +249,23 @@ function StatusPane({ repo }: { repo: Repo }) {
         <div className="status-file-list">
           {visible.map((entry) => {
             const rowStages = statusDiffStages(entry.xy, filter);
-            const stageKey = stageFileKey(entry);
+            const key = fileKey(entry);
             const canSelectStage = statusStagePaths(entry).length > 0;
+            const canSelectUnstage = canUnstageStatusFile(hasHead, entry);
+            const directoryCommand = buildUntrackedDirectoryCommand(repo.path, entry);
             return <div className="status-file-row" key={entry.xy + entry.path}>
               <code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code>
               <label className="status-file-path">
-                {canSelectStage && <input
+                {(canSelectStage || canSelectUnstage) && <input
                   type="checkbox"
-                  aria-label={`${entry.path} をステージ対象に選択`}
-                  checked={selectedStageFiles.has(stageKey)}
+                  aria-label={`${entry.path} を${canSelectStage && canSelectUnstage ? "ステージ・ステージ解除" : canSelectStage ? "ステージ" : "ステージ解除"}対象に選択`}
+                  checked={selectedFiles.has(key)}
                   onChange={(event) => {
                     const checked = event.currentTarget.checked;
-                    setSelectedStageFiles((previous) => {
+                    setSelectedFiles((previous) => {
                       const next = new Set(previous);
-                      if (checked) next.add(stageKey);
-                      else next.delete(stageKey);
+                      if (checked) next.add(key);
+                      else next.delete(key);
                       return next;
                     });
                   }}
@@ -269,6 +277,10 @@ function StatusPane({ repo }: { repo: Repo }) {
               {rowStages.length > 0
                 ? rowStages.map((stage) => <button key={stage} className="status-file-diff-button" type="button" onClick={() => { setDiffStage(stage); setSelectedDiffFile(entry.path); }}>{rowStages.length === 1 ? "差分を表示" : stage === "staged" ? "ステージ済み差分" : "未ステージ差分"}</button>)
                 : <span className="status-file-diff-excluded">差分対象外</span>}
+              {directoryCommand !== null && <details className="status-file-directory-command">
+                <summary>中身を確認するコマンド</summary>
+                <div className="status-file-diff-command"><code>{directoryCommand}</code><CopyButton value={directoryCommand} label={`${entry.path} の中身を確認するコマンドをコピー`} /></div>
+              </details>}
             </div>;
           })}
           {visible.length === 0 && <div className="status-file-empty">{hasNoUncommittedChanges(repo) ? "未コミットの変更なし" : "条件に一致する変更ファイルはありません。"}{hasFilters && <button className="subtle-button" type="button" onClick={clearFilters}>絞り込みを解除</button>}</div>}
@@ -286,6 +298,10 @@ function StatusPane({ repo }: { repo: Repo }) {
             </>}
           </div>
         )}
+        {unstageCommand !== null && <div className="status-file-command-copy">
+          <h4>選んだファイルをステージから外す</h4>
+          <div className="status-file-diff-command"><code>{unstageCommand}</code><CopyButton value={unstageCommand} label="ステージから外すコマンドをコピー" /></div>
+        </div>}
         {entries.some((entry) => fileStatusGroups(entry.xy).conflict) && <ConflictInspector path={repo.path} />}
         {entries.length > 0 && <div className="status-file-diff-tools" aria-labelledby="status-file-diff-title">
           <div className="status-file-diff-heading">

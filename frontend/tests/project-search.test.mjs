@@ -47,6 +47,16 @@ test("activity ordering keeps unknown timestamps explicit and supports both dire
   assert.ok(compareActivityEvents(unknown, recent, "oldest") > 0);
 });
 
+test("activity search matches short and full Git commit SHA prefixes only", () => {
+  const commit_hash = "e08e648b593012d17ae8a162b0052430589910e2";
+  const event = { source: "git", commit_hash };
+  assert.equal(activityMatchesSearch(event, normalizedSearchQuery(" E08E648 ")), true);
+  assert.equal(activityMatchesSearch(event, commit_hash), true);
+  assert.equal(activityMatchesSearch(event, "593012d"), false);
+  assert.equal(activityMatchesSearch({ ...event, source: "agent" }, "e08e648"), false);
+  assert.equal(activityMatchesSearch({ ...event, commit_hash: null }, "e08e648"), false);
+});
+
 test("lane filters never treat unknown counts as a positive Git state", async () => {
   const { laneMatchesFilter } = await import("../app/project-search.mjs");
   const unknown = { dirty: null, conflict: null, upstream_ahead: null, upstream_behind: null, is_worktree: false };

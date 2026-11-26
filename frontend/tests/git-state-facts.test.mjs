@@ -49,13 +49,16 @@ test("operation progress and copyable commands render separately from unknown an
 
 test("cherry-pick uses the observed checkout for both display and copy", () => {
   const operations = [{ kind: "cherry-pick", marker: "CHERRY_PICK_HEAD", step: null, total: null,
-    commands: [{ command: "git cherry-pick --abort", reason: "中止" }] }];
+    commands: [{ command: "git cherry-pick --abort", reason: "中止" }],
+    todo_first: { hash: "127430234e27867d689ae6c4bf6cb667a0a1fdd0", subject: "wip b3" } }];
   const path = "/repo/linked checkout";
   const html = render(OperationFacts, { operations, path });
   const command = "git -C &#x27;/repo/linked checkout&#x27; cherry-pick --abort";
   assert.ok(html.includes(`<code>${command}</code>`));
   assert.ok(html.includes(`data-value="${command}"`));
   assert.ok(html.includes(`実行先: ${path}`));
+  assert.match(html, /todo先頭 <code>127430234e27867d689ae6c4bf6cb667a0a1fdd0<\/code> wip b3/);
+  assert.doesNotMatch(render(OperationFacts, { operations: [{ ...operations[0], todo_first: null }], path }), /todo先頭/);
   const unknownPath = render(OperationFacts, { operations, path: null });
   assert.match(unknownPath, /実行先: 未取得/);
   assert.doesNotMatch(unknownPath, /data-value=/);

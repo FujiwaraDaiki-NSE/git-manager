@@ -5,6 +5,7 @@ import {
   canDisplayProject,
   parseProjectUrl,
   projectRequestRange,
+  resolveGitDetail,
   shouldFoldMergedLane,
   uniqueLocalForCommit,
   updateProjectUrl,
@@ -41,6 +42,8 @@ test("URL state is restored and updated without dropping the project path", () =
     lane: "branch:feature",
     branchRow: null,
     relationRef: null,
+    gitPath: null,
+    gitTab: null,
     at: 35,
     laneQuery: "", laneFilter: "all", laneOrder: "name",
     laneAuthorFilter: "", laneUpstreamFilter: "all", laneAgentFilter: "all",
@@ -57,6 +60,21 @@ test("URL state is restored and updated without dropping the project path", () =
   );
   assert.equal(parseProjectUrl(new URL(next, "http://localhost").search).path, "/workspace/repo");
   assert.equal(parseProjectUrl("?merged=true").merged, true);
+});
+
+test("Git detail URLs restore only listed worktrees with a valid tab and preserve the work list on close", () => {
+  const list = "/project?path=%2Frepo&tab=lanes&laneQuery=topic";
+  const view = (href) => parseProjectUrl(new URL(href, "http://localhost").search);
+  const gitPath = "/worktrees/topic branch";
+  const worktrees = [{ path: "/repo" }, { path: gitPath }];
+  for (const gitTab of ["status", "graph", "branches"]) {
+    const url = updateProjectUrl(list, { gitPath, gitTab });
+    assert.deepEqual(resolveGitDetail(view(url), worktrees), { path: gitPath, tab: gitTab });
+    assert.equal(resolveGitDetail(view(url), [{ path: "/other-project" }]), null);
+    assert.equal(updateProjectUrl(url, { gitPath: null, gitTab: null }), list);
+  }
+  assert.equal(resolveGitDetail(view(updateProjectUrl(list, { gitPath, gitTab: "unknown" })), worktrees), null);
+  assert.equal(resolveGitDetail(view(updateProjectUrl(list, { gitPath })), worktrees), null);
 });
 
 test("invalid project view parameters remain explicit", () => {

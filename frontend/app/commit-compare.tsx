@@ -10,7 +10,10 @@ import type { Numstat } from "./types";
 import {
   buildComparisonFilesCsv,
   buildComparisonMarkdown,
+  COMPARISON_STAT_LABELS,
+  comparisonPathChanges,
   comparisonStatChanges,
+  comparisonTextLineCounts,
   pinnedComparisonUrl,
   buildComparisonQuery,
   comparisonModeLabel,
@@ -57,7 +60,7 @@ type FileSource =
 
 async function fetchFileSource(path: string, revision: string, file: string, signal: AbortSignal): Promise<FileSource> {
   const params = repositoryFileQuery(path, revision, file);
-  const response = await fetch(`/api/repo/file?${params}`, { cache: "no-store", signal });
+  const response = await fetch(`/api/repo/file-text?${params}`, { cache: "no-store", signal });
   if (response.status === 404) {
     // A missing repository can also return 404. Only these file results mean the side is absent.
     const body = await response.json().catch(() => null);
@@ -152,15 +155,39 @@ function downloadBlob(content: BlobPart, type: string, name: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function ComparisonStats({ stats }: { stats: ComparisonStats }) {
+function ComparisonStats({ stats, files }: { stats: ComparisonStats; files: Numstat[] }) {
+  const textLines = stats.additions === null || stats.deletions === null ? comparisonTextLineCounts(files) : null;
   return (
-    <div className="commit-compare-stats" aria-label="比較結果の集計">
-      <div><span>ファイル</span><strong>{stats.files.toLocaleString()}</strong></div>
-      <div><span>追加行（既知）</span><strong>{displayStat(stats.additions)}</strong></div>
-      <div><span>削除行（既知）</span><strong>{displayStat(stats.deletions)}</strong></div>
-      <div><span>バイナリ</span><strong>{stats.binary.toLocaleString()}</strong></div>
-      <div><span>名前変更</span><strong>{stats.renamed.toLocaleString()}</strong></div>
-    </div>
+    <>
+      <div className="commit-compare-stats" aria-label="比較結果の集計">
+        <div><span>ファイル</span><strong>{stats.files.toLocaleString()}</strong></div>
+        <div><span>追加行（既知）</span><strong>{displayStat(stats.additions)}</strong></div>
+        <div><span>削除行（既知）</span><strong>{displayStat(stats.deletions)}</strong></div>
+        <div><span>バイナリ</span><strong>{stats.binary.toLocaleString()}</strong></div>
+        <div><span>{COMPARISON_STAT_LABELS.renamed}</span><strong>{stats.renamed.toLocaleString()}</strong></div>
+      </div>
+      {textLines !== null && <p className="commit-compare-text-lines">テキスト分 ＋{textLines.additions.toLocaleString()}／−{textLines.deletions.toLocaleString()}、行数対象外 {textLines.excluded.toLocaleString()}件</p>}
+    </>
+  );
+}
+
+function ComparisonPathList({ label, paths }: { label: string; paths: string[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className="commit-compare-path-changes" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>{label}（{paths.length.toLocaleString()}件）</summary>
+      {open && (paths.length === 0 ? <p>該当するパスはありません。</p> : <ul>{paths.map((path) => <li key={path}><code>{path}</code></li>)}</ul>)}
+    </details>
+  );
+}
+
+function ComparisonPathChanges({ previous, current }: { previous: Numstat[]; current: Numstat[] }) {
+  const { currentOnly, previousOnly } = comparisonPathChanges(previous, current);
+  return (
+    <>
+      <ComparisonPathList label="今回だけのパス" paths={currentOnly} />
+      <ComparisonPathList label="前回だけのパス" paths={previousOnly} />
+    </>
   );
 }
 
@@ -362,7 +389,7 @@ export default function CommitCompare({ path, laneComparison }: CommitComparePro
                 <button type="button" onClick={downloadPatch}>{data.patch_truncated ? "部分パッチを保存" : "生パッチを保存"}</button>
               </div>
             </div>
-            <ComparisonStats stats={data.stats} />
+            <ComparisonStats stats={data.stats} files={data.files} />
             <details className="commit-compare-evidence">
               <summary>取得した比較の再利用・記録</summary>
               <dl>
@@ -398,6 +425,7 @@ export default function CommitCompare({ path, laneComparison }: CommitComparePro
                   </tr>)}</tbody>
                 </table>
               </div>
+              <ComparisonPathChanges previous={previous.files} current={data.files} />
             </details>}
             <div className="commit-compare-command">
               <div><span>再現コマンド（読み取り専用・ハッシュ固定）</span><code>{comparisonReproductionCommand(path, data.command)}</code></div>

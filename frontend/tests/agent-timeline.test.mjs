@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  agentReportLaneId,
   applyBufferedAgentEvents,
   createTimelineProjectLabel,
   currentAgentTasks,
@@ -11,6 +12,25 @@ import {
   timelineProjectId,
   timelineWorktreeLocation,
 } from "../app/agent-timeline-tools.mjs";
+
+test("detached reports select a worktree lane only for a matching detached worktree in the current project", () => {
+  const project = "/workspace/project/.git";
+  const worktree = "/worktrees/feature copy";
+  const repos = new Map([
+    [worktree, { common_dir: project, detached: true }],
+    ["/worktrees/reused", { common_dir: "/workspace/other/.git", detached: true }],
+    ["/worktrees/attached", { common_dir: project, detached: false }],
+  ]);
+
+  for (const branch of ["(detached)", "", null]) {
+    assert.equal(agentReportLaneId(project, { branch, worktree }, repos), `worktree:${worktree}`);
+  }
+  for (const path of ["/worktrees/removed", "/worktrees/reused", "/worktrees/attached", null]) {
+    assert.equal(agentReportLaneId(project, { branch: "(detached)", worktree: path }, repos), null);
+  }
+  assert.equal(agentReportLaneId(project, { branch: "(detached)", worktree }, null), null);
+  assert.equal(agentReportLaneId(project, { branch: "feature", worktree }, repos), "branch:feature");
+});
 
 const event = (event_id, occurred_at, extra = {}) => ({
   event_id,

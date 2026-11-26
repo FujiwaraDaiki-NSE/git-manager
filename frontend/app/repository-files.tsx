@@ -11,6 +11,7 @@ import {
   repositoryFileName,
   repositoryFileQuery,
   repositoryFilesQuery,
+  repositoryImagePreviewSrc,
 } from "./repository-files-tools.mjs";
 import CopyButton from "./copy-button";
 import RepositoryTextView from "./repository-text-view";
@@ -40,7 +41,7 @@ type RepositoryFilePayload = {
   mode: string;
   type: string;
   kind: "blob" | "symlink" | "gitlink";
-  size: number;
+  size: number | null;
   binary: boolean;
   text: string | null;
   content_base64: string;
@@ -76,7 +77,7 @@ function isFilePayload(value: unknown): value is RepositoryFilePayload {
     && isString(item.mode)
     && isString(item.type)
     && (item.kind === "blob" || item.kind === "symlink" || item.kind === "gitlink")
-    && Number.isInteger(item.size)
+    && (item.kind === "gitlink" ? item.size === null : Number.isInteger(item.size))
     && typeof item.binary === "boolean"
     && (item.text === null || isString(item.text))
     && isString(item.content_base64)
@@ -126,7 +127,7 @@ function fullHash(value: string) {
   return /^[0-9a-f]{40,64}$/iu.test(value);
 }
 
-export default function RepositoryFiles({ path }: { path: string }) {
+export default function RepositoryFiles({ path, remote }: { path: string; remote: string | null }) {
   const [revision, setRevision] = useState("");
   const [directory, setDirectory] = useState("");
   const [query, setQuery] = useState("");
@@ -138,6 +139,7 @@ export default function RepositoryFiles({ path }: { path: string }) {
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [file, setFile] = useState<RepositoryFilePayload | null>(null);
+  const [failedImageHashes, setFailedImageHashes] = useState<Set<string>>(() => new Set());
   const [fileState, setFileState] = useState<LoadState>("idle");
   const [fileError, setFileError] = useState<string | null>(null);
   const [downloadStatus, setDownloadStatus] = useState("");
@@ -298,7 +300,7 @@ export default function RepositoryFiles({ path }: { path: string }) {
   };
 
   const download = () => {
-    if (!file || file.downloadable !== true || file.truncated || file.size > REPOSITORY_FILES_MAX_BLOB_BYTES) return;
+    if (!file || file.downloadable !== true || file.truncated || file.size === null || file.size > REPOSITORY_FILES_MAX_BLOB_BYTES) return;
     try {
       const bytes = repositoryBase64ToBytes(file.content_base64);
       // A partial or malformed response must never be offered as a complete
@@ -328,7 +330,8 @@ export default function RepositoryFiles({ path }: { path: string }) {
     }
   }
   const binaryPreview = file?.binary && file.content_base64 ? file.content_base64.slice(0, Math.floor(REPOSITORY_FILES_MAX_PREVIEW_BYTES / 3) * 4) : "";
-  const canDownload = file?.downloadable === true && file.truncated === false && file.size <= REPOSITORY_FILES_MAX_BLOB_BYTES;
+  const canDownload = file?.downloadable === true && file.truncated === false && file.size !== null && file.size <= REPOSITORY_FILES_MAX_BLOB_BYTES;
+  const imageSrc = useMemo(() => file?.binary ? repositoryImagePreviewSrc(file) : null, [file]);
   const symlinkTarget: RepositoryFileEntry | null = file?.kind === "symlink" && file.text !== null && !file.truncated && inventory?.pinned_hash === file.pinned_hash
     ? findRepositorySymlinkTarget(inventory.entries, file.path, file.text)
     : null;
@@ -381,7 +384,7 @@ export default function RepositoryFiles({ path }: { path: string }) {
         {file && fileState === "ready" && (
           <section className="repository-files-viewer" aria-labelledby="repository-files-viewer-title">
             <div className="repository-files-viewer-heading">
-              <div><h4 id="repository-files-viewer-title">{file.path}</h4><p><span>{entryKind({ path: file.path, mode: file.mode, type: file.type, hash: file.hash })}</span> · {formatBytes(file.size)} · <code>{shortHash(file.hash)}</code></p></div>
+              <div><h4 id="repository-files-viewer-title">{file.path}</h4><p><span>{entryKind(file)}</span> · {file.size === null ? "サイズ対象外" : formatBytes(file.size)} · <code>{file.kind === "gitlink" ? file.hash : shortHash(file.hash)}</code></p></div>
               <div className="repository-files-actions">
                 <button type="button" className="subtle-button" disabled={adjacent.previous === null} onClick={() => { if (adjacent.previous) loadFile(adjacent.previous); }}>前のファイル</button>
                 <span role="status">{adjacent.index < 0 ? "選択ファイルは現在の一覧外" : `${adjacent.index + 1} / ${adjacent.count} ファイル`}</span>
@@ -391,8 +394,17 @@ export default function RepositoryFiles({ path }: { path: string }) {
               </div>
             </div>
             {file.kind === "symlink" && <p className="repository-files-note" role="note">Gitに保存されたリンク文字列{symlinkTarget && <>{" "}<button type="button" className="subtle-button" onClick={() => loadFile(symlinkTarget)}>この版の参照先を開く</button></>}</p>}
-            {file.kind === "gitlink" && <p className="repository-files-note" role="note">gitlinkはサブモジュールの参照です。別リポジトリの内容は読み取りません。</p>}
-            {file.binary ? <div className="repository-files-binary" role="status"><strong>バイナリblob</strong><p>UTF-8テキストとして表示できないため、保存可能な完全blobかどうかだけを明示します。</p>{binaryPreview && <pre aria-label="バイナリblobのbase64プレビュー">{binaryPreview}</pre>}</div> : file.text !== null && file.text !== undefined ? <RepositoryTextView key={`${file.pinned_hash}:${file.path}`} text={file.text} /> : <p className="repository-files-empty" role="status">表示できる本文はありません。</p>}
+            {file.kind === "gitlink" ? (
+              <p className="repository-files-note" role="note">gitlinkはサブモジュールの参照です。別リポジトリの内容は読み取りません。</p>
+            ) : imageSrc && !failedImageHashes.has(file.hash) ? (
+              <img key={file.hash} className="repository-files-image" src={imageSrc} alt={`${file.path} の画像プレビュー`} onError={() => setFailedImageHashes((hashes) => new Set(hashes).add(file.hash))} />
+            ) : file.binary ? (
+              <div className="repository-files-binary" role="status"><strong>バイナリblob</strong><p>UTF-8テキストとして表示できないため、保存可能な完全blobかどうかだけを明示します。</p>{binaryPreview && <pre aria-label="バイナリblobのbase64プレビュー">{binaryPreview}</pre>}</div>
+            ) : file.text !== null ? (
+              <RepositoryTextView key={`${file.pinned_hash}:${file.path}`} text={file.text} remote={remote} revision={file.pinned_hash} path={file.path} />
+            ) : (
+              <p className="repository-files-empty" role="status">表示できる本文はありません。</p>
+            )}
             {file.truncated && <p className="repository-files-truncated" role="status">blobが{formatBytes(file.download_limit)}を超えるため、先頭のプレビューだけを表示しています。完全な保存はできません。</p>}
             {!file.truncated && !canDownload && file.kind !== "gitlink" && <p className="repository-files-note" role="status">このblobはダウンロード対象外です。</p>}
             {downloadStatus && <p className="repository-files-status" role="status" aria-live="polite">{downloadStatus}</p>}

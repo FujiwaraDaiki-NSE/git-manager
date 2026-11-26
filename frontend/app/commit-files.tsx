@@ -49,7 +49,7 @@ const filters: { id: CommitFileFilter; label: string }[] = [
   { id: "all", label: "すべて" },
   { id: "text", label: "テキスト" },
   { id: "binary", label: "バイナリ" },
-  { id: "renamed", label: "名前変更" },
+  { id: "renamed", label: "名前変更・コピー" },
   { id: "unknown", label: "変更量不明" },
 ];
 
@@ -86,16 +86,17 @@ function extensionLabel(extension: string) {
 }
 
 function FilePath({ file }: { file: Numstat }) {
-  const renamed = isRenamedFile(file);
+  const hasSourcePath = isRenamedFile(file);
   return (
     <div className="commit-files-paths">
-      {renamed && (
+      {hasSourcePath && (
         <span className="commit-files-path commit-files-path-old">
+          <span className="commit-files-source-label">変更元パス</span>
           <code title={file.old_path}>{file.old_path}</code>
-          <CopyButton value={file.old_path!} label="変更前のパスをコピー" />
+          <CopyButton value={file.old_path!} label="変更元パスをコピー" />
         </span>
       )}
-      {renamed && <span className="commit-files-arrow" aria-label="変更後">→</span>}
+      {hasSourcePath && <span className="commit-files-arrow" aria-hidden="true">→</span>}
       <span className="commit-files-path">
         <code title={file.path}>{file.path}</code>
         <CopyButton value={file.path} label="パスをコピー" />
@@ -221,7 +222,7 @@ export default function CommitFiles({ files, downloadName, renderFileSource, fil
             type="search"
             value={query}
             onChange={(event) => { setQuery(event.target.value); setPage(1); }}
-            placeholder="変更前・変更後のパス"
+            placeholder="現在のパス・変更元パス"
             aria-label="コミットの変更パスを検索"
           />
         </label>
@@ -270,7 +271,7 @@ export default function CommitFiles({ files, downloadName, renderFileSource, fil
           </span>
         )}
         <p className="commit-files-filter-note" id={`${titleId}-filter-note`}>
-          ディレクトリと拡張子は変更前・変更後のパスを対象にします。拡張子は最後のドット以降を小文字で扱い、<code>.gitignore</code> は「拡張子なし」、<code>.env.local</code> は <code>.local</code> です。
+          ディレクトリと拡張子は現在のパスと変更元パスを対象にします。拡張子は最後のドット以降を小文字で扱い、<code>.gitignore</code> は「拡張子なし」、<code>.env.local</code> は <code>.local</code> です。
         </p>
       </div>
 
@@ -279,9 +280,9 @@ export default function CommitFiles({ files, downloadName, renderFileSource, fil
         <div className="commit-files-tools">
           <label><span>除外するパス文字列</span><input type="search" value={excluded} onChange={(event) => { setExcluded(event.target.value); setPage(1); }} /></label>
           <label><span>文字列検索の対象パス</span><select value={scope} onChange={(event) => { setScope(event.target.value); setPage(1); }}>
-            <option value="both">現在のパスと名前変更前のパス</option>
+            <option value="both">現在のパスと変更元パス</option>
             <option value="current">現在のパスのみ</option>
-            <option value="previous">名前変更前のパスのみ</option>
+            <option value="previous">変更元パスのみ</option>
           </select></label>
           <label><span>最小変更行数（追加＋削除）</span><input type="text" inputMode="numeric" value={minimum} aria-invalid={invalidMinimum} onChange={(event) => { setMinimum(event.target.value); setPage(1); }} /></label>
           <label><span>行の変更内容</span><select value={change} onChange={(event) => { setChange(event.target.value); setPage(1); }}>
@@ -314,7 +315,7 @@ export default function CommitFiles({ files, downloadName, renderFileSource, fil
       {directories.length > 0 && (
         <details className="commit-files-extra">
           <summary>ディレクトリ別の変更集計</summary>
-          <p>ディレクトリ条件を外した集計です。移動したファイルは移動元と移動先の両方に含まれます。</p>
+          <p>ディレクトリ条件を外した集計です。名前変更・コピーは変更元パスと現在のパスの両方を対象にします。</p>
           <ul>{directories.map((item) => <li key={item.directory}>
             <button className="subtle-button" type="button" onClick={() => { setDirectory(item.directory); setPage(1); }}>{directoryLabel(item.directory)}</button>
             <span>{item.files} 件 · 既知の追加 +{item.additions} / 削除 −{item.deletions}{(item.unknownAdditions || item.unknownDeletions) && " · 不明を含む"}</span>

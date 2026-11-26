@@ -47,6 +47,17 @@ test("visible tags compose exact search, type and sort", () => {
   assert.deepEqual(visibleTags(tags, { query: "v2", matchMode: "exact", type: "all", sort: "name" }), []);
 });
 
+test("numeric name sorting orders version numbers within a prefix search", () => {
+  const releases = ["v0.6.100", "v0.6.9", "v0.6.10", "v0.7.1"].map((name) => ({ name }));
+  const options = { query: "v0.6.", matchMode: "prefix", type: "all" };
+  assert.deepEqual(visibleTags(releases, { ...options, sort: "name-numeric" }).map((tag) => tag.name), [
+    "v0.6.9", "v0.6.10", "v0.6.100",
+  ]);
+  assert.deepEqual(visibleTags(releases, { ...options, sort: "name" }).map((tag) => tag.name), [
+    "v0.6.10", "v0.6.100", "v0.6.9",
+  ]);
+});
+
 test("tag CSV quotes cells and neutralizes spreadsheet formulas", () => {
   const csv = tagsCsv([{ ...tags[0], name: "=LOOKUP(A1)", creator: "A, B\nC" }, tags[2]]);
   assert.match(csv, /^\uFEFF"name","type","hash"/u);

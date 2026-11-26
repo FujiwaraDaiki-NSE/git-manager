@@ -1,0 +1,50 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-27</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>Git詳細のURL共有、状態表のコマンド、比較・ファイル調査の補助、本文専用API — 2026-11-27</h1>
+<p>「再起動直後のfetch殺到」は 2026-11-21 に解消済みです。今朝の再ビルド直後も /api/health 0.004〜0.013秒、cold /api/project は git-manager 0.15秒・design_db 0.34秒で、再発はありませんでした。開始時30点 + 検証済み加点75点 = 105点 → 100点（上限）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+
+<h2>高速化（+5 × 2）</h2>
+<table><tr><th>内容</th><th>実測</th></tr>
+<tr><td>「両版の原文」と内容検索の「前後を表示」は Base64 を含まない <code>/api/repo/file-text</code> を使う</td><td>langchain@eb12294583 <code>cookbook/Multi_modal_RAG.ipynb</code>、本番HTTP（:4412）各7回の中央値: 2,450,265B / 30.0ms → 1,052,141B / 21.7ms。画面で両側とも file-text を要求することを確認</td></tr>
+<tr><td>ブランチ履歴でコミットイベントをSHAで一度だけ索引化（行ごとの <code>events.find()</code> ×2 を廃止）</td><td>langchain 実履歴13,646件・最新100行の組み立て、Node 11回中央値 47.0ms → 1.0ms（索引作成込み、出力一致）。画面で master の履歴表示を確認</td></tr>
+</table>
+
+<h2>機能追加（+5 × 11）</h2>
+<table><tr><th>内容</th><th>実画面での確認</th></tr>
+<tr><td>Git詳細の対象worktreeとタブ（状態／グラフ／ブランチ）をURLに保存し、再読込・共有で復元</td><td>git-manager: URL直開きで状態タブ復元、グラフ切替で <code>gitTab=graph</code>、戻る1回で作業一覧へ、閉じると履歴を戻す</td></tr>
+<tr><td>未追跡ディレクトリ行に <code>ls-files --others --exclude-standard</code> の確認コマンド</td><td>OCR_PaddleOCR <code>Azure-OCR/OUTPUT/azure_250206_aug/</code>: コマンド実行で3ファイル</td></tr>
+<tr><td>選んだステージ済みファイルを外す <code>git restore --staged</code> コマンド</td><td>git-manager でステージした <code>frontend/app/types.ts</code> の1パスだけを対象に表示</td></tr>
+<tr><td>活動一覧をコミットSHA（前方一致）で検索</td><td><code>e08e648</code> → 1 / 777件一致</td></tr>
+<tr><td>マージ済みPRの題名を取得・表示・検索</td><td>design_db「Lookup契約」→ #107 / #104</td></tr>
+<tr><td>対応が必要なオープンPRのCI失敗行に「Checksを開く」</td><td>thinkplatform #838 / #1564 / #1565 / #1593 … → <code>/pull/N/checks</code></td></tr>
+<tr><td>2地点比較で「今回だけ／前回だけのパス」</td><td>git-manager 5cd9442→c9e9dbb の後に →e08e648: 今回だけ58件・前回だけ0件</td></tr>
+<tr><td>内容検索でプレビュー上限外の一致行に固定SHAの確認コマンド</td><td>langchain <code>Multi_modal_RAG.ipynb</code> 824行: <code>cat-file -p … | sed -n '821,827p'</code> を実行して一致行を確認</td></tr>
+<tr><td>本文ビューの行範囲から GitHub 固定リンクをコピー</td><td>git-manager e08e648 <code>project-control.tsx</code> L10–L15（完全SHA）。終了行 &lt; 開始行でボタン非表示</td></tr>
+<tr><td>コミット詳細から完全SHAを入力済みで包含調査を開く</td><td>e08e648 → <code>refs/heads/main</code>, <code>refs/remotes/origin/main</code></td></tr>
+<tr><td>cherry-pick/revert 途中で todo 先頭のコミットを表示</td><td>git-manager: <code>todo先頭 127430234e27… wip b3</code></td></tr>
+</table>
+
+<h2>UIをリッチに（+2 × 3）</h2>
+<table><tr><th>内容</th><th>実画面での確認</th></tr>
+<tr><td>バイナリ混在の比較で「テキスト分 ＋N／−M、行数対象外 K件」</td><td>git-manager f06da5c→502ad73: ＋1,153／−81、対象外3件</td></tr>
+<tr><td>タグの並び順「名前（数字は数値順）」</td><td>thinkplatform-lib: v0.6.9 → v0.6.10 → v0.6.100</td></tr>
+<tr><td>完全に取得したPNG/JPEGを画像としてプレビュー（壊れた画像は従来表示）</td><td>git-manager <code>docs/daily-ui-20261008/history.png</code> 1354×1731</td></tr>
+</table>
+
+<h2>バグ修正（+1 × 3）</h2>
+<table><tr><th>内容</th><th>実画面での確認</th></tr>
+<tr><td>サブモジュール（gitlink）の表示が親にないコミットで502</td><td>OCR_PaddleOCR f8c78ca <code>PaddleOCR</code>: 「gitlink · サイズ対象外 · 52bc8f0e…」</td></tr>
+<tr><td>detached HEAD の agent 報告リンクが存在しないレーン <code>branch:(detached)</code> を指していた</td><td>タイムライン835リンク中 <code>(detached)</code> 指定0件。台帳上 detached なら <code>worktree:&lt;path&gt;</code></td></tr>
+<tr><td>差分・本文・競合stageの検索で IME 変換確定の Enter が次の一致へ移動</td><td>git-manager README「確認」: 変換中Enter 1/15のまま、Enter 2/15、Shift+Enter 1/15</td></tr>
+</table>
+
+<h2>文言修正（+1 × 1）</h2>
+<p>比較の「名前変更」→「名前変更・コピー」、旧パス見出し「変更元パス」（thinkplatform 19c7384e7→aba13aba6 のコピー C089 を確認）。</p>
+
+<h2>加点しなかったもの</h2>
+<ul>
+<li>Codexレビュー指摘5件への対応（ファイル↔ディレクトリ置換時のステージ解除対象、包含調査からの比較リンクを tab=info へ、比較パス一覧は開いたときだけ描画、Git詳細を閉じたときの履歴重複、壊れた画像のフォールバック）: 今回の変更自体の修正。</li>
+</ul>
+
+<h2>テスト</h2>
+<p>frontend 558件成功・tsc成功、backend 486件成功（<code>test_project_keeps_multiple_merges_on_one_source_lane</code> が1回だけ失敗し、単独実行・全体再実行2回では成功。不安定テストとして記録）。</p>
+</html>

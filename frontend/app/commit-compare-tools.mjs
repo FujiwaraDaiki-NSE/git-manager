@@ -1,6 +1,7 @@
 // @ts-check
 
 import { buildInvestigationShareUrl } from "./investigation-presets-tools.mjs";
+import { commitFileChangeVolume, summarizeCommitFiles } from "./commit-file-tools.mjs";
 
 /**
  * Pure helpers for the explicit commit comparison form and its downloads.
@@ -112,8 +113,25 @@ export function pinnedComparisonUrl(origin, path, result) {
 }
 
 export const COMPARISON_STAT_LABELS = /** @type {const} */ ({
-  files: "ファイル", additions: "追加行（既知）", deletions: "削除行（既知）", binary: "バイナリ", renamed: "名前変更",
+  files: "ファイル", additions: "追加行（既知）", deletions: "削除行（既知）", binary: "バイナリ", renamed: "名前変更・コピー",
 });
+
+/** @param {import("./types").Numstat[]} files */
+export function comparisonTextLineCounts(files) {
+  const measured = files.filter((file) => commitFileChangeVolume(file) !== null);
+  const { additions, deletions } = summarizeCommitFiles(measured);
+  return { additions, deletions, excluded: files.length - measured.length };
+}
+
+/** @param {Pick<import("./types").Numstat, "path">[]} previous @param {Pick<import("./types").Numstat, "path">[]} current */
+export function comparisonPathChanges(previous, current) {
+  const previousPaths = new Set(previous.map(({ path }) => path));
+  const currentPaths = new Set(current.map(({ path }) => path));
+  return {
+    currentOnly: [...currentPaths].filter((path) => !previousPaths.has(path)),
+    previousOnly: [...previousPaths].filter((path) => !currentPaths.has(path)),
+  };
+}
 
 /** @typedef {Record<keyof typeof COMPARISON_STAT_LABELS, number|null>} ComparisonStats */
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import CopyButton from "./copy-button";
+import { buildRepositoryGitHubRangeHref } from "./repository-files-tools.mjs";
 import {
   boundedRepositoryText,
   findRepositoryTextMatches,
@@ -90,7 +91,7 @@ function renderLineContent(
   return pieces;
 }
 
-export default function RepositoryTextView({ text }: { text: string }) {
+export default function RepositoryTextView({ text, remote, revision, path }: { text: string; remote: string | null; revision: string; path: string }) {
   const previewText = useMemo(() => boundedRepositoryText(text, REPOSITORY_TEXT_MAX_PREVIEW_BYTES), [text]);
   const lines = useMemo(() => splitRepositoryText(previewText), [previewText]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -136,6 +137,7 @@ export default function RepositoryTextView({ text }: { text: string }) {
   const activeMatchLine = activeMatch === undefined ? null : repositoryTextLineAtOffset(lines, activeMatch.offset);
   const goToLineNumber = useMemo(() => parseRepositoryLineNumber(lineQuery, lineNumber), [lineNumber, lineQuery]);
   const range = useMemo(() => repositoryTextRange(previewText, rangeStart, rangeEnd), [previewText, rangeEnd, rangeStart]);
+  const githubRangeHref = buildRepositoryGitHubRangeHref(remote, revision, path, range);
   const resultsId = `${codeId}-results`;
 
   useEffect(() => {
@@ -190,7 +192,7 @@ export default function RepositoryTextView({ text }: { text: string }) {
     <section className="repository-text-view" aria-label="バージョン付きファイルのテキスト">
       <div className="repository-text-search" role="search" aria-label="本文を検索">
         <label><span>本文検索</span><input ref={searchRef} type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
+          if (event.nativeEvent.isComposing || event.key !== "Enter") return;
           event.preventDefault();
           navigateMatch(event.shiftKey ? -1 : 1);
         }} placeholder="文字列をそのまま検索" aria-controls={resultsId} /></label>
@@ -211,6 +213,7 @@ export default function RepositoryTextView({ text }: { text: string }) {
           <span aria-hidden="true">〜</span>
           <label><span>終了行</span><input type="text" inputMode="numeric" value={rangeEnd} onChange={(event) => setRangeEnd(event.target.value)} placeholder="行番号" aria-label="コピー範囲の終了行" /></label>
           {range ? <CopyButton value={range.text} label={`${range.start}〜${range.end}行目をコピー`} /> : <button type="button" className="copy-button" disabled aria-label="有効な行範囲を指定するとコピーできます">範囲をコピー</button>}
+          {githubRangeHref && <CopyButton value={githubRangeHref} label="GitHub固定リンクをコピー" />}
           <span className="repository-text-control-status" role="status">{rangeStart === "" && rangeEnd === "" ? "開始・終了行を指定するとコピーできます" : range === null ? `1〜${lineNumber}の有効な範囲を指定` : `${range.start}〜${range.end}行目をコピーできます`}</span>
         </div>
         <div className="repository-text-display-controls">

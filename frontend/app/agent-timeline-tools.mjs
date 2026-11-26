@@ -25,6 +25,19 @@ export function timelineProjectId(path, repos) {
 }
 
 /**
+ * @param {string} projectId
+ * @param {Pick<import("./types").AgentTask, "branch" | "worktree">} report
+ * @param {ReadonlyMap<string, Pick<import("./types").Repo, "common_dir" | "detached">> | null} repos
+ */
+export function agentReportLaneId(projectId, { branch, worktree }, repos) {
+  if (branch && branch !== "(detached)") return `branch:${branch}`;
+  if (worktree === null) return null;
+  const repo = repos?.get(worktree);
+  if (repo?.common_dir === projectId && repo.detached === true) return `worktree:${worktree}`;
+  return null;
+}
+
+/**
  * @param {string} header
  * @param {Pick<import("./types").AgentTask, "summary" | "decision">} report
  */

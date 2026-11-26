@@ -274,7 +274,7 @@ export default function PatchView({ patch }: { patch: string }) {
       </div>}
       <div className="patch-search-group patch-content-search">
         <label>差分の内容を検索<input ref={contentSearchRef} type="search" value={contentQuery} onChange={(event) => setContentQuery(event.target.value)} onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
+          if (event.nativeEvent.isComposing || event.key !== "Enter") return;
           event.preventDefault();
           goToMatch(event.shiftKey ? -1 : 1);
         }} placeholder="追加行・削除行・ヘッダーの内容" aria-controls={patchResultsId} /></label>

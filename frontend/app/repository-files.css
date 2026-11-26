@@ -214,6 +214,16 @@
   text-decoration: none;
 }
 
+.repository-files-viewer-heading p code {
+  overflow-wrap: anywhere;
+}
+
+.repository-files-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 .repository-files-text,
 .repository-files-binary pre {
   max-height: 480px;

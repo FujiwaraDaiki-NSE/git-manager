@@ -1,3 +1,5 @@
+import { shellQuote } from "./status-file-tools.mjs";
+
 function requiredString(value, name) {
   if (typeof value !== "string") throw new TypeError(`${name} must be provided explicitly`);
   return value;
@@ -270,7 +272,7 @@ export function contentSearchFileQuery(path, revision, file) {
 
 /**
  * Return a small line-numbered window around one server-reported match.
- * The caller supplies the complete text fetched at the same pinned hash.
+ * The caller supplies the text fetched at the same pinned hash.
  */
 export function contentSearchContext(text, highlightLine, radius) {
   requiredString(text, "text");
@@ -291,6 +293,18 @@ export function contentSearchContext(text, highlightLine, radius) {
       highlight: start + index === highlightLine,
     })),
   };
+}
+
+/** Offer the Git command only when the bounded preview cannot show the full matching line. */
+export function contentSearchOutsidePreviewCommand(repoPath, pinnedHash, match, radius, truncated, context) {
+  if (!truncated || context === null) return null;
+  const shown = context.lines.find((line) => line.highlight);
+  const partialLine = shown && shown.text.length < match.text.length && match.text.startsWith(shown.text);
+  if (match.line <= context.end && !partialLine) return null;
+
+  const start = Math.max(1, match.line - radius);
+  const end = match.line + radius;
+  return `git -C ${shellQuote(repoPath)} cat-file -p ${shellQuote(`${pinnedHash}:${match.path}`)} | sed -n ${shellQuote(`${start},${end}p`)}`;
 }
 
 function csvCell(value) {

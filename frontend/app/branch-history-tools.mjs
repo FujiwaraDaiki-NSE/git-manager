@@ -4,6 +4,20 @@ export const AUTHOR_FILTER_PREFIX = "__gitdash_author__:";
 const CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u;
 const IMMUTABLE_COMMIT_HASH_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
+/** Keep the first commit event for each hash.
+ * @param {import("./types").ProjectEvent[]} events
+ */
+export function indexCommitEvents(events) {
+  /** @type {Map<string, import("./types").ProjectEvent>} */
+  const byHash = new Map();
+  for (const event of events) {
+    if (event.type === "commit" && event.commit_hash !== null && !byHash.has(event.commit_hash)) {
+      byHash.set(event.commit_hash, event);
+    }
+  }
+  return byHash;
+}
+
 function isEmptyFilter(value) {
   return value === null || value === undefined || value === "";
 }

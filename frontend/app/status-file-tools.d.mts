@@ -28,6 +28,9 @@ export declare function filterStatusFilesByExtension(entries: Entry[], extension
 export declare function sortStatusFiles(entries: Entry[], order: StatusFileOrder): Entry[];
 export declare function statusFilesCsv(entries: Entry[]): string;
 export declare function shellQuote(value: string): string;
+export declare function buildUntrackedDirectoryCommand(repoPath: string, entry: Entry): string | null;
+export declare function canUnstageStatusFile(hasHead: boolean, entry: Entry): boolean;
+export declare function buildStatusUnstageCommand(repoPath: string, hasHead: boolean, selectedEntries: Entry[], allEntries: Entry[]): string | null;
 export declare function statusStagePaths(entry: Entry): string[];
 export declare function buildStatusStageCommands(repoPath: string, entries: Entry[]): { dryRun: string; add: string } | null;
 export declare function buildStatusDiffCommands(repoPath: string, entries: Entry[]): StatusFileDiffCommands;

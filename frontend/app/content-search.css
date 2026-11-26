@@ -349,6 +349,12 @@
   border-left: 3px solid var(--rule);
 }
 
+.content-search-context-command {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .content-search-empty {
   padding: 8px 0;
 }

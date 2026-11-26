@@ -158,6 +158,25 @@ function literalPathspec(path) {
   return shellQuote(`:(literal)${path}`);
 }
 
+export function buildUntrackedDirectoryCommand(repoPath, entry) {
+  if (entryKind(entry) !== "untracked" || !entry.path.endsWith("/") || entry.path.includes("\uFFFD")) return null;
+  return `git -C ${shellQuote(repoPath)} ls-files --others --exclude-standard -- ${literalPathspec(entry.path)}`;
+}
+
+export function canUnstageStatusFile(hasHead, entry) {
+  return hasHead && entryKind(entry) === "tracked" && entry.regular_file === true
+    && !/[RC]/.test(entry.xy) && fileStatusGroups(entry.xy).staged
+    && !entry.path.endsWith("/") && !entry.path.includes("\uFFFD");
+}
+
+export function buildStatusUnstageCommand(repoPath, hasHead, selectedEntries, allEntries) {
+  const paths = [...new Set(selectedEntries.filter((entry) => canUnstageStatusFile(hasHead, entry)).map((entry) => entry.path))]
+    // Literal pathspecs still match directory descendants.
+    .filter((path) => !allEntries.some((other) => other.path.startsWith(`${path}/`) || path.startsWith(`${other.path}/`)));
+  if (paths.length === 0) return null;
+  return `git -C ${shellQuote(repoPath)} restore --staged -- ${paths.map(literalPathspec).join(" ")}`;
+}
+
 export function statusStagePaths(entry) {
   const kind = entryKind(entry);
   if (kind !== "tracked" && kind !== "untracked") return [];

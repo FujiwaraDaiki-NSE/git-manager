@@ -19,13 +19,16 @@ function isRecord(value) {
 /**
  * Return the complete client-owned initial state for one repository.
  * Nothing is fetched until the caller supplies a revision and submits it.
- * @param {{path: string}} input
+ * @param {{path: string, initialRevision: string | null}} input
  */
 export function defaultCommitContainment(input) {
   if (!isRecord(input) || typeof input.path !== "string" || input.path.length === 0) {
     throw new TypeError("path is required");
   }
-  return { path: input.path, revision: "", query: "", type: "all" };
+  if (input.initialRevision !== null && !isContainmentHash(input.initialRevision)) {
+    throw new TypeError("initialRevision must be a complete commit hash or null");
+  }
+  return { path: input.path, revision: input.initialRevision === null ? "" : input.initialRevision, query: "", type: "all" };
 }
 
 /** @param {unknown} value */
@@ -319,11 +322,14 @@ export function buildContainmentCompareUrl(href, pinnedHash, targetHash) {
   if (!isContainmentHash(pinnedHash) || !isContainmentHash(targetHash)) {
     throw new TypeError("compare hashes must be complete commit hashes");
   }
-  return buildInvestigationShareUrl(href, "compare", {
+  const compareHref = buildInvestigationShareUrl(href, "compare", {
     base: pinnedHash,
     target: targetHash,
     mode: "direct",
   });
+  const url = new URL(compareHref, "http://localhost");
+  url.searchParams.set("tab", "info");
+  return compareHref.startsWith("/") ? `${url.pathname}${url.search}${url.hash}` : url.href;
 }
 
 /** A stable identity for one path + pinned inventory snapshot. */
