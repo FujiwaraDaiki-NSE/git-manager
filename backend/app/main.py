@@ -206,9 +206,10 @@ def _repository_files_sync(host_path: str, repo: str, revision: str) -> dict[str
         return repository_files.list_files(repo, revision)
 
 
-def _repository_file_sync(host_path: str, repo: str, revision: str, file: str) -> dict[str, Any] | None:
+def _repository_file_sync(host_path: str, repo: str, revision: str, file: str, text_only: bool) -> dict[str, Any] | None:
     with _repo_lock(host_path):
-        return repository_files.get_file(repo, revision, file)
+        read = repository_files.get_file_text if text_only else repository_files.get_file
+        return read(repo, revision, file)
 
 
 def _blame_sync(host_path: str, repo: str, revision: str, file: str, start: int, end: int) -> dict[str, Any] | None:
@@ -1515,9 +1516,18 @@ async def list_repo_files(path: str, revision: str) -> dict[str, Any]:
 
 @app.get("/api/repo/file")
 async def read_repo_file(path: str, revision: str, file: str) -> dict[str, Any]:
+    return await _read_repo_file(path, revision, file, text_only=False)
+
+
+@app.get("/api/repo/file-text")
+async def read_repo_file_text(path: str, revision: str, file: str) -> dict[str, Any]:
+    return await _read_repo_file(path, revision, file, text_only=True)
+
+
+async def _read_repo_file(path: str, revision: str, file: str, *, text_only: bool) -> dict[str, Any]:
     repo = _known_repo(path)
     try:
-        result = await asyncio.get_running_loop().run_in_executor(pool, _repository_file_sync, path, repo, revision, file)
+        result = await asyncio.get_running_loop().run_in_executor(pool, _repository_file_sync, path, repo, revision, file, text_only)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except LookupError as error:

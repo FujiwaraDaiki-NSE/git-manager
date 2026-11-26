@@ -14,7 +14,7 @@ def test_remote_is_explicit_github_only(monkeypatch):
 
 def merged_pr_node():
     return {
-        "number": 1, "url": "https://github.com/o/r/pull/1", "mergedAt": "2026-09-29T00:00:00Z",
+        "number": 1, "url": "https://github.com/o/r/pull/1", "title": "Fix search", "mergedAt": "2026-09-29T00:00:00Z",
         "mergeCommit": {"oid": "a" * 40}, "baseRefName": "main", "headRefName": "feature",
         "headRefOid": "b" * 40, "headRepository": {"nameWithOwner": "fork/r"},
         "baseRepository": {"nameWithOwner": "o/r"},
@@ -42,6 +42,7 @@ def test_paginated_merged_metadata_and_no_credentials_in_payload(monkeypatch, ha
         assert args[:6] == ["gh", "api", "--hostname", "github.com", "graphql", "-f"]
         assert "pullRequests(states: MERGED, first: 100, after: $endCursor," in args[6]
         assert "orderBy: {field: CREATED_AT, direction: DESC}" in args[6]
+        assert "nodes { number url title mergedAt" in args[6]
         assert args[7:11] == ["-f", "owner=o", "-f", "name=r"]
         assert args[11:] == (["-f", "endCursor=page-1=="] if calls else [])
         assert kwargs["timeout"] == 15
@@ -51,7 +52,7 @@ def test_paginated_merged_metadata_and_no_credentials_in_payload(monkeypatch, ha
     monkeypatch.setattr(github.subprocess, "run", run)
     result = github._read("o/r")
     expected = {
-        "number": 1, "url": first["url"], "merged_at": first["mergedAt"], "merge": "a" * 40,
+        "number": 1, "url": first["url"], "title": first["title"], "merged_at": first["mergedAt"], "merge": "a" * 40,
         "base": "main", "head": "feature", "head_sha": "b" * 40, "head_repo": "fork/r", "base_repo": "o/r",
     }
     assert result["status"] == "available"

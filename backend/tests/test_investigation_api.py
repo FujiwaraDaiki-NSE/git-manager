@@ -189,7 +189,11 @@ def test_file_and_line_investigations_are_pinned_and_read_only(investigation):
     assert 'file.txt' in response.text
     response = client.get('/api/repo/file', params={'path': path, 'revision': target, 'file': 'file.txt'})
     assert response.status_code == 200
-    assert base64.b64decode(response.json()['content_base64']) == b'one\ntwo\n'
+    blob = response.json()
+    assert base64.b64decode(blob.pop('content_base64')) == b'one\ntwo\n'
+    response = client.get('/api/repo/file-text', params={'path': path, 'revision': target, 'file': 'file.txt'})
+    assert response.status_code == 200
+    assert response.json() == blob
     response = client.get('/api/repo/blame', params={'path': path, 'revision': target, 'file': 'file.txt', 'start': 1, 'end': 2})
     assert response.status_code == 200
     assert 'API Test' in response.text
@@ -199,6 +203,22 @@ def test_file_and_line_investigations_are_pinned_and_read_only(investigation):
         assert expected in response.json()['patch']
         assert excluded not in response.json()['patch']
     assert (git('status', '--porcelain=v2'), git('show-ref'), git('diff', '--cached'), git('diff')) == before
+
+
+def test_gitlink_returns_recorded_sha_when_commit_is_absent(investigation):
+    client, path, _, _, _, git = investigation
+    recorded_sha = 'a' * 40
+    git('update-index', '--add', '--cacheinfo', f'160000,{recorded_sha},submodule')
+    git('commit', '-m', 'record a submodule commit')
+    revision = git('rev-parse', 'HEAD')
+    response = client.get('/api/repo/file', params={'path': path, 'revision': revision, 'file': 'submodule'})
+    assert response.status_code == 200
+    data = response.json()
+    assert data['kind'] == 'gitlink'
+    assert data['hash'] == recorded_sha
+    assert data['size'] is None
+    assert data['downloadable'] is False
+    assert data['content_base64'] == ''
 
 
 def test_file_endpoints_reject_missing_unsafe_and_unknown_inputs(investigation):

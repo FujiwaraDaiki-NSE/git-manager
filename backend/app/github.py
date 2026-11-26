@@ -98,7 +98,7 @@ def _read(name: str) -> dict[str, Any]:
       repository(owner: $owner, name: $name) {
         pullRequests(states: MERGED, first: 100, after: $endCursor,
           orderBy: {field: CREATED_AT, direction: DESC}) {
-          nodes { number url mergedAt mergeCommit { oid } baseRefName headRefName headRefOid
+          nodes { number url title mergedAt mergeCommit { oid } baseRefName headRefName headRefOid
             headRepository { nameWithOwner } baseRepository { nameWithOwner }
           }
           pageInfo { hasNextPage endCursor }
@@ -141,6 +141,7 @@ def _read(name: str) -> dict[str, Any]:
                 pull = {
                     "number": item["number"],
                     "url": item["url"],
+                    "title": item["title"],
                     "merged_at": item["mergedAt"],
                     "merge": None if merge_commit is None else merge_commit["oid"],
                     "base": item["baseRefName"],
@@ -150,7 +151,7 @@ def _read(name: str) -> dict[str, Any]:
                     "base_repo": item["baseRepository"]["nameWithOwner"],
                 }
                 if (type(pull["number"]) is not int
-                    or not all(isinstance(pull[key], str) for key in ("url", "merged_at", "base", "head", "head_sha", "base_repo"))
+                    or not all(isinstance(pull[key], str) for key in ("url", "title", "merged_at", "base", "head", "head_sha", "base_repo"))
                     or (merge_commit is not None and not isinstance(pull["merge"], str))
                     or (head_repository is not None and not isinstance(pull["head_repo"], str))):
                     raise ValueError("Invalid merged PR")

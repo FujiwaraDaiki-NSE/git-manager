@@ -155,6 +155,7 @@ def test_merged_deleted_pr_gets_named_history_row_and_fork_stays_explicit(tmp_pa
             {
                 "number": 10,
                 "url": "https://github.com/owner/repo/pull/10",
+                "title": "Finish implementation",
                 "merged_at": "2026-09-30T00:00:00Z",
                 "merge": merge_hash,
                 "base": "main",
@@ -206,6 +207,9 @@ def test_merged_deleted_pr_gets_named_history_row_and_fork_stays_explicit(tmp_pa
     fork_history = next(row for row in history if row["pull_requests"][0]["source"].startswith("fork/"))
     unknown_history = next(row for row in history if row["pull_requests"][0]["number"] == 13)
     assert {pull["number"] for pull in owner_history["pull_requests"]} == {10, 12}
+    assert {pull["number"]: pull["title"] for pull in owner_history["pull_requests"]} == {
+        10: "Finish implementation", 12: None,
+    }
     assert completed_hash in owner_history["commit_hashes"]
     assert owner_history["pull_requests"][0]["source"] == "owner/repo:completed"
     assert owner_history["pull_requests"][0]["target"] == "owner/repo:main"

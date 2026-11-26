@@ -173,6 +173,7 @@ def _ref_contains(repo: str, ref: str, commit_hash: str) -> bool:
 def _pr_row(pr: Mapping[str, Any]) -> dict[str, Any] | None:
     number = pr.get("number")
     url = pr.get("url")
+    title = pr.get("title")
     source_branch = pr.get("head")
     target_branch = pr.get("base")
     source_repo = pr.get("head_repo")
@@ -194,6 +195,7 @@ def _pr_row(pr: Mapping[str, Any]) -> dict[str, Any] | None:
     return {
         "number": number,
         "url": url,
+        "title": title if isinstance(title, str) else None,
         "source": source,
         "target": f"{target_repo}:{target_branch}",
         "source_repository": source_repo if isinstance(source_repo, str) and source_repo else None,

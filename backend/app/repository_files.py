@@ -422,6 +422,15 @@ def get_file(repo: str, revision: str, file: str) -> dict[str, Any] | None:
     A caller may download only responses where ``downloadable`` is true; that
     flag is never true for a partial object, symlink, or gitlink.
     """
+    return _get_file(repo, revision, file, include_base64=True)
+
+
+def get_file_text(repo: str, revision: str, file: str) -> dict[str, Any] | None:
+    """Return the same bounded text and metadata without encoding the blob."""
+    return _get_file(repo, revision, file, include_base64=False)
+
+
+def _get_file(repo: str, revision: str, file: str, *, include_base64: bool) -> dict[str, Any] | None:
     validate_file_path(file)
     pinned_hash = _resolve_revision(repo, revision)
     if pinned_hash is None:
@@ -434,14 +443,10 @@ def get_file(repo: str, revision: str, file: str) -> dict[str, Any] | None:
     mode = entry["mode"]
     if object_type not in {"blob", "commit"}:
         raise RepositoryFilesNotFound("指定したパスはファイルではありません")
-    size = _object_size(repo, entry["hash"])
-    if size is None:
-        return None
-
     # A gitlink is a commit object, not a file.  Report it explicitly without
     # trying to resolve or read a nested repository.
     if mode == "160000" or object_type == "commit":
-        return {
+        result = {
             "revision": revision,
             "pinned_hash": pinned_hash,
             "path": file,
@@ -449,22 +454,27 @@ def get_file(repo: str, revision: str, file: str) -> dict[str, Any] | None:
             "mode": mode,
             "type": "commit",
             "kind": "gitlink",
-            "size": size,
+            "size": None,
             "binary": True,
             "text": None,
-            "content_base64": "",
             "truncated": False,
             "downloadable": False,
             "download_limit": MAX_BLOB_BYTES,
         }
+        if include_base64:
+            result["content_base64"] = ""
+        return result
 
+    size = _object_size(repo, entry["hash"])
+    if size is None:
+        return None
     blob = _read_blob_limited(repo, entry["hash"], MAX_BLOB_BYTES)
     if blob is None:
         return None
     data, truncated = blob
     text, binary = _text_value(data, truncated)
     symlink = mode == "120000"
-    return {
+    result = {
         "revision": revision,
         "pinned_hash": pinned_hash,
         "path": file,
@@ -475,11 +485,13 @@ def get_file(repo: str, revision: str, file: str) -> dict[str, Any] | None:
         "size": size,
         "binary": binary,
         "text": text,
-        "content_base64": base64.b64encode(data).decode("ascii"),
         "truncated": truncated,
         "downloadable": not symlink and not truncated and size <= MAX_BLOB_BYTES,
         "download_limit": MAX_BLOB_BYTES,
     }
+    if include_base64:
+        result["content_base64"] = base64.b64encode(data).decode("ascii")
+    return result
 
 
 __all__ = [
@@ -489,6 +501,7 @@ __all__ = [
     "RepositoryFilesInputError",
     "RepositoryFilesNotFound",
     "get_file",
+    "get_file_text",
     "list_files",
     "validate_directory",
     "validate_file_path",

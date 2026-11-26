@@ -143,14 +143,19 @@ def _run_limited(
 def _parse_status_v2(out: str) -> dict[str, Any]:
     """Parse NUL-delimited porcelain v2 without quoting or trimming file paths."""
     branch: str | None = None
+    head: str | None = None
     upstream: str | None = None
     detached = False
     ahead = behind = 0
-    entries: list[dict[str, str | None]] = []
+    entries: list[dict[str, Any]] = []
 
     records = iter(out.split("\0"))
     for line in records:
-        if line.startswith("# branch.head "):
+        if line.startswith("# branch.oid "):
+            oid = line[len("# branch.oid "):]
+            if oid != "(initial)":
+                head = oid
+        elif line.startswith("# branch.head "):
             branch = line[len("# branch.head "):].strip()
             detached = branch == "(detached)"
         elif line.startswith("# branch.upstream "):
@@ -163,7 +168,9 @@ def _parse_status_v2(out: str) -> dict[str, Any]:
                     behind = int(token[1:])
         elif line.startswith("1 "):
             fields = line.split(" ", 8)
-            entries.append({"xy": fields[1], "path": fields[8], "original_path": None})
+            modes = fields[3:6]  # HEAD, index, worktree
+            regular_file = all(mode in ("000000", "100644", "100755") for mode in modes)
+            entries.append({"xy": fields[1], "path": fields[8], "original_path": None, "regular_file": regular_file})
         elif line.startswith("2 "):
             fields = line.split(" ", 9)
             # In -z mode the destination is followed by a separate source record.
@@ -176,6 +183,7 @@ def _parse_status_v2(out: str) -> dict[str, Any]:
 
     return {
         "branch": branch,
+        "head": head,
         "detached": detached,
         "upstream": upstream,
         "ahead": ahead,
@@ -497,11 +505,21 @@ def operations(repo: str) -> list[dict[str, Any]] | None:
         todo = "sequencer/todo"
         try:
             with (directory / todo).open(encoding="utf-8", errors="replace") as pending:
-                action = pending.readline().split(maxsplit=1)
+                action = pending.readline().split(maxsplit=2)
         except FileNotFoundError:
             action = []
-        if len(action) == 2 and action[0] in ("pick", "revert"):
-            markers.append((todo, "cherry-pick" if action[0] == "pick" else "revert"))
+        todo_kind = None
+        todo_first = None
+        if len(action) >= 2 and action[0] in ("pick", "revert"):
+            todo_kind = "cherry-pick" if action[0] == "pick" else "revert"
+            markers.append((todo, todo_kind))
+            sha = action[1]
+            if re.fullmatch(r"[0-9a-fA-F]{4,64}", sha):
+                commit = _run(repo, ["log", "-1", "--no-show-signature", "--format=%H%x00%s", f"{sha}^{{commit}}", "--"])
+                if commit is not None:
+                    commit_hash, separator, subject = commit.removesuffix("\n").partition("\x00")
+                    if separator and commit_hash.startswith(sha.lower()):
+                        todo_first = {"hash": commit_hash, "subject": subject}
         for marker, kind in markers:
             target = directory / marker
             if marker == todo:
@@ -530,7 +548,8 @@ def operations(repo: str) -> list[dict[str, Any]] | None:
                 commands += [{"command": "git bisect log", "reason": "これまでの判定を確認します"}, {"command": "git bisect good", "reason": "現在のコミットを正常と判定して探索を続けます"}, {"command": "git bisect bad", "reason": "現在のコミットを問題ありと判定して探索を続けます"}, {"command": "git bisect reset", "reason": "探索を終了し開始前のHEADに戻します"}]
             elif kind != "unknown":
                 commands += [{"command": f"git {kind} --continue", "reason": "競合を解消してステージした後、操作を継続します"}, {"command": f"git {kind} --abort", "reason": "進行中の操作を中止します"}]
-            result.append({"kind": kind, "marker": marker, "step": step, "total": total, "commands": commands})
+            result.append({"kind": kind, "marker": marker, "step": step, "total": total, "commands": commands,
+                           "todo_first": todo_first if kind == todo_kind else None})
     except OSError:
         return None
     return result
@@ -832,6 +851,7 @@ def collect(
         "merged_branch": merged_branch,
         "error": None,
         "branch": context_branch,
+        "head": None,
         "detached": context_detached,
         "upstream": None,
         "ahead": 0,

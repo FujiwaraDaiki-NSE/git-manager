@@ -87,7 +87,7 @@ def test_get_file_rejects_directories_and_path_traversal(repository: tuple[Path,
         list_files(str(repo), "--help")
 
 
-def test_large_blob_is_partial_preview_and_never_downloadable(tmp_path: Path) -> None:
+def test_large_blob_is_partial_preview_and_never_downloadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     git(tmp_path, "init", "-b", "main")
     git(tmp_path, "config", "user.name", "Repository files test")
     git(tmp_path, "config", "user.email", "repository-files@example.invalid")
@@ -103,6 +103,13 @@ def test_large_blob_is_partial_preview_and_never_downloadable(tmp_path: Path) ->
     assert result["truncated"] is True
     assert result["downloadable"] is False
     assert len(base64.b64decode(result["content_base64"])) == MAX_BLOB_BYTES
+
+    def unexpected_encoding(_: bytes) -> bytes:
+        pytest.fail("The text-only preview must not encode the blob")
+
+    monkeypatch.setattr(repository_files.base64, "b64encode", unexpected_encoding)
+    text_result = repository_files.get_file_text(str(tmp_path), revision, "large.dat")
+    assert text_result == {key: value for key, value in result.items() if key != "content_base64"}
 
 
 def test_pinned_hash_remains_stable_when_named_ref_moves(repository: tuple[Path, str, str]) -> None:

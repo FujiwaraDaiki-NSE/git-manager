@@ -75,6 +75,18 @@ def test_status_source_paths_are_explicit_and_preserved():
                '? untracked.txt\0')
         assert gitinfo._parse_status_v2(raw)['entries'] == [
             {'xy': f'{code}.', 'path': destination, 'original_path': original},
-            {'xy': '.M', 'path': 'tracked.txt', 'original_path': None},
+            {'xy': '.M', 'path': 'tracked.txt', 'original_path': None, 'regular_file': True},
             {'xy': '??', 'path': 'untracked.txt', 'original_path': None},
         ]
+
+
+def test_status_reports_head_and_regular_file_modes_together():
+    head = 'a' * 40
+    rows = ('1 MM N... 100644 100755 100755 abc def regular.txt\0'
+            '1 D. N... 100644 000000 000000 abc def deleted.txt\0'
+            '1 M. S... 160000 160000 160000 abc def submodule\0'
+            '1 A. N... 000000 120000 120000 abc def symlink\0')
+    status = gitinfo._parse_status_v2(f'# branch.oid {head}\0{rows}')
+    assert status['head'] == head
+    assert [entry['regular_file'] for entry in status['entries']] == [True, True, False, False]
+    assert gitinfo._parse_status_v2('# branch.oid (initial)\0')['head'] is None

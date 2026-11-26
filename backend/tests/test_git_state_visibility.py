@@ -100,12 +100,21 @@ def test_sequencer_operation_belongs_to_linked_worktree(tmp_path, action, kind, 
     directory = Path(git(linked, "rev-parse", "--absolute-git-dir").strip())
     todo = directory / "sequencer" / "todo"
     todo.parent.mkdir()
-    todo.write_text(f"{action} {git(linked, 'rev-parse', '--short', 'HEAD').strip()} base\n")
+    commit_hash = git(linked, 'rev-parse', 'HEAD').strip()
+    todo.write_text(f"{action} {commit_hash[:7]} todoに記録された件名\n")
 
     assert gitinfo.operations(str(repo)) == []
-    assert [(op["kind"], op["marker"]) for op in gitinfo.operations(str(linked))] == [(kind, "sequencer/todo")]
+    operation, = gitinfo.operations(str(linked))
+    assert (operation["kind"], operation["marker"]) == (kind, "sequencer/todo")
+    assert operation["todo_first"] == {"hash": commit_hash, "subject": "base"}
     (directory / marker).touch()
-    assert [(op["kind"], op["marker"]) for op in gitinfo.operations(str(linked))] == [(kind, marker)]
+    operation, = gitinfo.operations(str(linked))
+    assert (operation["kind"], operation["marker"]) == (kind, marker)
+    assert operation["todo_first"] == {"hash": commit_hash, "subject": "base"}
+    for first_line in (f"exec {commit_hash}", f"{action} {'0' * len(commit_hash)}"):
+        todo.write_text(f"{first_line}\n{action} {commit_hash} base\n")
+        operation, = gitinfo.operations(str(linked))
+        assert operation["todo_first"] is None
     (directory / marker).unlink()
     todo.unlink()
     assert gitinfo.operations(str(linked)) == []
