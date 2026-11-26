@@ -14,6 +14,7 @@ import {
   COMMIT_FILE_EXTENSION_NONE,
   buildCommitFilesTsv,
   buildCommitFilesPathList,
+  buildCommitFileDiffCommand,
   commitFileChangeVolume,
   countCommitFileKinds,
   displayCommitFileCount,
@@ -41,6 +42,7 @@ type CommitFilesProps = {
   files: Numstat[];
   downloadName: string;
   renderFileSource?: (file: Numstat) => ReactNode;
+  fileDiffContext?: { repoPath: string; hash: string };
 };
 
 const filters: { id: CommitFileFilter; label: string }[] = [
@@ -110,7 +112,7 @@ function FileVolume({ file }: { file: Numstat }) {
     : <span>+{volume}</span>;
 }
 
-export default function CommitFiles({ files, downloadName, renderFileSource }: CommitFilesProps) {
+export default function CommitFiles({ files, downloadName, renderFileSource, fileDiffContext }: CommitFilesProps) {
   const [columns, setColumns] = usePreference("gitdash.commit-file-columns", [true, true, true], validColumns);
   const titleId = `commit-files-title-${useId().replaceAll(":", "")}`;
   const [query, setQuery] = useState("");
@@ -338,6 +340,7 @@ export default function CommitFiles({ files, downloadName, renderFileSource }: C
               {pageFiles.map((file) => {
                 const identity = commitFileIdentity(file);
                 const sourceOpen = sourceFile === identity;
+                const diffCommand = fileDiffContext ? buildCommitFileDiffCommand(fileDiffContext.repoPath, fileDiffContext.hash, file) : null;
                 return <Fragment key={identity}>
                   <tr>
                     <td><input type="checkbox" aria-label={`${file.path} を選択`} checked={selected.has(identity)} onChange={() => toggleFile(file)} /></td>
@@ -346,6 +349,7 @@ export default function CommitFiles({ files, downloadName, renderFileSource }: C
                     {columns[2] && <td className="commit-files-volume"><FileVolume file={file} /></td>}
                     <td>
                       <FilePath file={file} />
+                      {diffCommand !== null && <CopyButton value={diffCommand} label="差分コマンドをコピー" />}
                       {renderFileSource && <button className="subtle-button commit-files-source-button" type="button" aria-expanded={sourceOpen} aria-label={`${file.path} の両版の原文`} onClick={() => setSourceFile(sourceOpen ? null : identity)}>両版の原文</button>}
                     </td>
                   </tr>

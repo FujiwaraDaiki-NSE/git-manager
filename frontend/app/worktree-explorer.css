@@ -121,7 +121,8 @@
   border-color: var(--worktree-blue);
 }
 
-.worktree-explorer-export:disabled {
+.worktree-explorer-export:disabled,
+.worktree-explorer-card-actions .worktree-explorer-action:disabled {
   cursor: default;
   opacity: .45;
 }

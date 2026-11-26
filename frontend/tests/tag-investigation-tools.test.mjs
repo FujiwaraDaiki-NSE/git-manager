@@ -34,6 +34,7 @@ const tags = [
 function options(overrides = {}) {
   return {
     query: "",
+    matchMode: "exact",
     type: "all",
     creatorFilter: "",
     objectType: "",
@@ -45,6 +46,12 @@ function options(overrides = {}) {
     ...overrides,
   };
 }
+
+test("investigation composes the selected match mode with the other tag filters", () => {
+  const filter = options({ query: "v", matchMode: "prefix", type: "lightweight" });
+  assert.deepEqual(filterTagInvestigation(tags, filter).map((tag) => tag.name), ["v1", "v1-alias"]);
+  assert.deepEqual(filterTagInvestigation(tags, { ...filter, matchMode: "exact" }), []);
+});
 
 test("creator identities are exact and keep missing creators in a distinct bucket", () => {
   assert.deepEqual(tagCreatorIdentities(tags), ["Release <release@example.test>", "Release 2", "Tree Author 1"]);
@@ -91,12 +98,13 @@ test("collapse keeps one representative only for the same exact target object", 
 });
 
 test("JSON export contains only visible rows and repository plus active filter metadata", () => {
-  const filter = options({ creatorFilter: UNKNOWN_TAG_CREATOR_FILTER, collapseTargets: true });
+  const filter = options({ query: "v1", matchMode: "prefix", creatorFilter: UNKNOWN_TAG_CREATOR_FILTER, collapseTargets: true });
   const json = tagsJson([tags[3], tags[4]], { repositoryPath: "/repo/demo", filters: filter });
   assert.deepEqual(JSON.parse(json), {
     repository_path: "/repo/demo",
     filters: {
-      query: "",
+      query: "v1",
+      match_mode: "prefix",
       type: "all",
       creator: UNKNOWN_TAG_CREATOR_FILTER,
       target_object_type: "",

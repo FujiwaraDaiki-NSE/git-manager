@@ -461,15 +461,16 @@ export function worktreePrunePreviewCommand(mainPath) {
   return `git -C ${shellQuote(mainPath)} worktree prune --dry-run --verbose`;
 }
 
-export function worktreeCdCommand(path) {
-  if (typeof path !== "string" || path.length === 0) return null;
+export function worktreeCdCommand(worktree) {
+  const { path, state } = worktree;
+  if (state === "prunable" || typeof path !== "string" || path.length === 0) return null;
   return `cd -- ${shellQuote(path)}`;
 }
 
 /** Serialize one shell command per currently visible worktree. */
 export function worktreeCdCommands(rows) {
   return rows
-    .map((row) => worktreeCdCommand(row.worktree.path))
+    .map((row) => worktreeCdCommand(row.worktree))
     .filter((command) => command !== null)
     .join("\n");
 }

@@ -340,8 +340,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.agent-timeline-empty,
-.agent-timeline-unknown-note {
+.agent-timeline-empty {
   color: var(--control-muted);
   font: 10px/1.6 var(--control-sans);
   margin: 8px 4px;
@@ -465,6 +464,7 @@
 .agent-timeline-current-row:has(> :is(.agent-decision, .agent-timeline-card-actions)) .agent-timeline-row-head { flex-wrap: wrap; gap: 4px 7px; }
 .agent-timeline-current-row:has(> :is(.agent-decision, .agent-timeline-card-actions)) .agent-timeline-row-head > * { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .agent-timeline-current-row > .agent-decision { padding: 0 10px 10px; }
+.agent-timeline-question-note,
 .agent-timeline-report-path { color: var(--control-muted); font: 10px/1.5 var(--control-sans); margin: 0 10px 8px; overflow-wrap: anywhere; }
 .agent-timeline-report-path > code, .agent-timeline-report-path > span { display: block; }
 .agent-timeline-project-link:focus-visible { outline: 2px solid var(--control-blue); outline-offset: -2px; }

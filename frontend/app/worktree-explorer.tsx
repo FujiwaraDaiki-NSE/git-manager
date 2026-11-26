@@ -410,7 +410,7 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
           const sync = worktreeSync(row);
           const healthTokens = worktreeHealthTokens(row);
           const tokens = worktreeStateTokens(row.worktree);
-          const cd = worktreeCdCommand(row.worktree.path);
+          const cd = worktreeCdCommand(row.worktree);
           const lane = row.lane;
           return (
             <article className={`worktree-explorer-card state-${state} health-${health} sync-${sync}`} key={`${row.worktree.path}:${index}`}>
@@ -429,6 +429,9 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
                 </div>
                 <h3 title={branchLabel(row)}>{branchLabel(row)}</h3>
                 <code className="worktree-explorer-path" title={row.worktree.path}>{row.worktree.path || "パス未取得"}</code>
+                {row.worktree.prunable_reason && (
+                  <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.worktree.prunable_reason}</span>
+                )}
                 <div className="worktree-explorer-facts">
                   <span><b>HEAD</b> {worktreeHeadLabel(row)}</span>
                   {lane ? <span title={lane.path ?? undefined}><b>作業ブランチ</b> {lane.name}</span> : <span className="is-unknown"><b>作業ブランチ</b> 対応する作業情報なし</span>}
@@ -437,7 +440,9 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
               </div>
               <div className="worktree-explorer-card-actions">
                 {row.worktree.path.length > 0 && <CopyButton value={row.worktree.path} label="パスをコピー" />}
-                {cd && <CopyButton value={cd} label="cd をコピー" />}
+                {cd ? <CopyButton value={cd} label="cd をコピー" /> : state === "prunable" && (
+                  <button className="worktree-explorer-action" type="button" disabled>cd をコピー</button>
+                )}
                 {state === "prunable" && <div className="worktree-explorer-prune-preview">
                   <span>このリポジトリ全体が確認対象</span>
                   <CopyButton value={prunePreview} label="prune の確認コマンドをコピー" />

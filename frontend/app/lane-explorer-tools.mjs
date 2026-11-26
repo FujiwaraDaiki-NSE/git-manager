@@ -1,4 +1,5 @@
 import { AGENT_STATUS_PRIORITY, agentTaskState } from "./agent-overview.mjs";
+import { laneMatchesFilter, laneMatchesSearch } from "./project-search.mjs";
 
 /** A value that cannot collide with a real commit author. */
 export const UNKNOWN_LANE_AUTHOR_FILTER = "__gitdash_unknown_lane_author__";
@@ -23,6 +24,16 @@ export const LANE_UPSTREAM_LABELS = Object.freeze({
   untracked: "追跡先なし",
   unknown: "同期状態未取得",
 });
+
+export function filterWorkLanes(lanes, checkoutPaths, { query, filter, authorFilter, upstreamFilter, agentFilter }) {
+  const matchingQuery = lanes.filter((lane) => (
+    laneMatchesSearch(lane, query) && laneMatchesAuthor(lane, authorFilter) && laneMatchesAgent(lane, agentFilter)
+  ));
+  const matchingGit = matchingQuery.filter((lane) => laneMatchesFilter(lane, filter, checkoutPaths));
+  const matchingUpstream = matchingQuery.filter((lane) => laneMatchesUpstream(lane, upstreamFilter));
+  const matchingBoth = matchingGit.filter((lane) => laneMatchesUpstream(lane, upstreamFilter));
+  return { matchingGit, matchingUpstream, matchingBoth };
+}
 
 function assertLaneList(lanes) {
   if (!Array.isArray(lanes)) throw new TypeError("lanes must be an array");

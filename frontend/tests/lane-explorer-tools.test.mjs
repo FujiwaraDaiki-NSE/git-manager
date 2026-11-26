@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   encodeLaneAuthor,
   escapeLaneCsvCell,
+  filterWorkLanes,
   hasUnknownLaneAuthor,
   laneAgentStatus,
   laneAgentStatusValue,
@@ -16,6 +17,7 @@ import {
   LANE_CSV_HEADERS,
   UNKNOWN_LANE_AUTHOR_FILTER,
 } from "../app/lane-explorer-tools.mjs";
+import { laneMatchesFilter } from "../app/project-search.mjs";
 
 function lane(overrides = {}) {
   return {
@@ -34,6 +36,32 @@ function lane(overrides = {}) {
     ...overrides,
   };
 }
+
+test("作業状態とupstreamの各ボタンは、他の絞り込みを維持した件数を出す", () => {
+  const lanes = [
+    lane({ id: "clean", name: "feature-clean", dirty: false }),
+    lane({ id: "ahead", name: "feature-ahead", dirty: true, upstream_ahead: 1 }),
+    lane({ name: "feature-other-author", dirty: true, last_commit: { author: "Bob" } }),
+    lane({ name: "feature-other-agent", dirty: true, agent: null }),
+    lane({ name: "other-work", dirty: true }),
+  ];
+  const checkoutPaths = new Set();
+  const filters = {
+    query: "feature", authorFilter: encodeLaneAuthor("Alice"), agentFilter: "testing",
+    filter: "dirty", upstreamFilter: "synced",
+  };
+  const apply = (filters) => filterWorkLanes(lanes, checkoutPaths, filters);
+  const { matchingGit, matchingUpstream, matchingBoth } = apply(filters);
+  assert.deepEqual(matchingBoth, []);
+  for (const [filter, count] of [["all", 1], ["dirty", 0]]) {
+    assert.equal(matchingUpstream.filter((item) => laneMatchesFilter(item, filter, checkoutPaths)).length, count);
+    assert.equal(apply({ ...filters, filter }).matchingBoth.length, count);
+  }
+  for (const [upstreamFilter, count] of [["all", 1], ["ahead", 1], ["synced", 0]]) {
+    assert.equal(matchingGit.filter((item) => laneMatchesUpstream(item, upstreamFilter)).length, count);
+    assert.equal(apply({ ...filters, upstreamFilter }).matchingBoth.length, count);
+  }
+});
 
 test("author choices preserve exact values and expose missing commit authors", () => {
   const alice = lane();

@@ -31,7 +31,7 @@ import { limitedMergedPullRequestCoverage, openPullRequestLabels, validHttpUrl }
 import CopyButton from "./copy-button";
 import { commandTarget, worktreeCommand } from "./next-command-tools.mjs";
 import { missingLocalTrackingRefLabel } from "./upstream-label.mjs";
-import { timelineRowGeometry, agentFreshness, rowAgentReports, isUnpushedCommit, historicalPullRequestLabel } from "./branch-timeline-presentation.mjs";
+import { timelineRowGeometry, agentFreshness, rowAgentReports, isUnpushedCommit, historicalPullRequestLabel, rowStatus, branchJumpLabel } from "./branch-timeline-presentation.mjs";
 import { connectionEventTime, edgeDisplayLabel, evidenceLabel, operationLabel, referenceDisplayName } from "./branch-relations-tools.mjs";
 import type {
   ProjectBranchCommit,
@@ -138,28 +138,6 @@ function rowLabel(row: TimelineRow) {
 function rowLocal(row: TimelineRow) {
   return row.locals.length === 1 ? row.locals[0] : null;
 }
-
-function rowStatus(row: TimelineRow) {
-  const labels: Record<string, [string, string]> = {
-    synchronized: ["同期済み", "lane-state-ok"],
-    local_ahead: ["ローカル先行（未push）", "lane-state-warn"],
-    remote_ahead: ["リモート先行（未pull）", "lane-state-warn"],
-    diverged: ["分岐", "lane-state-danger"],
-    remote_only: ["リモートのみ", "lane-state-muted"],
-    remote_unavailable: ["リモート参照未取得", "lane-state-warn"],
-    tracking_unavailable: ["追跡状態未取得", "lane-state-warn"],
-    tracking_inconsistent: ["追跡状態不整合", "lane-state-warn"],
-    mixed: ["ローカル混在", "lane-state-warn"],
-    local_only: ["ローカルのみ", "lane-state-muted"],
-    upstream_deleted: [missingLocalTrackingRefLabel, "lane-state-danger"],
-    detached: ["detached HEAD", "lane-state-muted"],
-    historical_deleted: ["マージ済みPRの履歴", "lane-state-muted"],
-  };
-  if (labels[row.status]) return labels[row.status];
-  if (row.historical) return ["履歴", "lane-state-muted"];
-  return ["状態未取得", "lane-state-muted"];
-}
-
 
 function statusExplanation(status: string) {
   if (status === "upstream_deleted") return `${missingLocalTrackingRefLabel}状態です。`;
@@ -828,8 +806,7 @@ export default function BranchTimeline({
           <label>行の並び<select aria-label="行の並び順" value={rowOrder} onChange={(event) => setRowOrder(event.target.value as "parent" | "updated")}><option value="parent">親子順</option><option value="updated">更新順</option></select></label>
           <div className="flow-control-actions"><label className="flow-branch-jump"><span>ブランチへ移動</span><select aria-label="グラフのブランチへ移動" value={rows.some((row) => row.id === navigationRow) ? navigationRow : ""} onChange={(event) => { setNavigationRow(event.target.value); document.querySelector(`[data-flow-row="${CSS.escape(event.target.value)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }}><option value="">ブランチを選択</option>{rows.map((row) => {
             const name = rowLabel(row);
-            const pullRequest = duplicateRowNames.has(name) ? historicalPullRequestLabel(row) : null;
-            return <option key={row.id} value={row.id}>{pullRequest === null ? name : `${name} · ${pullRequest}`}</option>;
+            return <option key={row.id} value={row.id}>{branchJumpLabel(row, name, duplicateRowNames.has(name))}</option>;
           })}</select></label>{mergedCount > 0 && <button aria-pressed={showMerged} className="subtle-button" type="button" onClick={() => onShowMergedChange(!showMerged)}>{showMerged ? "完了ブランチを折り畳む" : `完了ブランチを表示 (${mergedCount})`}</button>}<button className="subtle-button" type="button" onClick={() => flowScrollRef.current?.scrollTo({ left: flowScrollRef.current.scrollWidth, behavior: "smooth" })}>右端へ移動 →</button></div>
         </div>
       </div>

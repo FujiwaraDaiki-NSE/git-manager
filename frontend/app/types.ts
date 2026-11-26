@@ -374,6 +374,7 @@ export type ProjectWorktree = {
   state: "ok" | "prunable" | "locked" | null;
   git_dir_missing: boolean;
   lock_reason: string | null;
+  prunable_reason: string | null;
   detached: boolean;
   is_main: boolean;
 };

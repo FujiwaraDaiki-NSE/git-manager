@@ -19,3 +19,10 @@
   border-inline-start: 3px solid var(--accent);
   padding-inline-start: 4px;
 }
+
+.graph-child-navigation .copy {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+}

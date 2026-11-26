@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { timelineRowGeometry, agentFreshness, rowAgentReports } from '../app/branch-timeline-presentation.mjs';
+import { timelineRowGeometry, agentFreshness, rowAgentReports, branchJumpLabel } from '../app/branch-timeline-presentation.mjs';
 
 test('empty known history compresses without removing rows or shifting endpoints independently', () => {
   const rows = [{id:'a', history_available:true}, {id:'b', history_available:true}, {id:'c', history_available:false}];
@@ -31,6 +31,17 @@ test('only explicit reports for branches present in the row locals appear', () =
   assert.deepEqual(rowAgentReports(remoteRow, tasks), []);
   assert.deepEqual(rowAgentReports(historicalRow, tasks), []);
   assert.deepEqual(rowAgentReports(localRow, null), []);
+});
+
+test('branch jump distinguishes duplicate names with the row status and preserves existing PR labels', () => {
+  const local = { historical: false, status: 'local_only', pull_requests: [] };
+  const remote = { historical: false, status: 'remote_only', remote_ref: 'origin/topic', pull_requests: [] };
+  const history = { historical: true, status: 'historical_deleted', pull_requests: [{ number: 42, source_repository: 'owner/repo' }] };
+  assert.equal(branchJumpLabel(local, 'topic', true), 'topic · ローカルのみ');
+  assert.equal(branchJumpLabel(remote, 'topic', true), 'topic · origin/topic');
+  assert.equal(branchJumpLabel({ ...remote, remote_ref: 'upstream/topic' }, 'topic', true), 'topic · upstream/topic');
+  assert.equal(branchJumpLabel(history, 'topic', true), 'topic · PR #42 · 作成元 owner/repo');
+  assert.equal(branchJumpLabel(local, 'topic', false), 'topic');
 });
 
 import { isUnpushedCommit } from '../app/branch-timeline-presentation.mjs';

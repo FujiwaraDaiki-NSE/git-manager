@@ -5,7 +5,7 @@ import {
   applyBufferedAgentEvents,
   createTimelineProjectLabel,
   currentAgentTasks,
-  hasUnknownCurrentTasks,
+  hasNoCurrentReports,
   mergeAgentEvents,
   timelineDecisionCopy,
   timelineProjectId,
@@ -62,7 +62,19 @@ test("replay reconciles a stale project snapshot with a missed attention event",
   const projects = [{ id: old.project_id, agent_tasks: [old], agent_state: "implementing" }];
   const restored = applyBufferedAgentEvents(projects, [waiting, ended]);
   assert.equal(currentAgentTasks(restored)[0].task.status, "waiting_for_user");
-  assert.equal(hasUnknownCurrentTasks([{ id: "unknown", agent_tasks: null }]), true);
+});
+
+test("an explicit null means no reports only within the selected project scope", () => {
+  const empty = { id: "empty", agent_tasks: null };
+  const reported = { id: "reported", agent_tasks: [event("status", null)] };
+  const projects = [empty, reported];
+
+  assert.equal(hasNoCurrentReports(projects, empty.id), true);
+  assert.equal(hasNoCurrentReports(projects, reported.id), false);
+  assert.equal(hasNoCurrentReports(projects, "missing"), false);
+  assert.equal(hasNoCurrentReports(projects, null), false);
+  assert.equal(hasNoCurrentReports([empty], null), true);
+  assert.equal(hasNoCurrentReports([], null), false);
 });
 
 test("late replay cannot replace a live completed report with older attention", () => {

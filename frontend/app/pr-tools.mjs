@@ -375,14 +375,14 @@ export function openPullRequestLocalLanes(rows, number) {
 
 /** @param {import("./types").OpenPullRequest[]} pulls */
 export function openPullRequestsNeedingAttention(pulls) {
-  /** @type {Map<number, {number: number, url: string, reasons: string[]}>} */
+  /** @type {Map<number, {number: number, url: string, title: string, reasons: string[]}>} */
   const matches = new Map();
   for (const pr of pulls) {
     const reasons = [];
     if (pr.ciState === "FAILURE" || pr.ciState === "ERROR") reasons.push(ciFailureLabel);
     if (pr.reviewDecision === "CHANGES_REQUESTED") reasons.push(changesRequestedLabel);
     if (reasons.length > 0 && !matches.has(pr.number)) {
-      matches.set(pr.number, { number: pr.number, url: pr.url, reasons });
+      matches.set(pr.number, { number: pr.number, url: pr.url, title: pr.title, reasons });
     }
   }
   return [...matches.values()];

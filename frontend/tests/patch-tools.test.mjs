@@ -74,7 +74,7 @@ test('content search returns every occurrence, honors filename scope and exclude
     '-other',
     '+target',
   ].join('\n'));
-  const all = findPatchMatches(sections, 'target', { changedOnly: false, sectionIndexes: [0, 1] });
+  const all = findPatchMatches(sections, 'target', { changedOnly: false, lineKind: 'all', sectionIndexes: [0, 1] });
   assert.equal(all.length, 5);
   assert.deepEqual(all.map((match) => [match.sectionIndex, match.lineIndex, match.offset]), [
     [0, 2, 6], [0, 3, 1], [0, 4, 1], [0, 4, 8], [1, 3, 1],
@@ -83,6 +83,30 @@ test('content search returns every occurrence, honors filename scope and exclude
   assert.equal(scoped.length, 3);
   assert.ok(scoped.every((match) => match.sectionIndex === 0));
   assert.ok(scoped.every((match) => sections[0].lines[match.lineIndex].kind !== 'context'));
+
+  const additions = findPatchMatches(sections, 'target', { lineKind: 'addition', sectionIndexes: [0] });
+  assert.deepEqual(additions.map((match) => match.id), ['0:4:1', '0:4:8']);
+  const deletions = findPatchMatches(sections, 'target', { changedOnly: true, lineKind: 'deletion', sectionIndexes: [0, 1] });
+  assert.deepEqual(deletions.map((match) => match.id), ['0:3:1']);
+});
+
+test('combined hunk search classifies changes from the parent columns', () => {
+  const sections = parsePatch([
+    'diff --cc merge.txt',
+    '--- a/merge.txt',
+    '+++ b/merge.txt',
+    '@@@ -1,4 -1,3 +1,3 @@@',
+    '--target removed from both',
+    ' -target removed from one',
+    '++target added to both',
+    '+ target added to one',
+    '  +target unchanged',
+    'diff --combined octopus.txt',
+    '@@@@ -1,0 -1 -1 +1 @@@@',
+    '  +target added to third parent',
+  ].join('\n'));
+  assert.deepEqual(findPatchMatches(sections, 'target', { lineKind: 'addition' }).map(({ id }) => id), ['0:6:2', '0:7:2', '1:2:3']);
+  assert.deepEqual(findPatchMatches(sections, 'target', { lineKind: 'deletion' }).map(({ id }) => id), ['0:4:2', '0:5:2']);
 });
 
 test('source row indexes survive context removal and a page boundary', async () => {

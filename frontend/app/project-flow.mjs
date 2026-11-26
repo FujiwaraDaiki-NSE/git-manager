@@ -2,6 +2,19 @@ import { decodeAuthorFilter, LANE_UPSTREAM_FILTERS, LANE_AGENT_FILTERS } from ".
 const CONTROL_TABS = new Set(["flow", "lanes", "activity", "files", "info"]);
 const TIME_RANGES = new Set(["current", "24h", "7d", "all"]);
 
+export function projectRequestRange({ tab, range, event }) {
+  return tab === "flow" || (tab === "files" && event === null) ? "current" : range;
+}
+
+/**
+ * @param {{path: string | null, tab: string, range: string, event: string | null}} urlState
+ * @param {{path: string, range: string} | null} loadedRequest
+ */
+export function canDisplayProject(urlState, loadedRequest) {
+  return loadedRequest !== null && loadedRequest.path === urlState.path
+    && (urlState.tab === "files" || loadedRequest.range === projectRequestRange(urlState));
+}
+
 /**
  * Parse URL state without depending on the current component tree. Keeping
  * this pure lets Next soft navigation and browser history use one contract.

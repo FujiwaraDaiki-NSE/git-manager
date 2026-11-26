@@ -7,6 +7,8 @@
  * meaningful.
  */
 
+import { shellQuote } from "./status-file-tools.mjs";
+
 export const COMMIT_FILE_FILTERS = ["all", "text", "binary", "renamed", "unknown"];
 export const COMMIT_FILE_SORTS = ["path", "volume", "additions", "deletions"];
 export const COMMIT_FILE_ORDERS = ["asc", "desc"];
@@ -21,6 +23,12 @@ export function isBinaryFile(file) {
 
 export function isRenamedFile(file) {
   return file.old_path !== undefined;
+}
+
+export function buildCommitFileDiffCommand(repoPath, hash, file) {
+  const paths = commitFilePaths(file);
+  if (paths.some((path) => path.includes("\uFFFD"))) return null;
+  return `git -C ${shellQuote(repoPath)} --literal-pathspecs show --format= --cc --no-ext-diff --no-textconv ${shellQuote(hash)} -- ${paths.map(shellQuote).join(" ")}`;
 }
 
 export function matchesCommitFileQuery(file, query) {

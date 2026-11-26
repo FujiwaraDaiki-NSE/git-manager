@@ -2,11 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canDisplayProject,
   parseProjectUrl,
+  projectRequestRange,
   shouldFoldMergedLane,
   uniqueLocalForCommit,
   updateProjectUrl,
 } from "../app/project-flow.mjs";
+
+test("closing the Files detail keeps the loaded project visible during a range change", () => {
+  const selected = "/project?path=/repo&tab=files&range=7d&event=abc123";
+  const before = parseProjectUrl(new URL(selected, "http://localhost").search);
+  const after = parseProjectUrl(new URL(updateProjectUrl(selected, { event: null }), "http://localhost").search);
+  const loaded = { path: before.path, range: projectRequestRange(before) };
+  assert.equal(loaded.range, "7d");
+  assert.equal(projectRequestRange(after), "current");
+  assert.equal(canDisplayProject(after, loaded), true);
+  assert.equal(canDisplayProject({ ...after, path: "/another-repo" }, loaded), false);
+  assert.equal(canDisplayProject({ ...after, tab: "activity", range: "all" }, loaded), false);
+});
 
 test("project URLs default to 7d while preserving an explicit current range", () => {
   assert.equal(parseProjectUrl("?path=%2Fworkspace%2Frepo").range, "7d");
@@ -89,6 +103,15 @@ test("file investigations are directly addressable without changing project iden
   assert.equal(state.path, "/workspace/repo");
   assert.deepEqual(state.invalidParams, []);
   assert.equal(updateProjectUrl("/project?path=%2Fworkspace%2Frepo&tab=files", {tab: "info"}), "/project?path=%2Fworkspace%2Frepo&tab=info");
+});
+
+test("ファイル単独表示は current を要求し、コミット選択とアクティビティでは URL の期間を使う", () => {
+  const files = "/project?path=%2Frepo&tab=files&range=all";
+  const view = (url) => parseProjectUrl(new URL(url, "http://localhost").search);
+  assert.equal(projectRequestRange(view(files)), "current");
+  assert.equal(view(files).range, "all");
+  assert.equal(projectRequestRange(view(updateProjectUrl(files, { event: "abc123" }))), "all");
+  assert.equal(projectRequestRange(view(updateProjectUrl(files, { tab: "activity" }))), "all");
 });
 
 test("flow sections use URL defaults, preserve context, and reject unknown values", () => {

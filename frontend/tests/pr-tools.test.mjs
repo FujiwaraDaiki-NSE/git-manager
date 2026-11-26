@@ -253,15 +253,15 @@ test("PR番号が対応付けられた行のローカルレーンをすべて返
 
 test("対応が必要なオープンPRを番号ごとに表示し、両方の理由を残す", () => {
   const pulls = [
-    pr(1, { ciState: "FAILURE", reviewDecision: "APPROVED" }),
-    pr(2, { ciState: "SUCCESS", reviewDecision: "CHANGES_REQUESTED" }),
-    pr(3, { ciState: "ERROR", reviewDecision: "CHANGES_REQUESTED" }),
+    pr(1, { title: "CI修正", ciState: "FAILURE", reviewDecision: "APPROVED" }),
+    pr(2, { title: "設定追加", ciState: "SUCCESS", reviewDecision: "CHANGES_REQUESTED" }),
+    pr(3, { title: "文書更新", ciState: "ERROR", reviewDecision: "CHANGES_REQUESTED" }),
     pr(4, { ciState: "SUCCESS", reviewDecision: "APPROVED" }),
     pr(5, { ciState: null, reviewDecision: null }),
   ];
   assert.deepEqual(openPullRequestsNeedingAttention([...pulls, pulls[2]]), [
-    { number: 1, url: pulls[0].url, reasons: ["CI 失敗"] },
-    { number: 2, url: pulls[1].url, reasons: ["変更要求"] },
-    { number: 3, url: pulls[2].url, reasons: ["CI 失敗", "変更要求"] },
+    { number: 1, url: pulls[0].url, title: "CI修正", reasons: ["CI 失敗"] },
+    { number: 2, url: pulls[1].url, title: "設定追加", reasons: ["変更要求"] },
+    { number: 3, url: pulls[2].url, title: "文書更新", reasons: ["CI 失敗", "変更要求"] },
   ]);
 });

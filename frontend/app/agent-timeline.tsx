@@ -23,7 +23,7 @@ import {
   agentReportFreshness,
   createTimelineProjectLabel,
   currentAgentTasks,
-  hasUnknownCurrentTasks,
+  hasNoCurrentReports,
   timelineDecisionCopy,
   timelineProjectId,
   timelineWorktreeLocation,
@@ -55,6 +55,8 @@ type TimelineSnapshot = {
   projects: ProjectSummary[];
   loading: boolean;
   error: string | null;
+  projectsLoading: boolean;
+  projectsError: string | null;
 };
 
 type AgentTimelineProps = {
@@ -177,6 +179,7 @@ function CurrentRow({ project, name, task, repos, oldDecision = false, acknowled
         {oldDecision && <span className="agent-timeline-freshness">{relativeTime(task.occurred_at)}から（古い報告）</span>}
         <TimeValue value={task.occurred_at} />
       </ProjectBranch>
+      {agentTaskState(task) === "waiting_for_user" && !task.decision?.question.trim() && <p className="agent-timeline-question-note">質問の記載なし</p>}
       <AgentDecisionDetails key={JSON.stringify(identity)} decision={task.decision} replyBranch={branch} />
       {location !== null && <p className="agent-timeline-report-path">
         報告時のパス <code>{worktree}</code>{location.note !== null && <span role="status">{location.note}</span>}
@@ -304,19 +307,22 @@ export default function AgentTimelineSidebar({
   loading = false,
   error = null,
 }: AgentTimelineProps) {
-  const { repos, reposLoading, subscribeAgentEvents, loadOlderEvents, historyHasMore, historyLoading, historyError } = useRepoStream();
+  const { repos, reposLoading, projectsLoading, projectsError, subscribeAgentEvents, loadOlderEvents, historyHasMore, historyLoading, historyError } = useRepoStream();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
   const [isPaused, setIsPaused] = useState(false);
-  const [frozenSnapshot, setFrozenSnapshot] = useState<TimelineSnapshot>({
+  const liveSnapshot: TimelineSnapshot = {
     events: agentEvents,
     projects: projectSummaries,
     loading,
     error,
-  });
+    projectsLoading,
+    projectsError,
+  };
+  const [frozenSnapshot, setFrozenSnapshot] = useState(liveSnapshot);
   const [newDecisionCount, setNewDecisionCount] = useState(0);
   useEffect(() => {
     if (!isPaused) return;
@@ -396,9 +402,7 @@ export default function AgentTimelineSidebar({
   const [oldestDecisionFirst, setOldestDecisionFirst] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
 
-  const displaySnapshot = isPaused
-    ? frozenSnapshot
-    : { events: agentEvents, projects: projectSummaries, loading, error };
+  const displaySnapshot = isPaused ? frozenSnapshot : liveSnapshot;
   const projects = displaySnapshot.projects;
   const events = displaySnapshot.events;
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
@@ -422,11 +426,9 @@ export default function AgentTimelineSidebar({
     () => sortCurrentRows(currentAgentTasks(projects) as CurrentRow[], false),
     [projects],
   );
-  const unknownCurrent = useMemo(() => hasUnknownCurrentTasks(projects), [projects]);
-
   const filterOptions = useMemo<TimelineFilterOptions>(() => ({
     query,
-    projectId: scoped ? scopedProjectId : projectFilter,
+    projectId: scoped ? scopedProjectId : projectFilter || null,
     historyBranch,
     status: statusFilter,
     kind: kindFilter,
@@ -466,7 +468,14 @@ export default function AgentTimelineSidebar({
   );
   const history = scoped && scopedProjectId === null ? [] : historyDetails.filtered;
   const decisionChanges = useMemo(() => timelineDecisionChanges(events), [events]);
-  const currentLoading = displaySnapshot.loading && projects.length === 0;
+  const currentLoading = displaySnapshot.projectsLoading && projects.length === 0;
+  const currentEmptyMessage = scoped && scopedProjectId === null
+    ? null
+    : hasNoCurrentReports(projects, filterOptions.projectId)
+      ? "agent報告なし"
+      : projects.length > 0
+        ? "条件に一致する明示された現在の状態はありません。"
+        : "明示された現在の状態はありません。";
 
   const projectOptions = useMemo(() =>
     [...projectLabels.entries()].sort((left, right) => left[1].localeCompare(right[1]) || left[0].localeCompare(right[0])),
@@ -481,7 +490,7 @@ export default function AgentTimelineSidebar({
       return;
     }
     setNewDecisionCount(0);
-    setFrozenSnapshot({ events: agentEvents, projects: projectSummaries, loading, error });
+    setFrozenSnapshot(liveSnapshot);
     setIsPaused(true);
   };
 
@@ -536,9 +545,7 @@ export default function AgentTimelineSidebar({
           <div className="agent-timeline-section-heading"><h3 id="agent-timeline-current-title" tabIndex={-1}>現在の注意・状態</h3><span>{filteredCurrentRows.length}件</span></div>
           <p className="agent-timeline-caption">最新の明示状態を表示。直近は24時間未満です。確認済みはこのブラウザでの閲覧記録で、報告の状態は変えません。タイトル・ホーム集計・上部の件数は確認済みを含みます。</p>
           {currentLoading && <p className="agent-timeline-empty" role="status">現在の状態を取得中…</p>}
-          {!currentLoading && filteredCurrentRows.length === 0 && unknownCurrent && <p className="agent-timeline-empty" role="status">現在の状態を取得できないプロジェクトがあります。</p>}
-          {!currentLoading && filteredCurrentRows.length === 0 && !unknownCurrent && projects.length > 0 && <p className="agent-timeline-empty" role="status">条件に一致する明示された現在の状態はありません。</p>}
-          {!currentLoading && filteredCurrentRows.length === 0 && !unknownCurrent && projects.length === 0 && !displaySnapshot.error && <p className="agent-timeline-empty" role="status">明示された現在の状態はありません。</p>}
+          {!currentLoading && !displaySnapshot.projectsError && filteredCurrentRows.length === 0 && currentEmptyMessage !== null && <p className="agent-timeline-empty" role="status">{currentEmptyMessage}</p>}
           {filteredCurrentRows.length > 0 && <>
             <div className="agent-timeline-current-group">
               <h4>未確認の判断待ち · {decisionCount}件<span className="agent-timeline-decision-counts">{AGENT_DECISION_STATUSES.map((status) => `${statusLabels[status]} ${currentGroups.decisionCounts[status]}件`).join(" · ")}</span></h4>
@@ -559,7 +566,6 @@ export default function AgentTimelineSidebar({
             {currentGroups.old.length > 0 && <details className="agent-timeline-old-reports"><summary>古い報告 · {currentGroups.old.length}件</summary>{renderCurrentRows(currentGroups.old)}</details>}
             {currentGroups.unknown.length > 0 && <div className="agent-timeline-current-group"><h4>報告時刻未取得 · {currentGroups.unknown.length}件</h4>{renderCurrentRows(currentGroups.unknown)}</div>}
           </>}
-          {filteredCurrentRows.length > 0 && unknownCurrent && <p className="agent-timeline-unknown-note" role="status">一部のプロジェクトは現在状態未取得です。</p>}
         </section>
 
         <section className="agent-timeline-history" aria-labelledby="agent-timeline-history-title">

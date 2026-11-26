@@ -86,11 +86,12 @@ function assertFilterOptions(options) {
   if (options === null || typeof options !== "object") {
     throw new TypeError("tag filter options must be provided explicitly");
   }
-  const required = ["query", "type", "creatorFilter", "objectType", "startDate", "endDate", "datePresence", "sort", "collapseTargets"];
+  const required = ["query", "matchMode", "type", "creatorFilter", "objectType", "startDate", "endDate", "datePresence", "sort", "collapseTargets"];
   if (required.some((key) => options[key] === undefined)) {
     throw new TypeError(`${required.join(", ")} must be provided explicitly; use null or an empty string for no filter`);
   }
   if (typeof options.query !== "string") throw new TypeError("query must be a string; use an empty string for no filter");
+  if (options.matchMode !== "exact" && options.matchMode !== "prefix") throw new TypeError("matchMode must be exact or prefix");
   if (options.creatorFilter !== null && typeof options.creatorFilter !== "string") {
     throw new TypeError("creatorFilter must be a string or null; use an empty string for no filter");
   }
@@ -192,7 +193,7 @@ export function filterTagInvestigation(tags, options) {
   // empty value in filter metadata.
   const startDate = isEmpty(options.startDate) ? null : options.startDate;
   const endDate = isEmpty(options.endDate) ? null : options.endDate;
-  const searched = searchTags(tags, options.query);
+  const searched = searchTags(tags, options.query, options.matchMode);
   const typed = filterTags(searched, options.type);
   const filtered = typed.filter((tag) => (
     matchesCreator(tag, options.creatorFilter)
@@ -263,6 +264,7 @@ function assertExportFilters(filters) {
   assertFilterOptions(filters);
   return {
     query: filters.query,
+    match_mode: filters.matchMode,
     type: filters.type,
     creator: filters.creatorFilter,
     target_object_type: filters.objectType,

@@ -6,6 +6,7 @@ import {
   summarizeCommitFileDirectories,
   COMMIT_FILE_DIRECTORY_ROOT,
   COMMIT_FILE_EXTENSION_NONE,
+  buildCommitFileDiffCommand,
   buildCommitFilesPathList,
   buildCommitFilesTsv,
   commitFileDirectory,
@@ -28,6 +29,24 @@ const textFile = (path, additions, deletions, old_path) => ({
   deletions,
   binary: false,
   ...(old_path === undefined ? {} : { old_path }),
+});
+
+test("file diff commands pin the checkout and full commit hash and quote literal paths", () => {
+  const repoPath = "/work/it's a repo";
+  const hash = "5cd944291a922c2afd5bea0bfc051c73dc12f8bc";
+  const prefix = `git -C '/work/it'\\''s a repo' --literal-pathspecs show --format= --cc --no-ext-diff --no-textconv '${hash}' --`;
+  assert.equal(buildCommitFileDiffCommand(repoPath, hash, textFile("-file.ts", 1, 0)), `${prefix} '-file.ts'`);
+  assert.equal(
+    buildCommitFileDiffCommand(repoPath, hash, textFile(":(glob)*.ts", 1, 1, "old's file.ts")),
+    `${prefix} 'old'\\''s file.ts' ':(glob)*.ts'`,
+  );
+});
+
+test("file diff commands reject replacement characters in either path", () => {
+  const hash = "5cd944291a922c2afd5bea0bfc051c73dc12f8bc";
+  for (const file of [textFile("bad\uFFFD.ts", 1, 0), textFile("bad\uFFFD.ts", 1, 1, "old.ts"), textFile("new.ts", 1, 1, "bad\uFFFD.ts")]) {
+    assert.equal(buildCommitFileDiffCommand("/repo", hash, file), null);
+  }
 });
 
 test("path search includes both the current and renamed path", () => {

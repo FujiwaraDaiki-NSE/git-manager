@@ -1,5 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import ts from 'typescript';
+import { blameQuery } from '../app/blame-explorer-tools.mjs';
 import {
   CONTENT_SEARCH_SORTS,
   adjacentContentSearchMatches,
@@ -19,6 +26,52 @@ import {
 } from '../app/content-search-tools.mjs';
 
 const HASH = '0123456789abcdef0123456789abcdef01234567';
+
+test('selected match requests blame only on click for the pinned file and exactly one line', async () => {
+  const source = readFileSync(new URL('../app/content-search.tsx', import.meta.url), 'utf8').replace(/^import .*\.css";$/gm, '');
+  const { outputText } = ts.transpileModule(source + '\nexport { MatchLineOrigin };', {
+    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS },
+  });
+  const exports = {};
+  const require = createRequire(import.meta.url);
+  const controllerRef = { current: null };
+  const file = 'backend/app/detail.py';
+  const calls = [];
+  let state;
+  let cleanup;
+  runInNewContext(outputText, {
+    exports, URLSearchParams, AbortController,
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return { ok: true, json: async () => ({
+        pinned_hash: HASH, source_file: file,
+        lines: [{ final_line: 10, commit: '909e06bbf87a6b88eb734b76efb6439354e65841', summary: 'APIを追加', author: 'fujiwara.daiki' }],
+      }) };
+    },
+    require: id => id === 'react' ? {
+      ...React, useState: initial => [state ?? initial, next => { state = next; }],
+      useRef: () => controllerRef, useEffect: effect => { cleanup = effect(); },
+    } : id === './blame-explorer-tools.mjs' ? { blameQuery }
+      : id.startsWith('./') ? {} : require(id),
+  });
+  const render = () => exports.MatchLineOrigin({ path: '/repo', pinnedHash: HASH, match: { path: file, line: 10, text: 'PATCH_MAX_BYTES' } });
+  const button = render().props.children[0];
+  assert.equal(calls.length, 0);
+  const request = button.props.onClick();
+  assert.equal(render().props.children[0].props.disabled, true);
+  await request;
+  assert.equal(calls.length, 1);
+  const url = new URL(calls[0].url, 'http://localhost');
+  assert.equal(url.pathname, '/api/repo/blame');
+  assert.deepEqual(Object.fromEntries(url.searchParams), { path: '/repo', revision: HASH, file, start: '10', end: '10' });
+  assert.match(renderToStaticMarkup(render()), /909e06bb.*APIを追加.*fujiwara\.daiki/);
+
+  const abandonedRequest = render().props.children[0].props.onClick();
+  cleanup();
+  await abandonedRequest;
+  assert.equal(calls[1].options.signal.aborted, true);
+  assert.equal(state.status, 'loading');
+});
 
 test('content search query carries explicit empty directory and case option', () => {
   const params = new URLSearchParams(contentSearchQuery('/repo', 'main', 'Needle', false, ''));

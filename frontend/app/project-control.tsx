@@ -45,9 +45,10 @@ import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
 import RepoDetail, { type DetailTab } from "./repo-detail";
+import { fetchCommitDetail } from "./repo-detail-tools.mjs";
 import { agentDecisionReportTimes, agentReportKey, agentStateLabel, agentTaskState, mergeProjectAgentEvent } from "./agent-overview.mjs";
-import { parseProjectUrl, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
-import { activityMatchesSearch, checkedOutWorktreePaths, compareActivityEvents, laneMatchesFilter, laneMatchesSearch, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
+import { canDisplayProject, parseProjectUrl, projectRequestRange, shouldFoldMergedLane, updateProjectUrl } from "./project-flow.mjs";
+import { activityMatchesSearch, checkedOutWorktreePaths, compareActivityEvents, laneMatchesFilter, normalizedSearchQuery, sortWorkLanes } from "./project-search.mjs";
 import {
   activityAuthors,
   activityBranches,
@@ -62,7 +63,7 @@ import {
   UNKNOWN_AUTHOR_FILTER,
   UNKNOWN_BRANCH_FILTER,
 } from "./activity-explorer-tools.mjs";
-import { type LaneUpstreamFilter, type LaneAgentFilter, decodeAuthorFilter, laneMatchesAgent, LANE_AGENT_FILTERS, encodeLaneAuthor, hasUnknownLaneAuthor, laneCsv, laneAuthors, laneMatchesAuthor, laneMatchesUpstream, laneSummaryMarkdown, laneUpstreamState, LANE_UPSTREAM_FILTERS, LANE_UPSTREAM_LABELS, UNKNOWN_LANE_AUTHOR_FILTER } from "./lane-explorer-tools.mjs";
+import { type LaneUpstreamFilter, type LaneAgentFilter, decodeAuthorFilter, filterWorkLanes, LANE_AGENT_FILTERS, encodeLaneAuthor, hasUnknownLaneAuthor, laneCsv, laneAuthors, laneMatchesUpstream, laneSummaryMarkdown, laneUpstreamState, LANE_UPSTREAM_FILTERS, LANE_UPSTREAM_LABELS, UNKNOWN_LANE_AUTHOR_FILTER } from "./lane-explorer-tools.mjs";
 import { useRepoStream } from "./repo-stream";
 import type {
   CommitDetail,
@@ -357,16 +358,11 @@ function WorkLanes({
     () => project.lanes.filter((lane) => showMerged || relationLaneIds.has(lane.id) || lane.branch === project.default_branch || !isFoldedMerged(lane)),
     [project.lanes, relationLaneIds, showMerged, project.default_branch],
   );
-  const lanes = useMemo(
-    () => sortWorkLanes(visibleLanes.filter((lane) => (
-      laneMatchesSearch(lane, normalizedQuery)
-      && laneMatchesFilter(lane, filter, checkoutPaths)
-      && laneMatchesAuthor(lane, authorFilter)
-      && laneMatchesUpstream(lane, upstreamFilter)
-      && laneMatchesAgent(lane, agentFilter)
-    )), order),
-    [agentFilter, authorFilter, checkoutPaths, filter, order, normalizedQuery, upstreamFilter, visibleLanes],
+  const { matchingGit, matchingUpstream, matchingBoth } = useMemo(
+    () => filterWorkLanes(visibleLanes, checkoutPaths, { query: normalizedQuery, filter, authorFilter, upstreamFilter, agentFilter }),
+    [agentFilter, authorFilter, checkoutPaths, filter, normalizedQuery, upstreamFilter, visibleLanes],
   );
+  const lanes = useMemo(() => sortWorkLanes(matchingBoth, order), [matchingBoth, order]);
   const authors = useMemo(() => laneAuthors(visibleLanes), [visibleLanes]);
   const includesUnknownAuthor = useMemo(() => hasUnknownLaneAuthor(visibleLanes), [visibleLanes]);
   const handoffSummary = useMemo(() => laneSummaryMarkdown(project, lanes), [lanes, project]);
@@ -415,8 +411,8 @@ function WorkLanes({
           {exportStatus && <span className="lane-explorer-status" role="status">{exportStatus}</span>}
         </div>
       </div>
-      <div className="lane-filters" role="group" aria-label="作業の状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{visibleLanes.filter((lane) => laneMatchesFilter(lane, item.id, checkoutPaths)).length}</span></button>)}</div>
-      <div className="lane-explorer-upstream-filters" role="group" aria-label="upstream の同期状態で絞り込み"><span>upstream</span>{upstreamFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={upstreamFilter === item.id} onClick={() => onUpstreamFilter(item.id)}>{item.label}<span>{item.id === "all" ? visibleLanes.length : visibleLanes.filter((lane) => laneMatchesUpstream(lane, item.id)).length}</span></button>)}</div>
+      <div className="lane-filters" role="group" aria-label="作業の状態で絞り込み">{laneFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => onFilter(item.id)}>{item.label}<span>{matchingUpstream.filter((lane) => laneMatchesFilter(lane, item.id, checkoutPaths)).length}</span></button>)}</div>
+      <div className="lane-explorer-upstream-filters" role="group" aria-label="upstream の同期状態で絞り込み"><span>upstream</span>{upstreamFilters.map((item) => <button className="filter-button" type="button" key={item.id} aria-pressed={upstreamFilter === item.id} onClick={() => onUpstreamFilter(item.id)}>{item.label}<span>{matchingGit.filter((lane) => laneMatchesUpstream(lane, item.id)).length}</span></button>)}</div>
       <div className="lane-table-wrap">
         <table className="lane-table">
           <thead>
@@ -668,7 +664,7 @@ function ProjectInfo({ project, onOpenGit, onSelectLane }: { project: ProjectRes
         <InfoField label="ブランチの作業状況" value={project.agent_tasks === null ? null : `${project.agent_tasks.length} 件`} />
       </div>
       <div className="info-subsection"><h4>ブランチの作業状況</h4>{project.agent_tasks === null ? <div className="info-unavailable" role="status">agent報告なし</div> : project.agent_tasks.length ? <div className="related-agent-tasks">{project.agent_tasks.map((task) => <div className="related-agent-task" key={agentReportKey(task) || task.branch || task.worktree || "agent-report"}><div><strong>{task.branch || "ブランチ未取得"}</strong><span>{agentStateLabel(agentTaskState(task))}</span></div><AgentDecisionDetails decision={task.decision} /><p>{task.summary || "報告内容なし"}</p><time dateTime={task.occurred_at ?? undefined}>{exactDate(task.occurred_at)} · {agentElapsed(task.occurred_at)}</time></div>)}</div> : <div className="info-unavailable" role="status">明示されたブランチ報告はありません。</div>}</div>
-      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} laneComparison={null} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
+      <div className="info-subsection"><h4>Gitの変更を調べる</h4><CommitContainment key={`containment:${project.main_path}`} path={project.main_path} /><TagExplorer key={`tags:${project.main_path}`} path={project.main_path} /><CommitSearch path={project.main_path} /><RecoveryCandidates path={project.main_path} /><ReflogExplorer key={`reflog:${project.main_path}`} path={project.main_path} /><StashExplorer key={`stash:${project.main_path}`} path={project.main_path} projectWorktrees={project.worktrees} /><PatchEquivalence path={project.main_path} /><CommitCompare key={`compare:${project.main_path}`} path={project.main_path} laneComparison={null} /><FileHistoryExplorer key={`history:${project.main_path}`} path={project.main_path} /></div>
       <WorktreeExplorer project={project} onOpenGit={onOpenGit} onSelectLane={onSelectLane} />
       <PrExplorer project={project} />
       <div className="info-unavailable" role="status">PR・レビュー・CI の情報は、明示された値のみ表示します。</div>
@@ -785,20 +781,26 @@ function CommitDetail({
   const path = project.main_path;
   const [state, setState] = useState<LoadState>("loading");
   const [detail, setDetail] = useState<CommitDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
   useEffect(() => {
     if (!hash || !path) {
+      setError("コミットIDまたはリポジトリのパスがありません。");
       setState("error");
       return;
     }
     const controller = new AbortController();
     setState("loading");
     setDetail(null);
+    setError(null);
     const timer = window.setTimeout(() => {
-      void fetch(`/api/repo/commit?path=${encodeURIComponent(path)}&hash=${encodeURIComponent(hash)}`, { cache: "no-store", signal: controller.signal })
-        .then(async (response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return (await response.json()) as CommitDetail; })
+      void fetchCommitDetail(path, hash, controller.signal)
         .then((value) => { if (controller.signal.aborted) return; setDetail(value); setState("ready"); })
-        .catch((reason: unknown) => { if (controller.signal.aborted) return; setState("error"); });
+        .catch((reason: unknown) => {
+          if (controller.signal.aborted) return;
+          setError(reason instanceof Error ? reason.message : "コミット詳細を取得できませんでした。");
+          setState("error");
+        });
     }, 150);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [hash, path, retryToken]);
@@ -809,9 +811,9 @@ function CommitDetail({
       <h3>{header.subject ?? "コミット詳細"}</h3>
       <div className="selection-commit-meta"><code>{hash ?? "未取得"}</code>{hash && <CopyButton value={hash} label="コミットIDをコピー" />}<span>{header.author ?? "author 未取得"}</span><time dateTime={header.date ?? undefined}>{exactDate(header.date)}</time></div>
       {state === "loading" && <div className="selection-loading" role="status">完全なコミット詳細を取得中…</div>}
-      {state === "error" && <div className="selection-error" role="alert">コミット詳細を取得できませんでした。<button className="subtle-button" type="button" onClick={() => setRetryToken((value) => value + 1)}>再試行</button></div>}
+      {state === "error" && <div className="selection-error" role="alert">{error}<button className="subtle-button" type="button" onClick={() => setRetryToken((value) => value + 1)}>再試行</button></div>}
       {state === "ready" && detail && <>
-        <CommitFiles key={detail.hash} files={detail.files} downloadName={`${detail.hash}-files.tsv`} />
+        <CommitFiles key={detail.hash} files={detail.files} downloadName={`${detail.hash}-files.tsv`} fileDiffContext={detail.patch_truncated && path ? { repoPath: path, hash: detail.hash } : undefined} />
         <PatchView key={detail.hash} patch={detail.patch} />
         {detail.patch_truncated && <p className="inline-note" role="status">差分が大きいため、一部を省略しています。全体は <code>git show {hash}</code> で確認できます。</p>}
       </>}
@@ -918,7 +920,7 @@ function SelectionPane({
   return (
     <aside ref={panelRef} className="control-selection" aria-label="選択詳細" aria-modal={modal ? true : undefined} role={modal ? "dialog" : "complementary"} tabIndex={-1}>
       <div className="selection-head"><span className="selection-title">選択した項目の詳細</span><button ref={closeRef} className="icon-close" type="button" aria-label="詳細を閉じる" onClick={onClose}>×</button></div>
-      {selectedEvent && selectedHash ? <CommitDetail event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail defaultBranch={project.default_branch} project={project} lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
+      {selectedEvent && selectedHash ? <CommitDetail key={selectedHash} event={selectedEvent} lane={lane} onOpenGit={onOpenGit} project={project} /> : lane ? <LaneDetail defaultBranch={project.default_branch} project={project} lane={lane} onOpenGit={onOpenGit} /> : <div className="selection-content"><p>選択対象はありません。</p></div>}
     </aside>
   );
 }
@@ -998,13 +1000,13 @@ export default function ProjectControl() {
   }, [project?.name]);
   const [projectState, setProjectState] = useState<LoadState>("idle");
   const [projectError, setProjectError] = useState<string | null>(null);
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [loadedRequest, setLoadedRequest] = useState<{ path: string; range: string } | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   // Branch rows filter and page their row-level histories locally. Keep their
   // initial project snapshot at the compact current range; Activity still
   // requests the selected range because it consumes the global event history.
-  const projectFetchRange = urlState.tab === "flow" ? "current" : urlState.range;
-  const resourceKey = `${urlState.path}|${projectFetchRange}`;
+  // Files need the selected range only when restoring a commit from the URL.
+  const projectFetchRange = projectRequestRange(urlState);
   const invalidUrlKey = urlState.invalidParams.join(",");
   const retryProject = () => setReloadToken((value) => value + 1);
   const { laneQuery, laneFilter, laneOrder, laneAuthorFilter, laneUpstreamFilter, laneAgentFilter, activityQuery, activityFilter, activityOrder } = urlState;
@@ -1089,7 +1091,7 @@ export default function ProjectControl() {
         .then((value) => {
           if (controller.signal.aborted) return;
           setProject(reports.reduce(mergeProjectAgentEvent, value));
-          setLoadedKey(resourceKey);
+          setLoadedRequest({ path: projectPath, range: projectFetchRange });
           setProjectState("ready");
         })
         .catch((reason: unknown) => { if (controller.signal.aborted) return; setProjectState("error"); setProjectError(reason instanceof TypeError ? "サーバーとの通信を確認してから再試行してください。" : reason instanceof Error ? reason.message : "情報の取得に失敗しました。"); })
@@ -1099,9 +1101,9 @@ export default function ProjectControl() {
         });
       // Explicit project/range navigation should start immediately. Debounce
       // background observations only, where several SSE updates can coalesce.
-    }, loadedKey === resourceKey ? 180 : 0);
+    }, loadedRequest?.path === projectPath && loadedRequest.range === projectFetchRange ? 180 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [invalidUrlKey, projectFetchRange, projectStateKey, projectUpdateToken, resourceKey, reloadToken, subscribeAgentEvents, urlState.path]);
+  }, [invalidUrlKey, projectFetchRange, projectStateKey, projectUpdateToken, reloadToken, subscribeAgentEvents, urlState.path]);
 
   const selectedHash = urlState.event;
   const selectedLane = urlState.lane;
@@ -1206,7 +1208,7 @@ export default function ProjectControl() {
     </main>;
   }
 
-  if (!project || loadedKey !== resourceKey) {
+  if (!project || !canDisplayProject(urlState, loadedRequest)) {
     return (
       <main className="control-shell" id="main-content" tabIndex={-1}>
         <header className="control-topbar"><Link className="back-link" href={homeHref}>← プロジェクト一覧</Link><span className="connection-state"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}</span></header>
@@ -1220,7 +1222,7 @@ export default function ProjectControl() {
       <header className="control-topbar">
         <Link className="back-link" href={homeHref}>← プロジェクト一覧</Link>
         <div className="control-status"><span className={`connection-dot${connected ? " is-on" : ""}`} aria-hidden="true" />{connected ? "ライブ更新" : "再接続中"}{(projectState === "loading" || project?.snapshot?.status === "refreshing") && " · 情報を更新中"}<ProjectSnapshotFreshness snapshot={project?.snapshot} /></div>
-        <div className="control-topbar-tools"><ProjectSwitcher currentPath={urlState.path} homeQuery={homeQuery} /><ThemeControl /><ShortcutHelp /><RescanControl scanning={scanning} /></div>
+        <div className="control-topbar-tools"><ProjectSwitcher currentPath={project.main_path} homeQuery={homeQuery} /><ThemeControl /><ShortcutHelp /><RescanControl scanning={scanning} /></div>
       </header>
       {projectState === "error" && <div className="project-refresh-error" role="alert"><span>最新情報を取得できませんでした。前回取得した内容を表示しています。</span><button className="subtle-button" type="button" onClick={retryProject}>再試行</button></div>}
       <section className="control-hero" aria-labelledby="project-title">

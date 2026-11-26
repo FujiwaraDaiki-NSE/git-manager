@@ -13,7 +13,7 @@ const code = ts.transpileModule(readFileSync(source, "utf8"), {
   compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function home(search = "") {
+function home(search = "", onAgentCountButton) {
   let stream;
   let cursor;
   let effects;
@@ -36,7 +36,17 @@ function home(search = "") {
           return [states[index], (next) => { states[index] = typeof next === "function" ? next(states[index]) : next; }];
         },
       };
-      if (name.endsWith(".mjs") || name === "react/jsx-runtime") return require(name);
+      if (name === "react/jsx-runtime") {
+        const runtime = require(name);
+        return {
+          ...runtime,
+          jsxs(type, props, key) {
+            if (type === "button" && props["aria-controls"] === "agent-list") onAgentCountButton?.(key, props.onClick);
+            return runtime.jsxs(type, props, key);
+          },
+        };
+      }
+      if (name.endsWith(".mjs")) return require(name);
       if (name === "next/link") return { default: ({ prefetch, ...props }) => require("react").createElement("a", props) };
       if (name === "./agent-decision") return { AgentDecisionDetails: () => null };
       if (name === "./git-state-facts") return { FetchFacts: () => null };
@@ -56,7 +66,8 @@ function home(search = "") {
 
 const project = (id, failures) => ({
   id, name: id.slice(1), main_path: id, lane_count: 3, remote: null, remote_status: "unset",
-  git: { conflict: 0, dirty: 1, ahead: 0, behind: 0, merged: 0 },
+  git: { conflict: 0, dirty: 1, ahead: 0, behind: 0, merged: 0, prunable: 0 },
+  worktree_count: 0,
   git_status_available: true, git_status_failed: failures,
   next_lane: null, next_lane_id: null,
 });
@@ -97,6 +108,85 @@ test("Home filters for Git status failures independently of fetch failures", () 
   assert.match(html, /<article[^>]*aria-label="alpha"/);
   assert.match(html, /<article[^>]*aria-label="beta"/);
   assert.doesNotMatch(html, /<article[^>]*aria-label="gamma"/);
+});
+
+test("Home labels additional worktrees, including zero", () => {
+  const html = home()({
+    projectSummaries: [project("/alpha", 0), { ...project("/beta", 0), worktree_count: 35 }],
+    projectsLoading: false, projectsError: null,
+  });
+  assert.match(html, /管理情報 <span>追加worktree 0件<\/span>/);
+  assert.match(html, /管理情報 <span>追加worktree 35件<\/span>/);
+});
+
+test("Home expands all active reports and keeps their original status labels", () => {
+  const clicks = new Map();
+  const render = home("", (key, click) => clicks.set(key, click));
+  const tasks = [
+    ["waiting_for_user", "waiting"], ["blocked", "blocked"], ["review_required", "review"],
+    ["investigating", "investigate"], ["implementing", "implement"], ["testing", "test"], ["reviewing", "reviewing"],
+  ].map(([status, branch]) => ({ kind: "status", status, branch, project_id: "/alpha" }));
+  const snapshot = {
+    projectSummaries: [{
+      ...project("/alpha", 0),
+      agent_priority_counts: { waiting_for_user: 1, blocked: 1, review_required: 1, active: 4 },
+      agent_tasks: tasks,
+    }],
+    projectsLoading: false, projectsError: null,
+  };
+  const collapsed = render(snapshot);
+  assert.match(collapsed, /aria-expanded="false"><strong>4<\/strong> 実行中/);
+  assert.match(collapsed, /上位ブランチの作業状況/);
+  clicks.get("active")();
+  const expanded = render(snapshot);
+  assert.match(expanded, /aria-expanded="true"><strong>4<\/strong> 実行中/);
+  const list = expanded.match(/aria-label="実行中のブランチ">(.*?)<div class="project-card-event">/)[1];
+  assert.equal([...list.matchAll(/class="agent-task-entry"/g)].length, 4);
+  assert.match(list, /調査中.*>investigate<.*実装中.*>implement<.*テスト中.*>test<.*レビュー中.*>reviewing</);
+  assert.doesNotMatch(list, /入力待ち|問題あり|レビュー待ち/);
+  clicks.get("active")();
+  assert.match(render(snapshot), /上位ブランチの作業状況/);
+});
+
+test("Home filters prunable worktrees independently of Git status failures", () => {
+  const alpha = project("/alpha", 0);
+  const html = home("?git=prunable")({
+    projectSummaries: [{ ...alpha, git: { ...alpha.git, prunable: 3 } }, project("/beta", 19)],
+    projectsLoading: false, projectsError: null,
+  });
+  assert.match(html, /aria-pressed="true">参照先なしworktreeあり<span class="filter-count">1<\/span>/);
+  assert.match(html, /<article[^>]*aria-label="alpha"/);
+  assert.doesNotMatch(html, /<article[^>]*aria-label="beta"/);
+});
+
+test("Home counts dormant projects within the current search and Git filter", () => {
+  const dormant = (id, behind) => {
+    const item = project(id, 0);
+    return {
+      ...item,
+      git: { ...item.git, dirty: 0, behind },
+      latest_event: { date: "2020-01-01T00:00:00Z" },
+      agent_tasks: null,
+      agent_counts: { running: null, waiting_for_user: null, problem: null, reviewing: null, integratable: null },
+      agent_priority_counts: { waiting_for_user: null, blocked: null, active: null, review_required: null, merge_ready: null, completed: null },
+    };
+  };
+  const snapshot = {
+    projectSummaries: [
+      dormant("/alpha-dormant", 1),
+      { ...project("/alpha-active", 0), git: { dirty: 1, conflict: 0, ahead: 0, behind: 1 } },
+      dormant("/alpha-no-behind", 0),
+      dormant("/beta-dormant", 1),
+    ],
+    projectsLoading: false, projectsError: null,
+  };
+  const shown = home("?q=alpha&git=behind")(snapshot);
+  const hidden = home("?q=alpha&git=behind&hideDormant=1")(snapshot);
+  assert.match(shown, /休眠プロジェクトを隠す<span class="filter-count">1件<\/span>/);
+  assert.match(shown, /2 \/ 4 プロジェクトを表示中/);
+  assert.match(hidden, /休眠プロジェクトを隠す<span class="filter-count">1件を非表示<\/span>/);
+  assert.match(hidden, /1 \/ 4 プロジェクトを表示中/);
+  assert.match(hidden, /<article[^>]*aria-label="alpha-active"/);
 });
 
 test("Home describes the largest default-branch difference among checked-out branches", () => {

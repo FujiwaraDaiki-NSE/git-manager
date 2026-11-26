@@ -45,12 +45,24 @@ test('workspace exports distinguish clean, unavailable, and partially available 
   assert.match(markdown, /\| unavailable \| \/test\/repo \| 未取得 \| 1 \| 2 \| 未取得 \| 未取得 \| 未取得 \| 未取得 \| 3 \|/);
   assert.match(markdown, /\| partial \| \/test\/repo \| 未取得 \| 1 \| 2 \| 2 \| 0 \| 1 \| 0 \| 1 \|/);
 });
+test('JSON preserves fetch status fields and explicit absence without exporting stderr', () => {
+  const failure = { attempted_at: 1793020000, result: 'failure', category: 'timeout', reason: 'fetch timed out' };
+  const success = { attempted_at: 1793020100, result: 'success', category: null, reason: null };
+  const projects = [failure, success, null].map(fetch_status => ({ ...project, fetch_status }));
+  const snapshot = JSON.parse(workspaceSnapshot(projects, view, time));
+  assert.deepEqual(snapshot.projects.map(row => row.fetchStatus), [
+    { attempted_at: 1793020000, result: 'failure', category: 'timeout' },
+    { attempted_at: 1793020100, result: 'success', category: null },
+    null,
+  ]);
+});
+
 test('Markdown escapes user strings and distinguishes missing counts from zero',()=>{
   const markdown = workspaceMarkdown([{...project,name:'[link](https://x)|<script>\n`code`',git:{dirty:NaN,conflict:-1,ahead:0,behind:null}}],view,time);
   assert.ok(markdown.includes('\\[link\\]\\(https://x\\)\\|&lt;script&gt;<br>\\`code\\`'));
   assert.ok(markdown.includes('| 未取得 | 未取得 | 0 | 未取得 |'));
   assert.ok(markdown.includes('表示件数: 1'));
-  assert.ok(markdown.includes(time));
+  assert.equal(markdown.split('\n')[2], `一覧の作成時刻: ${time}`);
   assert.ok(markdown.includes('未取得は0件を意味しません'));
   assert.equal(project.git.dirty,2);
 });

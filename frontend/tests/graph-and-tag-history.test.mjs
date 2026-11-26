@@ -76,6 +76,41 @@ test("graph marks the visible first-parent history in place and extends it when 
   assert.match(renderToStaticMarkup(render([rows[0]])), /取得範囲にHEADがありません/);
 });
 
+test("graph navigates to each loaded child, including a merge's second-parent link", (t) => {
+  const graphView = componentHarness("graph-view.tsx", { "./branch-relation.mjs": branchRelation });
+  const row = (hash, short, subject, parents) => ({
+    hash, short, subject, parents, refs: [], lane: 0,
+    through: [], in_lanes: [], out_lanes: [], is_merge: parents.length > 1,
+  });
+  const parent = row("parent-full", "parent", "Root commit", []);
+  const first = row("first-full", "first", "Change on first branch", [parent.hash]);
+  const merge = row("merge-full", "merge", "Merge another branch", ["outside", parent.hash]);
+  const unrelated = row("other-full", "other", "Unrelated commit", ["outside"]);
+  const rows = [first, merge, unrelated, parent];
+  const selected = [];
+  const focused = [];
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    getElementById: (id) => ({ focus: () => focused.push(id) }),
+  } });
+  t.after(() => {
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else delete globalThis.document;
+  });
+
+  const render = (selectedHash) => graphView({ rows, maxLane: 0, selectedHash, onSelect: (hash) => selected.push(hash) });
+  const childGroup = (hash) => findNode(render(hash), (node) => node.props["aria-label"] === "子コミットへ移動");
+  const buttons = React.Children.toArray(childGroup(parent.hash).props.children);
+  assert.deepEqual(buttons.map((button) => button.props.children.join("")), [
+    "子（first）Change on first branch へ移動",
+    "子（merge）Merge another branch へ移動",
+  ]);
+  for (const button of buttons) button.props.onClick();
+  assert.deepEqual(selected, [first.hash, merge.hash]);
+  assert.deepEqual(focused, [`graph-row-${first.hash}`, `graph-row-${merge.hash}`]);
+  assert.match(renderToStaticMarkup(childGroup(first.hash)), /取得範囲内に子コミットはありません/);
+});
+
 test("tag comparison preserves explicit order across searches and uses only commit target hashes", async () => {
   const Compare = () => null;
   const old = { name: "v0.6.130", type: "annotated", hash: "a".repeat(40), peeled_hash: "b".repeat(40), peeled_type: "commit" };

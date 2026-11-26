@@ -59,7 +59,7 @@ const filters = (overrides = {}) => ({
   ...overrides,
 });
 
-function loadHistoryList() {
+function loadTimeline(projectsError = null) {
   const source = new URL("../app/agent-timeline.tsx", import.meta.url);
   const require = createRequire(source);
   const code = ts.transpileModule(readFileSync(source, "utf8") + "\nexport { HistoryList };", {
@@ -68,16 +68,62 @@ function loadHistoryList() {
   const exports = {};
   runInNewContext(code, {
     exports,
+    Map,
+    URLSearchParams,
     require: (name) => {
-      if (name === "./agent-decision") return { AgentDecisionDetails: () => null };
+      if (name === "./agent-decision") return {
+        AgentDecisionDetails: ({ decision }) => decision && createElement("strong", null, decision.question),
+      };
+      if (name === "./repo-stream") return {
+        useRepoStream: () => ({ projectsError, projectsLoading: false, repos: new Map() }),
+      };
+      if (name === "next/navigation") return {
+        usePathname: () => "/", useSearchParams: () => new URLSearchParams(),
+      };
+      if (name === "next/link") return { default: ({ children }) => createElement("span", null, children) };
+      if (name === "./desktop-notifications" || name === "./copy-button") return { default: () => null };
       return name.endsWith(".mjs") || !name.startsWith(".") ? require(name) : {};
     },
   });
-  return exports.HistoryList;
+  return exports;
 }
 
+test("current empty state distinguishes project retrieval failure from no agent reports", () => {
+  const render = (error) => renderToStaticMarkup(createElement(loadTimeline(error).default, {
+    agentEvents: [], projectSummaries: [{ ...projectA, agent_tasks: null }], connected: true, error,
+  }));
+  const success = render(null);
+  assert.match(success, /role="status">agent報告なし</);
+  assert.doesNotMatch(success, /role="alert"/);
+  const failure = render("HTTP 503");
+  assert.match(failure, /role="alert">報告を再取得できませんでした/);
+  assert.doesNotMatch(failure, /agent報告なし/);
+});
+
+test("only input-waiting cards with a blank question show the note alongside the summary", () => {
+  const waiting = event("waiting", new Date().toISOString(), { status: "waiting_for_user", summary: "確認結果を保存済み" });
+  const report = (branch, decision, status = "waiting_for_user") => ({ ...waiting, branch, decision, status });
+  const tasks = [
+    report("missing", null),
+    report("blank", { question: "　 ", options: [], links: [] }),
+    report("asked", { question: "確認しますか？", options: [], links: [] }),
+    report("testing", null, "testing"),
+  ];
+  const html = renderToStaticMarkup(createElement(loadTimeline().default, {
+    agentEvents: [], projectSummaries: [{ ...projectA, agent_tasks: tasks }, { ...projectB, agent_tasks: null }], connected: true,
+  }));
+  const cards = [...html.matchAll(/<li class="agent-timeline-current-row[^]*?<\/li>/g)].map(([card]) => card);
+  const card = (branch) => cards.find((value) => value.includes(`<span>${branch}</span>`));
+  assert.match(card("missing"), /確認結果を保存済み[^]*質問の記載なし/);
+  assert.match(card("blank"), /質問の記載なし/);
+  assert.match(card("asked"), /<strong>確認しますか？<\/strong>/);
+  assert.doesNotMatch(card("asked"), /質問の記載なし/);
+  assert.doesNotMatch(card("testing"), /質問の記載なし/);
+  assert.doesNotMatch(html, /現在状態未取得/);
+});
+
 test("displayed history groups local days across pages and preserves the exported order", () => {
-  const HistoryList = loadHistoryList();
+  const { HistoryList } = loadTimeline();
   const projectById = new Map();
   const input = [
     event("morning", new Date(2026, 9, 2, 0, 5).toISOString(), { summary: "morning report" }),
@@ -135,7 +181,7 @@ test("decision comparison uses the previous loaded status of the same project an
     ]],
   ]);
 
-  const HistoryList = loadHistoryList();
+  const { HistoryList } = loadTimeline();
   const projectById = new Map();
   for (const sort of [TIMELINE_SORT_NEWEST, TIMELINE_SORT_OLDEST]) {
     const { filtered } = timelineHistoryDetails(events, filters({ query: "の報告", sort }), projectById);

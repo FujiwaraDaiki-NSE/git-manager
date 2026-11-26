@@ -107,6 +107,7 @@ function TagTarget({ detail, commit, state, error }: { detail: TagDetail; commit
 export default function TagExplorer({ path }: { path: string }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [matchMode, setMatchMode] = useState<"exact" | "prefix">("exact");
   const [type, setType] = useState<"all" | TagType>("all");
   const [creatorFilter, setCreatorFilter] = useState("");
   const [objectType, setObjectType] = useState("");
@@ -250,6 +251,7 @@ export default function TagExplorer({ path }: { path: string }) {
 
   const filterOptions = useMemo(() => ({
     query,
+    matchMode,
     type,
     creatorFilter,
     objectType,
@@ -258,7 +260,7 @@ export default function TagExplorer({ path }: { path: string }) {
     datePresence,
     sort,
     collapseTargets,
-  }), [collapseTargets, creatorFilter, datePresence, endDate, objectType, query, sort, startDate, type]);
+  }), [collapseTargets, creatorFilter, datePresence, endDate, matchMode, objectType, query, sort, startDate, type]);
   const filtered: TagSummary[] = useMemo(
     () => filterTagInvestigation(inventory?.tags ?? [], filterOptions) as TagSummary[],
     [filterOptions, inventory?.tags],
@@ -280,7 +282,7 @@ export default function TagExplorer({ path }: { path: string }) {
 
   useEffect(() => {
     setDownloadStatus("idle");
-  }, [collapseTargets, creatorFilter, datePresence, endDate, objectType, query, sort, startDate, type]);
+  }, [collapseTargets, creatorFilter, datePresence, endDate, matchMode, objectType, query, sort, startDate, type]);
 
   const onToggle = (event: SyntheticEvent<HTMLDetailsElement>) => setOpen(event.currentTarget.open);
   const exportCsv = () => {
@@ -311,6 +313,7 @@ export default function TagExplorer({ path }: { path: string }) {
   };
   const clearFilters = () => {
     setQuery("");
+    setMatchMode("exact");
     setType("all");
     setCreatorFilter("");
     setObjectType("");
@@ -321,6 +324,7 @@ export default function TagExplorer({ path }: { path: string }) {
     setCollapseTargets(false);
   };
   const hasFilters = query.trim() !== ""
+    || matchMode !== "exact"
     || type !== "all"
     || creatorFilter !== ""
     || objectType !== ""
@@ -345,7 +349,14 @@ export default function TagExplorer({ path }: { path: string }) {
 
         {inventory && <>
           <div className="tag-explorer-tools" role="group" aria-label="タグ一覧の絞り込みと操作">
-            <label><span>タグ名を完全一致で検索</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例: v2.0" aria-label="タグ名を完全一致で検索" /></label>
+            <label><span>タグ名を検索</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例: v2.0" /></label>
+            <label>
+              <span>タグ名の一致方法</span>
+              <select value={matchMode} onChange={(event) => setMatchMode(event.target.value as "exact" | "prefix")}>
+                <option value="exact">完全一致</option>
+                <option value="prefix">前方一致</option>
+              </select>
+            </label>
             <label><span>種類</span><select value={type} onChange={(event) => setType(event.target.value as "all" | TagType)} aria-label="タグの種類で絞り込み">{TAG_TYPES.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select></label>
             <label><span>作成者（完全一致）</span><select value={creatorFilter} onChange={(event) => setCreatorFilter(event.target.value)} aria-label="タグの作成者で完全一致絞り込み"><option value="">すべて</option>{creatorIdentities.map((identity) => <option key={identity} value={encodeTagCreatorFilter(identity)}>{identity}</option>)}{includesUnknownCreator && <option value={UNKNOWN_TAG_CREATOR_FILTER}>作成者未取得</option>}</select></label>
             <label><span>対象object type</span><select value={objectType} onChange={(event) => setObjectType(event.target.value)} aria-label="タグの対象object typeで絞り込み"><option value="">すべて</option>{TAG_OBJECT_TYPES.map((value) => <option key={value} value={value}>{value}</option>)}<option value={UNKNOWN_TAG_OBJECT_TYPE_FILTER}>対象不明</option></select></label>

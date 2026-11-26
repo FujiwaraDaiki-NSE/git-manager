@@ -650,6 +650,7 @@ export function GraphView({
   const classes = ["graph-view", className].filter(Boolean).join(" ");
   const headIndex = virtualNode ? rows.findIndex((row) => row.is_head) : -1;
   const selectedRow = rows.find((row) => row.hash === selectedHash);
+  const children = selectedRow ? rows.filter((row) => row.parents.includes(selectedRow.hash)) : [];
 
   const graphRows = (
     <div aria-label={ariaLabel} className={classes} role="group">
@@ -724,6 +725,23 @@ export function GraphView({
               <span key={key}>{label}は表示範囲外です</span>
             );
           })}
+        </div>
+      )}
+      {onSelect && selectedRow && (
+        <div className="commit-meta graph-child-navigation" role="group" aria-label="子コミットへ移動">
+          {children.length === 0 ? <span>取得範囲内に子コミットはありません</span> : children.map((child) => (
+            <button
+              key={child.hash}
+              className="copy"
+              type="button"
+              onClick={() => {
+                select(child.hash);
+                document.getElementById(rowId(child))?.focus();
+              }}
+            >
+              子（{child.short}）{child.subject} へ移動
+            </button>
+          ))}
         </div>
       )}
     </>

@@ -88,7 +88,7 @@ export function selectPatchRows(lines, changedOnly) {
  *
  * @param {PatchSection[]} sections
  * @param {string} query
- * @param {{ changedOnly?: boolean, sectionIndexes?: number[], caseSensitive?: boolean, wholeWord?: boolean }} options
+ * @param {{ changedOnly?: boolean, lineKind?: "all" | "addition" | "deletion", sectionIndexes?: number[], caseSensitive?: boolean, wholeWord?: boolean }} options
  * @returns {PatchMatch[]}
  */
 export function findPatchMatches(sections, query, options) {
@@ -102,13 +102,26 @@ export function findPatchMatches(sections, query, options) {
   const wordEnd = /[\p{L}\p{M}\p{N}\p{Pc}$]$/u;
   const wordStart = /^[\p{L}\p{M}\p{N}\p{Pc}$]/u;
   const changedOnly = options.changedOnly === true;
+  const { lineKind } = options;
   const allowed = options.sectionIndexes === undefined ? null : new Set(options.sectionIndexes);
   const matches = [];
   sections.forEach((section, sectionIndex) => {
     if (allowed !== null && !allowed.has(sectionIndex)) return;
+    let combinedParents = 0;
     for (let lineIndex = 0; lineIndex < section.lines.length; lineIndex += 1) {
       const line = section.lines[lineIndex];
+      if (line.kind === "hunk") {
+        const marker = line.text.match(/^(@{3,}) /);
+        combinedParents = marker === null ? 0 : marker[1].length - 1;
+      }
       if (changedOnly && line.kind === "context") continue;
+      if ((lineKind === "addition" || lineKind === "deletion") && line.kind !== lineKind) {
+        if (line.kind !== "meta" || combinedParents === 0) continue;
+        const prefix = line.text.slice(0, combinedParents);
+        const columns = lineKind === "addition" ? /^[+ ]+$/ : /^[- ]+$/;
+        const marker = lineKind === "addition" ? "+" : "-";
+        if (prefix.length !== combinedParents || !columns.test(prefix) || !prefix.includes(marker)) continue;
+      }
       pattern.lastIndex = 0;
       let occurrence;
       while ((occurrence = pattern.exec(line.text)) !== null) {

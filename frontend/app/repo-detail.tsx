@@ -423,7 +423,12 @@ export function CommitPane({
               ))}
             </div>
           )}
-          <CommitFiles key={commit.hash} files={commit.files} downloadName={`${commit.hash}-files.tsv`} />
+          <CommitFiles
+            key={commit.hash}
+            files={commit.files}
+            downloadName={`${commit.hash}-files.tsv`}
+            fileDiffContext={commit.patch_truncated ? { repoPath, hash: commit.hash } : undefined}
+          />
           <PatchView key={commit.hash} patch={commit.patch} />
           {commit.patch_truncated && (
             <div className="truncated" role="status">
@@ -536,11 +541,12 @@ function BranchesPane({
   if (state === "idle") return null;
   const local = data?.local ?? [];
   const remote = data?.remotes ?? [];
-  const branchOptions = { query, filter, showMerged, sort } as const;
+  const localOptions = { query, showMerged, sort, scope: "local" } as const;
+  const remoteOptions = { query, showMerged, sort, scope: "remote" } as const;
   // A merged branch checked out in another worktree remains active and must
   // stay visible in the default view.
-  const visibleLocal = visibleBranches(local, branchOptions);
-  const visibleRemote = visibleBranches(remote, branchOptions);
+  const visibleLocal = visibleBranches(local, { ...localOptions, filter });
+  const visibleRemote = visibleBranches(remote, { ...remoteOptions, filter });
   const resultCount = visibleLocal.length + visibleRemote.length;
   const totalCount = local.length + remote.length;
   const mergedCount = local.filter(
@@ -598,8 +604,8 @@ function BranchesPane({
           <div className="branch-filter-list" role="group" aria-label="ブランチの種類で絞り込み">
             {BRANCH_FILTERS.map((option) => {
               const optionFilter = option.key as BranchFilter;
-              const count = visibleBranches(local, { query, filter: optionFilter, showMerged, sort }).length
-                + visibleBranches(remote, { query, filter: optionFilter, showMerged, sort }).length;
+              const count = visibleBranches(local, { ...localOptions, filter: optionFilter }).length
+                + visibleBranches(remote, { ...remoteOptions, filter: optionFilter }).length;
               return <button key={option.key} type="button" aria-pressed={filter === optionFilter} onClick={() => setFilter(optionFilter)}>{option.label}<span>{count}</span></button>;
             })}
           </div>

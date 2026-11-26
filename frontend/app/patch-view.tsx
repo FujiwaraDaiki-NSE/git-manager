@@ -26,6 +26,7 @@ type PatchMatch = {
 };
 type PatchFileKind = "all" | "text" | "binary";
 type PatchFileSort = "original" | "path" | "changes";
+type PatchSearchLineKind = "all" | "addition" | "deletion";
 type PatchReviewEntry = { section: PatchSection; index: number };
 
 const EMPTY_REVIEWED = new Set<number>();
@@ -175,6 +176,7 @@ export default function PatchView({ patch }: { patch: string }) {
   const [hideReviewed, setHideReviewed] = useState(false);
   const [reviewState, setReviewState] = useState<{ patch: string; indexes: Set<number> }>({ patch, indexes: new Set() });
   const [contentQuery, setContentQuery] = useState("");
+  const [searchLineKind, setSearchLineKind] = useState<PatchSearchLineKind>("all");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState("");
@@ -193,7 +195,7 @@ export default function PatchView({ patch }: { patch: string }) {
     return sortPatchReviewEntries(filteredByReview, fileSort);
   }, [fileKind, fileSort, hideReviewed, indexedSections, normalizedFileQuery, reviewedIndexes]);
   const visibleIndexes = useMemo(() => visible.map(({ index }) => index), [visible]);
-  const matches = useMemo(() => findPatchMatches(sections, contentQuery, { changedOnly, sectionIndexes: visibleIndexes, caseSensitive, wholeWord }), [changedOnly, contentQuery, sections, visibleIndexes, caseSensitive, wholeWord]);
+  const matches = useMemo(() => findPatchMatches(sections, contentQuery, { changedOnly, lineKind: searchLineKind, sectionIndexes: visibleIndexes, caseSensitive, wholeWord }), [changedOnly, searchLineKind, contentQuery, sections, visibleIndexes, caseSensitive, wholeWord]);
   const matchesBySection = useMemo(() => {
     const grouped = new Map<number, PatchMatch[]>();
     for (const match of matches) {
@@ -276,6 +278,11 @@ export default function PatchView({ patch }: { patch: string }) {
           event.preventDefault();
           goToMatch(event.shiftKey ? -1 : 1);
         }} placeholder="追加行・削除行・ヘッダーの内容" aria-controls={patchResultsId} /></label>
+        <label className="patch-search-line-kind">検索対象<select value={searchLineKind} onChange={(event) => setSearchLineKind(event.target.value as PatchSearchLineKind)}>
+          <option value="all">すべて</option>
+          <option value="addition">追加行</option>
+          <option value="deletion">削除行</option>
+        </select></label>
         <button type="button" disabled={!contentQuery} onClick={() => { setContentQuery(""); contentSearchRef.current?.focus(); }}>クリア</button>
         <button type="button" aria-label="前の差分検索結果へ" disabled={!matches.length} onClick={() => goToMatch(-1)}>前へ</button>
         <button type="button" aria-label="次の差分検索結果へ" disabled={!matches.length} onClick={() => goToMatch(1)}>次へ</button>

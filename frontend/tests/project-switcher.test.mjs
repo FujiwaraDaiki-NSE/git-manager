@@ -1,6 +1,59 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
+import { renderToStaticMarkup } from 'react-dom/server';
+import ts from 'typescript';
 import {parseRecentProjectPaths, recordRecentProjectPath, filterProjectSwitcherProjects, findProjectSwitcherWorktrees, sortProjectSwitcherProjects, projectSwitcherResultIndex} from '../app/project-switcher-tools.mjs';
+
+const require = createRequire(new URL('../app/project-switcher.tsx', import.meta.url));
+const compilerOptions = { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 };
+
+test('a linked worktree visit passes the main path returned by the project API to the switcher', () => {
+  const source = readFileSync(new URL('../app/project-control.tsx', import.meta.url), 'utf8');
+  const switcher = source.match(/<ProjectSwitcher\s[^>]*\/>/)[0];
+  const { outputText } = ts.transpileModule(switcher, { compilerOptions });
+  const { props } = runInNewContext(outputText, {
+    exports: {},
+    require,
+    ProjectSwitcher: () => null,
+    project: { main_path: '/main' },
+    urlState: { path: '/linked' },
+    homeQuery: null,
+  });
+  assert.equal(props.currentPath, '/main');
+});
+
+test('a failed project refresh keeps matches and retry visible when projects are already available', () => {
+  const source = readFileSync(new URL('../app/project-switcher.tsx', import.meta.url), 'utf8');
+  const { outputText } = ts.transpileModule(source, { compilerOptions });
+  const render = (projects) => {
+    const exports = {};
+    runInNewContext(outputText, {
+      exports,
+      require(name) {
+        if (name.endsWith('.css')) return {};
+        if (name === './repo-stream') return { useRepoStream: () => ({
+          repos: new Map(), projectSummaries: projects, projectsLoading: false, projectsError: 'offline',
+          refreshProjects() {}, subscribeProjectsLiveUpdates() {},
+        }) };
+        if (name === 'next/link') return { default: ({ prefetch, ...props }) => require('react').createElement('a', props) };
+        return require(name);
+      },
+    });
+    return renderToStaticMarkup(require('react').createElement(exports.default, { currentPath: null, homeQuery: null }));
+  };
+
+  const retained = render([{ id: 'alpha', name: 'Alpha', main_path: '/alpha' }]);
+  assert.match(retained, /role="alert".*前回取得した一覧を表示しています。.*再試行/);
+  assert.match(retained, /role="status">1 プロジェクト/);
+  assert.match(retained, /data-project-switch-result="true".*<strong>Alpha<\/strong>/);
+
+  const initialFailure = render([]);
+  assert.match(initialFailure, /role="alert".*再試行/);
+  assert.doesNotMatch(initialFailure, /前回取得した一覧|data-project-switch-result|検索をクリア/);
+});
 
 test('recent paths distinguish absent from corrupt storage and keep exact unique visit order',()=>{
  assert.deepEqual(parseRecentProjectPaths(null),[]);

@@ -34,6 +34,8 @@ type PullRequestRecord = {
   merged_at: string | null;
 };
 
+const githubPendingTitle = "GitHubに照会中";
+
 const rangeOptions: { id: PrRange; label: string }[] = [
   { id: "7", label: "7日" },
   { id: "30", label: "30日" },
@@ -67,6 +69,7 @@ function exportFilename(name: string) {
 function githubStatusMessage(status: string) {
   switch (status) {
     case "available":
+    case "pending":
       return null;
     case "unavailable":
       return "GitHubのPR情報を取得できないため、このスナップショットだけではPR履歴の全体を確認できません。認証・接続を確認してください。";
@@ -100,7 +103,10 @@ function OpenPullRequestAttention({ open, branchRows }: {
       </div>
       {result === null ? (
         <div className={`pr-explorer-coverage pr-explorer-coverage-${open === undefined ? "unknown" : open.status}`} role="status">
-          <strong>{open?.status === "not_applicable" ? "オープンPR情報は対象外です" : open?.status === "unavailable" ? "オープンPRを取得できませんでした" : "オープンPR情報は未取得です"}</strong>
+          <strong>{open?.status === "pending" ? githubPendingTitle
+            : open?.status === "not_applicable" ? "オープンPR情報は対象外です"
+            : open?.status === "unavailable" ? "オープンPRを取得できませんでした"
+            : "オープンPR情報は未取得です"}</strong>
           {open?.reason && <small>{open.reason}</small>}
         </div>
       ) : (
@@ -111,12 +117,13 @@ function OpenPullRequestAttention({ open, branchRows }: {
           </p>
           {result.matches.length > 0 && (
             <ul className="pr-explorer-open-list">
-              {result.matches.map(({ number, url, reasons }) => {
+              {result.matches.map(({ number, url, title, reasons }) => {
                 const href = validHttpUrl(url);
                 const lanes = openPullRequestLocalLanes(branchRows, number);
                 return (
                   <li key={number}>
                     {href ? <a href={href} target="_blank" rel="noreferrer">{recordNumber(number)} <span aria-hidden="true">↗</span></a> : <strong>{recordNumber(number)}</strong>}
+                    <strong>{title}</strong>
                     <span>{reasons.join(" · ")}</span>
                     {lanes.map((lane) => (
                       <Link key={lane.id} href={updateProjectUrl(`/project?${searchParams.toString()}`, {
@@ -339,10 +346,15 @@ function MergedPullRequestExplorer({ project }: { project: ProjectResponse }) {
         <p><strong>表示範囲</strong> 取得済みのブランチに関連するマージ済みPRを表示しています。GitHub上のすべてのPRや、オープンPRを含む一覧ではありません。</p>
       </div>
 
-      {(!branchRowsAvailable || unavailableMessage) && (
+      {(!branchRowsAvailable || githubStatus === "pending" || unavailableMessage) && (
         <div className={`pr-explorer-coverage pr-explorer-coverage-${!branchRowsAvailable ? "unknown" : githubStatus}`} role="status">
-          <strong>{!branchRowsAvailable ? "ブランチ行のPR履歴を確認できません" : githubStatus === "not_applicable" ? "PR情報は対象外です" : "GitHubのPR履歴を確認できません"}</strong>
-          <span>{!branchRowsAvailable ? "ブランチ行の取得に失敗したため、PRがないとは判断できません。再走査してから再試行してください。" : unavailableMessage}</span>
+          <strong>{githubStatus === "pending" ? githubPendingTitle
+            : !branchRowsAvailable ? "ブランチ行のPR履歴を確認できません"
+            : githubStatus === "not_applicable" ? "PR情報は対象外です"
+            : "GitHubのPR履歴を確認できません"}</strong>
+          {!branchRowsAvailable
+            ? <span>ブランチ行の取得に失敗したため、PRがないとは判断できません。再走査してから再試行してください。</span>
+            : unavailableMessage && <span>{unavailableMessage}</span>}
           {project.github.reason && <small>{project.github.reason}</small>}
         </div>
       )}

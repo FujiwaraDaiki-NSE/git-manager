@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import CopyButton from "./copy-button";
+import { blameQuery } from "./blame-explorer-tools.mjs";
 import {
   CONTENT_SEARCH_SORTS,
   adjacentContentSearchMatches,
@@ -160,6 +161,54 @@ async function responseError(response: Response) {
 
 function shortHash(value: string) {
   return value.slice(0, 12);
+}
+
+type LineOrigin = { final_line: number; commit: string; summary: string; author: string | null };
+type LineOriginState =
+  | { status: "idle" | "loading" }
+  | { status: "ready"; line: LineOrigin }
+  | { status: "error"; message: string };
+
+function MatchLineOrigin({ path, pinnedHash, match }: { path: string; pinnedHash: string; match: ContentSearchMatch }) {
+  const [state, setState] = useState<LineOriginState>({ status: "idle" });
+  const controllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => controllerRef.current?.abort(), []);
+
+  async function load() {
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setState({ status: "loading" });
+    try {
+      const params = blameQuery(path, pinnedHash, match.path, match.line, match.line);
+      const response = await fetch(`/api/repo/blame?${params}`, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(await responseError(response));
+      const result = await response.json() as { pinned_hash: string; source_file: string; lines: LineOrigin[] };
+      const line = result.lines[0];
+      if (result.pinned_hash !== pinnedHash || result.source_file !== match.path
+        || result.lines.length !== 1 || line?.final_line !== match.line) {
+        throw new Error("検索結果と異なる版・ファイル・行の応答が返されました。");
+      }
+      if (!isString(line.commit) || !isString(line.summary) || (line.author !== null && !isString(line.author))) {
+        throw new Error("変更元の応答形式が不正です。");
+      }
+      if (!controller.signal.aborted) setState({ status: "ready", line });
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
+
+  return <div>
+    <button type="button" className="subtle-button" disabled={state.status === "loading"} onClick={load}>この行の変更元</button>
+    {state.status === "loading" && <p className="content-search-status" role="status">変更元を取得中…</p>}
+    {state.status === "error" && <p className="content-search-error" role="alert">変更元を取得できませんでした。（{state.message}）</p>}
+    {state.status === "ready" && <p className="content-search-note" role="status">
+      <code title={state.line.commit}>{shortHash(state.line.commit)}</code> · {state.line.summary}
+      {state.line.author !== null && <> · {state.line.author}</>}
+    </p>}
+  </div>;
 }
 
 function formatBytes(value: number) {
@@ -569,6 +618,7 @@ export default function ContentSearch({ path }: { path: string }) {
             <div><h4 id="content-search-preview-title">一致行の前後を表示</h4><p><code>{selectedMatch.path}</code> · 行 {selectedMatch.line} · 固定版 <code>{pinnedHash ? shortHash(pinnedHash) : "未取得"}</code></p></div>
             <div className="content-search-preview-actions">{historyHref && <a className="subtle-button" href={historyHref} aria-label="固定した版でファイル履歴を調べる（自動取得しない）">ファイル履歴を調べる</a>}{investigationReport && <CopyButton value={investigationReport} label="選択した一致行のMarkdown調査レポートをコピー" />}</div>
           </div>
+          {pinnedHash && <MatchLineOrigin key={JSON.stringify([path, pinnedHash, selectedMatch.path, selectedMatch.line])} path={path} pinnedHash={pinnedHash} match={selectedMatch} />}
           <div className="content-search-navigation" role="group" aria-label="表示中の一致行の移動">
             <button type="button" className="subtle-button" disabled={navigation.previous === null} onClick={() => { if (navigation.previous) selectMatch(navigation.previous); }} aria-label="前の表示中の一致行へ">← 前の表示結果</button>
             <span role="status">{navigation.index >= 0 ? `選択 ${navigation.index + 1} / ${navigation.count} 件` : "選択中の一致行は表示条件外です"}</span>

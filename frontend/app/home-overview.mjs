@@ -21,7 +21,7 @@ export const AGENT_SUMMARY_LABELS = {
 
 export const AGENT_COUNT_KEYS = [...AGENT_SUMMARY_KEYS, "completed"];
 
-export const GIT_FILTER_KEYS = ["dirty", "conflict", "ahead", "behind", "fetch-failure", "git-status-failure"];
+export const GIT_FILTER_KEYS = ["dirty", "conflict", "ahead", "behind", "fetch-failure", "git-status-failure", "prunable"];
 
 export const HOME_DEFAULT_VIEW = {
   query: "",
@@ -281,14 +281,19 @@ export function homeCardIndex(action, current, length) {
   return Math.max(0, Math.min(length - 1, current + (action === "previous" ? -1 : 1)));
 }
 
+const activeAgentStatuses = new Set(["investigating", "implementing", "testing", "reviewing"]);
+
+export function isActiveAgentTask(task) {
+  return activeAgentStatuses.has(agentTaskState(task));
+}
+
 /** Count only current progress reports with a verifiable old timestamp. */
 export function countOldActiveReports(projects, now) {
-  const active = new Set(["investigating", "implementing", "testing", "reviewing"]);
   let count = 0;
   for (const project of projects) {
     if (!Array.isArray(project.agent_tasks)) continue;
     for (const task of project.agent_tasks) {
-      if (active.has(agentTaskState(task)) && agentReportFreshness(task.occurred_at, now) === "old") count += 1;
+      if (isActiveAgentTask(task) && agentReportFreshness(task.occurred_at, now) === "old") count += 1;
     }
   }
   return count;

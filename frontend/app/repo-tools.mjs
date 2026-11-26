@@ -33,11 +33,11 @@ export function branchMatchesSearch(branch, query) {
     .some((value) => branchValue(value).includes(normalized));
 }
 
-export function branchMatchesFilter(branch, filter) {
+export function branchMatchesFilter(branch, filter, scope) {
   if (filter === "all") return true;
   if (filter === "current") return branch.current === true;
   if (filter === "worktree") return typeof branch.worktree === "string" && branch.worktree.length > 0;
-  if (filter === "untracked-upstream") return branch.upstream === null;
+  if (filter === "untracked-upstream") return scope === "local" && branch.upstream === null;
   return false;
 }
 
@@ -79,11 +79,11 @@ export function sortBranches(branches, sort) {
   return [...branches].sort((left, right) => compareBranches(left, right, sort));
 }
 
-export function visibleBranches(branches, { query, filter, showMerged, sort }) {
+export function visibleBranches(branches, { query, filter, showMerged, sort, scope }) {
   return sortBranches(
     branches.filter((branch) => (
       mergedBranchIsVisible(branch, showMerged)
-      && branchMatchesFilter(branch, filter)
+      && branchMatchesFilter(branch, filter, scope)
       && branchMatchesSearch(branch, query)
     )),
     sort,

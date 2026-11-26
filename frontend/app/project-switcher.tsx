@@ -37,6 +37,7 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
   const { repos, projectSummaries: projects, projectsLoading: loading, projectsError, refreshProjects, subscribeProjectsLiveUpdates } = useRepoStream();
   const error = !loading && projectsError !== null;
   const initialLoading = loading && projects.length === 0;
+  const showResults = projects.length > 0 || (!initialLoading && !error);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favoritesStorageIssue, setFavoritesStorageIssue] = useState(false);
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
@@ -213,8 +214,9 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
       <p className="project-switch-local-note">お気に入りと最近見た履歴は、このブラウザにのみ保存されます。</p>
       {favoritesStorageIssue && <div className="project-switch-storage-issue" role="alert">お気に入りの保存データを読み込めません。ホーム画面で保存を再設定できます。</div>}
       {recentStorageIssue && <div className="project-switch-storage-issue" role="alert">最近見た履歴を保存できないため、この画面では一時的に表示しています。</div>}
-      <div className="project-switch-count" role="status">{initialLoading ? "プロジェクトを読み込み中…" : error ? "" : `${matches.length} プロジェクト${query.trim() ? ` · ${worktreeMatches.length} 作業ディレクトリ` : ""}${loading ? " · 更新中" : ""}`}</div>
-      {error ? <div className="project-switch-empty" role="alert">プロジェクト一覧を取得できませんでした。<button className="subtle-button" type="button" onClick={refreshProjects}>再試行</button></div> : !initialLoading && <div className="project-switch-results">
+      {error && <div className="project-switch-empty" role="alert">プロジェクト一覧を取得できませんでした。{showResults && "前回取得した一覧を表示しています。"}<button className="subtle-button" type="button" onClick={refreshProjects}>再試行</button></div>}
+      <div className="project-switch-count" role="status">{initialLoading ? "プロジェクトを読み込み中…" : showResults ? `${matches.length} プロジェクト${query.trim() ? ` · ${worktreeMatches.length} 作業ディレクトリ` : ""}${loading ? " · 更新中" : ""}` : ""}</div>
+      {showResults && <div className="project-switch-results">
         {matches.map((project) => project.main_path === null ? <div className="project-switch-unavailable" key={project.id} aria-disabled="true">{project.name}<span>作業パス未取得</span></div> : <Link prefetch={false} href={`/project?path=${encodeURIComponent(project.main_path)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`} key={project.id} data-project-switch-result="true" aria-current={project.main_path === currentPath ? "page" : undefined} onClick={(event) => handleResultClick(event, project.main_path)} onKeyDown={handleResultKeyDown}><span><strong>{project.name}</strong><code>{project.main_path}</code></span><span>{project.main_path === currentPath ? "表示中" : "→"}</span></Link>)}
         {worktreeMatches.map(({ project, path, branch, href }) => (
           <Link prefetch={false} href={href} key={path} className="project-switch-worktree" data-project-switch-result="true" onClick={(event) => handleResultClick(event, project.main_path)} onKeyDown={handleResultKeyDown}>

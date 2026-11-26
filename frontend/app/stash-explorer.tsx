@@ -7,7 +7,7 @@ import CommitCompare from "./commit-compare";
 import PatchView from "./patch-view";
 import { fileStatusDescription } from "./file-status.mjs";
 import { useRepoStream } from "./repo-stream";
-import type { Numstat, Repo } from "./types";
+import type { Numstat, ProjectWorktree, Repo } from "./types";
 import * as stashTools from "./stash-explorer-tools.mjs";
 import "./stash-explorer.css";
 
@@ -206,7 +206,7 @@ function StashPartView({
   );
 }
 
-export default function StashExplorer({ path }: { path: string }) {
+export default function StashExplorer({ path, projectWorktrees }: { path: string; projectWorktrees: ProjectWorktree[] }) {
   const { repos, reposLoading } = useRepoStream();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -319,6 +319,9 @@ export default function StashExplorer({ path }: { path: string }) {
     return [...repos.values()].filter((repo) => repo.common_dir === commonDir);
   }, [path, repos]);
   const worktree = worktrees.find((repo) => repo.path === worktreePath);
+  const projectWorktree = projectWorktrees.find((item) => item.path === worktreePath);
+  const checkoutMissing = worktree?.worktree_state === "prunable"
+    || projectWorktree?.state === "prunable" || projectWorktree?.git_dir_missing === true;
   const overlap = detail && worktree ? stashWorktreeOverlap(detail, worktree, reposLoading) : null;
 
   useEffect(() => {
@@ -500,6 +503,20 @@ export default function StashExplorer({ path }: { path: string }) {
                 )}
               </div>
             </section>
+            {checkoutMissing && <p className="stash-explorer-state" role="status">適用先のチェックアウトが存在しません。</p>}
+            {!checkoutMissing && worktree && detail.hash === selectedHash && (
+              <CommitCompare
+                key={JSON.stringify([detail.hash, worktree.path])}
+                path={worktree.path}
+                laneComparison={{
+                  base: detail.head_parent,
+                  target: "HEAD",
+                  baseLabel: detail.head_parent,
+                  directLabel: "退避時点から適用先HEADまでの差分",
+                  supportsMergeBase: false,
+                }}
+              />
+            )}
             {detailCommand && (
               <div className="stash-explorer-command">
                 <span>trackedを再現</span>

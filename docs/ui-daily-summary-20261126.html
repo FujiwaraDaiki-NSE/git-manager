@@ -1,0 +1,62 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-26</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>集計の誤り・worktree台帳・調査ツールの改善、大規模リポジトリのファイル画面の高速化 — 2026-11-26</h1>
+<p>「再起動直後のfetch殺到」は 2026-11-21 に解消済みです。今朝の再起動直後（git 11プロセス並走中）も cold <code>/api/project</code> は 0.02〜0.29秒で、再発はありませんでした。開始時30点 + 検証済み加点79点 = <b>100点</b>（上限到達）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+
+<h2>高速化（+5 × 1）</h2>
+<table><thead><tr><th>内容</th><th>実測</th></tr></thead><tbody>
+<tr><td>コミット未選択で「ファイル」を開くとき、全期間の活動履歴を要求しない（<code>range=current</code>）</td><td>langchain: backend直 cold 28.9秒/32.8MB → 2.6秒/13.2MB、warm 1.3〜1.5秒/37.1MB → 0.9秒/13.2MB。画面でも <code>range=current</code> のみを確認</td></tr>
+</tbody></table>
+
+<h2>機能追加（+5 × 11）</h2>
+<table><thead><tr><th>内容</th><th>実画面での確認</th></tr></thead><tbody>
+<tr><td>worktree台帳にGitが返した <code>prunable</code> の理由を表示</td><td>git-manager <code>/tmp/gitdash-skip-unchanged-fetch-refresh</code>: gitdir file points to non-existent location</td></tr>
+<tr><td>ホームカードの「実行中」から対象ブランチを展開</td><td>design_db 12件、各行に 実装中/調査中/テスト中</td></tr>
+<tr><td>ホームの絞り込み「参照先なしworktreeあり」</td><td>111件 → 3件</td></tr>
+<tr><td>ホームのJSON書き出しに fetch の試行時刻・結果・分類（理由の原文は含めない）</td><td>hk_thinkplatform: timeout、internship2025: authentication</td></tr>
+<tr><td>「件名・本文」検索で選んだコミットの本文を表示</td><td>「could not be read to the end」→ 5cd9442 の本文に該当文</td></tr>
+<tr><td>差分が省略されたコミットで、ファイル単位の差分コマンドをコピー</td><td>5cd9442（57ファイル中47のみ）: コピーしたコマンドで lane-detail.test.mjs の差分を取得</td></tr>
+<tr><td>Git詳細のグラフで取得済みの子コミットへ移動</td><td>a927351 → 子 9a5ea8e へ選択・フォーカス移動</td></tr>
+<tr><td>タグ名の前方一致</td><td>langchain <code>langchain-core==</code>: 128 / 918件</td></tr>
+<tr><td>stashの退避時点と適用先worktreeのHEADを比較（押下時のみ要求）</td><td>thinkplatform stash@{0}: 90b70bb7 → 8876958、3,899ファイル</td></tr>
+<tr><td>内容検索で選んだ行の変更元（blame）をその場で表示</td><td>detail.py:10 PATCH_MAX_BYTES → 909e06bb、要求は固定SHA・start=end=10</td></tr>
+<tr><td>差分内検索の対象を「追加行」「削除行」で選択（<code>--cc</code> の結合ハンク含む）</td><td>5cd9442 「worktree」: すべて299 / 追加142 / 削除29</td></tr>
+</tbody></table>
+
+<h2>UIをリッチに（+2 × 4）</h2>
+<table><thead><tr><th>内容</th><th>実画面での確認</th></tr></thead><tbody>
+<tr><td>入力待ちで質問欄が空のカードに「質問の記載なし」</td><td>agentタイムライン 7件</td></tr>
+<tr><td>コミット詳細の取得失敗理由を表示</td><td>404「コミットが見つかりません」→ 通信失敗の案内 → 再試行で復旧</td></tr>
+<tr><td>「休眠を隠す」の件数を現在の条件内で表示</td><td>未pull 40件 → 隠すと29件、ボタン「11件」</td></tr>
+<tr><td>「対応が必要なオープンPR」にタイトル</td><td>thinkplatform #838 / #1564 / #1565</td></tr>
+</tbody></table>
+
+<h2>バグ修正（+1 × 9）</h2>
+<table><thead><tr><th>内容</th><th>実画面での確認</th></tr></thead><tbody>
+<tr><td>ホームの「統合済み」を二重に数えていた</td><td>git-manager 81 → 48</td></tr>
+<tr><td>参照先なしworktreeの <code>cd</code> をコピー対象から除外</td><td>個別ボタン無効、パス・prune確認コマンドは利用可</td></tr>
+<tr><td>agentタイムラインで報告なしを「現在状態未取得」と表示</td><td>device-transcribe:「agent報告なし」</td></tr>
+<tr><td>作業一覧の絞り込みボタン件数が他の条件を無視</td><td>design_db 入力待ち絞り込み時「未push 1」→ 1行</td></tr>
+<tr><td>linked worktreeのURLから開くと「最近見た」に残らない</td><td>メインパス <code>/home/solution2024/git-manager</code> を記録</td></tr>
+<tr><td>一覧の再取得失敗で Ctrl K の候補が消える</td><td>エラー表示と並んで111件を検索・移動可</td></tr>
+<tr><td>グラフの「ブランチへ移動」で同名の行が区別できない</td><td>codex/ui-100 · ローカルのみ / · リモートのみ</td></tr>
+<tr><td>Git詳細「追跡先なし」にリモート追跡参照を含めていた</td><td>git-manager 52 → 3</td></tr>
+<tr><td>一覧の更新中は書き出しボタンが常に無効</td><td>「更新中」でもJSON・Markdownを書き出し可（取得失敗時は無効のまま）</td></tr>
+</tbody></table>
+
+<h2>文言修正（+1 × 2）</h2>
+<table><tbody>
+<tr><td>ホームカード「N worktree」→「追加worktree N件」</td><td>git-manager 35件、もう一方 0件</td></tr>
+<tr><td>Markdown出力「取得時刻」→「一覧の作成時刻」</td><td>コピー内容で確認</td></tr>
+</tbody></table>
+
+<h2>加点しなかったもの</h2>
+<ul>
+<li>表示対象コミットだけに numstat を問い合わせる変更: in-process A/B（各7回）で cold 859→711ms / 883→693ms だが、本番HTTPで同条件の計測をしていないため加点せず（変更は採用）。</li>
+<li>PR照会中の見出し「GitHubに照会中」: 単体テストのみ。再起動後もキャッシュ済みで pending 状態を実画面で観測できず。</li>
+<li>オープンPR「レビュー待ちのみ」: 実データの全オープンPR（96件）が reviewDecision=null で常に0件のため撤回。</li>
+<li>レビュー指摘への対応（結合ハンク、ファイル画面の保持、エクスポートの理由除外、stash比較の無効化、文字化けパスのコマンド抑止、同名リモート行のremote_ref）: 今回の変更自体の修正。</li>
+</ul>
+
+<h2>テスト</h2>
+<p>frontend 541件成功・tsc成功、backend 478件成功・6件スキップ。</p>
+</html>

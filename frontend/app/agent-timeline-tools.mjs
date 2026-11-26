@@ -86,8 +86,13 @@ export function currentAgentTasks(projects) {
   return [...byKey.values()];
 }
 
-export function hasUnknownCurrentTasks(projects) {
-  return projects.some((project) => project.agent_tasks === null);
+/**
+ * @param {import("./types").ProjectSummary[]} projects
+ * @param {string | null} projectId
+ */
+export function hasNoCurrentReports(projects, projectId) {
+  const selected = projectId === null ? projects : projects.filter((project) => project.id === projectId);
+  return selected.length > 0 && selected.every((project) => project.agent_tasks === null);
 }
 
 export function sortTimelineEvents(events) {

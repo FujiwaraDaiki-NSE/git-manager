@@ -16,9 +16,17 @@ const tags = [
 ];
 
 test("tag search is an exact name match and does not broaden a typo", () => {
-  assert.deepEqual(searchTags(tags, "v2.0"), [tags[0]]);
-  assert.deepEqual(searchTags(tags, "v2"), []);
-  assert.deepEqual(searchTags(tags, ""), tags);
+  assert.deepEqual(searchTags(tags, "v2.0", "exact"), [tags[0]]);
+  assert.deepEqual(searchTags(tags, "v2", "exact"), []);
+  assert.deepEqual(searchTags(tags, "", "exact"), tags);
+});
+
+test("prefix search matches the start of the tag name and requires an explicit mode", () => {
+  assert.deepEqual(searchTags(tags, " v ", "prefix"), tags.slice(0, 2));
+  assert.deepEqual(searchTags(tags, "2.0", "prefix"), []);
+  assert.deepEqual(searchTags(tags, "V", "prefix"), []);
+  assert.deepEqual(searchTags(tags, "", "prefix"), tags);
+  assert.deepEqual(searchTags(tags, "v"), []);
 });
 
 test("type filter keeps lightweight and annotated facts explicit", () => {
@@ -35,8 +43,8 @@ test("name and creator-date sorting preserve unknown dates at the end", () => {
 });
 
 test("visible tags compose exact search, type and sort", () => {
-  assert.deepEqual(visibleTags(tags, { query: "v2.0", type: "annotated", sort: "newest" }).map((tag) => tag.name), ["v2.0"]);
-  assert.deepEqual(visibleTags(tags, { query: "v2", type: "all", sort: "name" }), []);
+  assert.deepEqual(visibleTags(tags, { query: "v2.0", matchMode: "exact", type: "annotated", sort: "newest" }).map((tag) => tag.name), ["v2.0"]);
+  assert.deepEqual(visibleTags(tags, { query: "v2", matchMode: "exact", type: "all", sort: "name" }), []);
 });
 
 test("tag CSV quotes cells and neutralizes spreadsheet formulas", () => {

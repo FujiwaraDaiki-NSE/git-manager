@@ -16,7 +16,6 @@ import ProjectSwitcher from "./project-switcher";
 import ThemeControl from "./theme-control";
 import RescanControl from "./rescan-control";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { AGENT_DECISION_STATUSES } from "./agent-timeline-tools.mjs";
 import {
   AGENT_SUMMARY_LABELS,
   FAVORITES_STORAGE_KEY,
@@ -29,6 +28,7 @@ import {
   countProjectsWithUnknownAgentCounts,
   formatAgentCount,
   homeSearch,
+  isActiveAgentTask,
   isDormantProject,
   homeCardKeyAction,
   homeCardIndex,
@@ -54,7 +54,7 @@ const summaryCards: Array<{ key: AgentSummaryKey; label: string }> = [
 
 type AgentFilter = "all" | "unknown" | AgentSummaryKey;
 type LaneGitFilter = "all" | "dirty" | "conflict" | "ahead" | "behind";
-type GitFilter = LaneGitFilter | "fetch-failure" | "git-status-failure";
+type GitFilter = LaneGitFilter | "fetch-failure" | "git-status-failure" | "prunable";
 type ProjectSort = "priority" | "name" | "latest";
 type CardDensity = "comfortable" | "compact";
 type GitStatusFailure = { path: string; error: string };
@@ -85,6 +85,7 @@ const gitFilters: Array<{ key: Exclude<GitFilter, "all">; label: string }> = [
   { key: "behind", label: "未pull" },
   { key: "fetch-failure", label: "fetch失敗" },
   { key: "git-status-failure", label: "Git状態の取得失敗" },
+  { key: "prunable", label: "参照先なしworktreeあり" },
 ];
 
 function relativeTime(iso: string | null | undefined) {
@@ -151,7 +152,7 @@ function ProjectCard({
   const topTasks = topAgentTasks(project.agent_tasks, 3);
   const tasks = expandedStatus === null
     ? topTasks
-    : project.agent_tasks?.filter((task) => agentTaskState(task) === expandedStatus);
+    : project.agent_tasks?.filter((task) => expandedStatus === "active" ? isActiveAgentTask(task) : agentTaskState(task) === expandedStatus);
   const latestAgent = project.latest_agent_event;
   const latestGit = project.latest_event;
   const maxRemainder = Math.max(0, (project.agent_tasks?.length ?? 0) - topTasks.length);
@@ -199,7 +200,7 @@ function ProjectCard({
         {summaryCards.map(({ key, label }) => {
           const count = agentCount(project, key);
           if (count === null) return null;
-          if (count > 0 && AGENT_DECISION_STATUSES.includes(key)) {
+          if (count > 0) {
             const isOpen = expandedStatus === key;
             return <button key={key} type="button" aria-controls={agentListId} aria-expanded={isOpen} onClick={() => setSelectedStatus(isOpen ? null : key)}>
               <strong>{formatAgentCount(count)}</strong> {label} <span aria-hidden="true">{isOpen ? "▴" : "▾"}</span>
@@ -219,7 +220,7 @@ function ProjectCard({
               <strong>{branchHref ? <Link href={branchHref} prefetch={false}>{task.branch}</Link> : task.branch || "ブランチ未取得"}</strong>
               <span>{task.summary || "報告内容なし"}</span>
             </div>
-            {expandedStatus !== null && <AgentDecisionDetails decision={task.decision} />}
+            {expandedStatus !== null && expandedStatus !== "active" && <AgentDecisionDetails decision={task.decision} />}
           </div>;
         })}
         {expandedStatus === null && maxRemainder > 0 && <span className="agent-remainder">+{maxRemainder} 件</span>}
@@ -254,7 +255,7 @@ function ProjectCard({
       })()}
       {project.fetch_status?.result === "failure" && <span className="fact fact-danger" role="status">⚠ fetch失敗（{fetchCategoryLabel(project.fetch_status.category)}）</span>}
       <details className="project-card-extra">
-        <summary>管理情報 <span>{project.worktree_count} worktree</span></summary>
+        <summary>管理情報 <span>追加worktree {project.worktree_count}件</span></summary>
         <FetchFacts fetchedAt={project.fetched_at} status={project.fetch_status} />
         <dl>
           <div><dt>作業パス</dt><dd><code>{project.main_path ?? "未取得"}</code></dd></div>
@@ -452,8 +453,13 @@ export default function Page() {
     return displayOrder.map((id) => byId.get(id)).filter((project): project is ProjectSummary => Boolean(project));
   }, [displayOrder, projects]);
   const ordered = useMemo(() => view.sort === "priority" ? orderedByPriority : sortHomeProjects(projects, view.sort), [orderedByPriority, projects, view.sort]);
-  const dormantIds = useMemo(() => new Set(projects.filter((project) => isDormantProject(project, acknowledgements, Date.now())).map((project) => project.id)), [projects, acknowledgements]);
-  const visible = useMemo(() => invalidUrlParams.length > 0 ? [] : ordered.filter((project) => projectMatchesView(project, view, favorites) && (!view.hideDormant || !dormantIds.has(project.id))), [dormantIds, favorites, invalidUrlParams.length, ordered, view]);
+  const matchingProjects = useMemo(() => invalidUrlParams.length > 0 ? [] : ordered.filter((project) => projectMatchesView(project, view, favorites)), [favorites, invalidUrlParams.length, ordered, view]);
+  const nonDormantProjects = useMemo(() => {
+    const now = Date.now();
+    return matchingProjects.filter((project) => !isDormantProject(project, acknowledgements, now));
+  }, [matchingProjects, acknowledgements]);
+  const dormantCount = matchingProjects.length - nonDormantProjects.length;
+  const visible = view.hideDormant ? nonDormantProjects : matchingProjects;
   const oldActiveReports = countOldActiveReports(projects, Date.now());
   const totals = useMemo(() => aggregateAgentCounts(projects), [projects]);
   useEffect(() => {
@@ -543,7 +549,7 @@ export default function Page() {
         <label>並び順<select value={view.sort} onChange={(event) => applyView({ sort: event.target.value as ProjectSort })} aria-label="プロジェクトの並び順"><option value="priority">優先度</option><option value="name">名前</option><option value="latest">最新更新</option></select></label>
         <div role="group" aria-label="Git状態で絞り込み"><button type="button" aria-pressed={view.gitFilter === "all"} onClick={() => applyView({ gitFilter: "all" })}>すべて</button>{gitFilters.map(({ key, label }) => <button type="button" key={key} aria-pressed={view.gitFilter === key} onClick={() => applyView({ gitFilter: view.gitFilter === key ? "all" : key })}>{label}<span className="filter-count">{projectsUnavailable ? "—" : gitProjectCounts[key]}</span></button>)}</div>
         <button type="button" aria-pressed={view.favoritesOnly} onClick={() => applyView({ favoritesOnly: !view.favoritesOnly })}>{view.favoritesOnly ? "★ お気に入りのみ" : "☆ お気に入り"}</button>
-        <button type="button" aria-pressed={view.hideDormant} title="最新コミットが30日以上前で、変更・未push・未確認の判断待ち・実行中がないプロジェクト" onClick={() => applyView({ hideDormant: !view.hideDormant })}>休眠プロジェクトを隠す<span className="filter-count">{projectsUnavailable ? "—" : `${dormantIds.size}件${view.hideDormant ? "を非表示" : ""}`}</span></button>
+        <button type="button" aria-pressed={view.hideDormant} title="最新コミットが30日以上前で、変更・未push・未確認の判断待ち・実行中がないプロジェクト" onClick={() => applyView({ hideDormant: !view.hideDormant })}>休眠プロジェクトを隠す<span className="filter-count">{projectsUnavailable ? "—" : `${dormantCount}件${view.hideDormant ? "を非表示" : ""}`}</span></button>
         <div role="group" aria-label="カード密度"><button type="button" aria-pressed={view.density === "comfortable"} onClick={() => applyView({ density: "comfortable" })}>ゆったり</button><button type="button" aria-pressed={view.density === "compact"} onClick={() => applyView({ density: "compact" })}>コンパクト</button></div>
         <span className="toolbar-note">{projectsUnavailable ? (loading ? "Git件数を取得中…" : "Git件数の取得失敗") : <>{previousLabel}{gitTotals.lanes === null ? "ブランチ数は一部未取得" : `${gitTotals.lanes} ブランチ`} · {gitTotals.failed === 0 ? `${gitTotals.dirty} 作業ディレクトリに変更` : `${gitTotals.available ? `取得できた範囲で ${gitTotals.dirty} 作業ディレクトリに変更` : "変更件数は未取得"} · Git状態の取得失敗 ${gitTotals.failed}件`}</>}</span>
       </section>}
@@ -584,7 +590,7 @@ export default function Page() {
       {invalidUrlParams.length === 0 && deferredOrder && view.sort === "priority" && <div className="order-update" role="status"><span>優先度の並び順に更新があります</span><button type="button" onClick={applyOrder}>並び順を更新</button></div>}
       {invalidUrlParams.length === 0 && <div className="home-results" role="status" aria-live="polite"><span>{projectsUnavailable ? (loading ? "プロジェクトを読み込み中…" : "プロジェクト一覧の取得失敗") : `${previousLabel}${visible.length} / ${projects.length} プロジェクトを表示中`}</span>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
       {invalidUrlParams.length === 0 && view.gitFilter === "fetch-failure" && <FetchFailureBreakdown projects={visible} />}
-      {invalidUrlParams.length === 0 && <WorkspaceExport projects={visible} view={view} disabled={loading || error !== null} />}
+      {invalidUrlParams.length === 0 && <WorkspaceExport projects={visible} view={view} disabled={projectsUnavailable || error !== null} />}
       {projectsCachedAt !== null && <div className="home-state" role="status"><strong>前回取得したデータを表示中（{Math.max(0, Math.floor((Date.now() - projectsCachedAt) / 60000))}分前）{loading ? "・最新を取得中…" : ""}</strong><span>一覧・件数・タブタイトルは前回取得時点の情報です。ファビコンの入力待ち件数は最新取得まで表示しません。</span></div>}
       {invalidUrlParams.length === 0 && projectsUnavailable && loading && <SkeletonGrid />}
       {error && <div className="home-state home-state-error" role="alert"><strong>{hasPreviousProjects ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}

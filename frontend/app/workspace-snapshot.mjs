@@ -7,6 +7,11 @@ export function workspaceSnapshot(projects, view, capturedAt) {
       git: { ...project.git, ...gitStatusCounts(project, null) },
       gitStatusAvailable: project.git_status_available,
       gitStatusFailed: project.git_status_failed,
+      fetchStatus: project.fetch_status && {
+        attempted_at: project.fetch_status.attempted_at,
+        result: project.fetch_status.result,
+        category: project.fetch_status.category,
+      },
       agentState: project.agent_state,
       agentCounts: project.agent_priority_counts,
       latestCommit: project.latest_event,
@@ -58,7 +63,7 @@ export function workspaceMarkdown(projects, view, capturedAt) {
   const columns = ['プロジェクト', 'パス', 'リモート', 'ブランチ', 'worktree', '変更あり', '競合', '未push', '未pull', 'Git状態の取得失敗', 'agent状態'];
   return [
     '# gitdash プロジェクト一覧', '',
-    `取得時刻: ${markdownCell(capturedAt)}`, `表示件数: ${projects.length}`, '',
+    `一覧の作成時刻: ${markdownCell(capturedAt)}`, `表示件数: ${projects.length}`, '',
     `表示条件: ${markdownCell(JSON.stringify(view))}`, '',
     `| ${columns.join(' | ')} |`, `| ${columns.map(() => '---').join(' | ')} |`,
     ...summaryRows(projects, null).map(row => `| ${row.map(markdownCell).join(' | ')} |`), '',

@@ -1,4 +1,5 @@
 import { agentTaskState } from './agent-overview.mjs';
+import { missingLocalTrackingRefLabel } from './upstream-label.mjs';
 
 // One geometry contract for rows, SVG endpoints and connection chips.
 export function timelineRowGeometry(rows, eventsByRow) {
@@ -36,4 +37,32 @@ export function historicalPullRequestLabel(row) {
   const numbers = row.pull_requests.map(({ number }) => `#${number}`).join(", ");
   const repository = row.pull_requests[0].source_repository;
   return `PR ${numbers} · 作成元 ${repository === null ? "不明" : repository}`;
+}
+
+export function rowStatus(row) {
+  const labels = {
+    synchronized: ["同期済み", "lane-state-ok"],
+    local_ahead: ["ローカル先行（未push）", "lane-state-warn"],
+    remote_ahead: ["リモート先行（未pull）", "lane-state-warn"],
+    diverged: ["分岐", "lane-state-danger"],
+    remote_only: ["リモートのみ", "lane-state-muted"],
+    remote_unavailable: ["リモート参照未取得", "lane-state-warn"],
+    tracking_unavailable: ["追跡状態未取得", "lane-state-warn"],
+    tracking_inconsistent: ["追跡状態不整合", "lane-state-warn"],
+    mixed: ["ローカル混在", "lane-state-warn"],
+    local_only: ["ローカルのみ", "lane-state-muted"],
+    upstream_deleted: [missingLocalTrackingRefLabel, "lane-state-danger"],
+    detached: ["detached HEAD", "lane-state-muted"],
+    historical_deleted: ["マージ済みPRの履歴", "lane-state-muted"],
+  };
+  if (labels[row.status]) return labels[row.status];
+  if (row.historical) return ["履歴", "lane-state-muted"];
+  return ["状態未取得", "lane-state-muted"];
+}
+
+export function branchJumpLabel(row, name, duplicateName) {
+  if (!duplicateName) return name;
+  const pullRequest = historicalPullRequestLabel(row);
+  const label = pullRequest ?? (row.status === "remote_only" ? row.remote_ref : rowStatus(row)[0]);
+  return `${name} · ${label}`;
 }

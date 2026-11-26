@@ -12,7 +12,7 @@ import "./repository-investigations.css";
 const patchLabels = { "<": "Aのみ", ">": "Bのみ", "=": "同等" } as const;
 type PatchMark = keyof typeof patchLabels;
 const patchMarks: PatchMark[] = ["<", ">", "="];
-type Commit = { hash: string; subject: string; date: string; author: string; committer_date?: string; mark?: PatchMark; is_tip?: boolean; sources?: { selector: string; message: string }[]; command?: string };
+type Commit = { hash: string; subject: string; date: string; author: string; committer_date?: string; body?: string; mark?: PatchMark; is_tip?: boolean; sources?: { selector: string; message: string }[]; command?: string };
 type Result = { commits?: Commit[]; scope?: string; fixed_shas?: string[]; offset?: number; has_more?: boolean; left?: string; right?: string; left_sha?: string; right_sha?: string; command?: string | null; complete?: boolean; unavailable?: string[]; overlaps?: { path: string; worktrees: { worktree: string; branch: string | null; xy: string[] }[] }[] };
 async function read<T,>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, cache: "no-store", signal });
@@ -39,7 +39,9 @@ function Detail({ path, hash, searchCommit }: { path: string; hash: string; sear
       {searchCommit.committer_date !== undefined && <span>期間判定に使うコミッター日時 <time dateTime={searchCommit.committer_date}>{searchCommit.committer_date}</time></span>}
       <span>作者日時 <time dateTime={searchCommit.date}>{searchCommit.date}</time></span>
     </p>}
-    {error && <p className="tag-explorer-error" role="alert">{error}</p>}{!data && !error && <p className="tag-explorer-state" role="status">取得中…</p>}{data && <><p className="tag-explorer-note">{data.subject}</p><CommitFiles files={data.files} downloadName={`${hash}.tsv`} /><PatchView patch={data.patch} />{data.patch_truncated && <p className="tag-explorer-note">パッチは一部省略されています。</p>}</>}
+    {data && <p className="tag-explorer-note">{data.subject}</p>}
+    {searchCommit?.body?.trim() && <p className="tag-explorer-note repository-investigation-commit-body">{searchCommit.body}</p>}
+    {error && <p className="tag-explorer-error" role="alert">{error}</p>}{!data && !error && <p className="tag-explorer-state" role="status">取得中…</p>}{data && <><CommitFiles files={data.files} downloadName={`${hash}.tsv`} /><PatchView patch={data.patch} />{data.patch_truncated && <p className="tag-explorer-note">パッチは一部省略されています。</p>}</>}
   </section>;
 }
 type InvestigationProps = { path: string } & (

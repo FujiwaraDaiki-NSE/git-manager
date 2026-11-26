@@ -61,12 +61,14 @@ test("オープンPRの取得結果から件数と照会時刻を表示する", 
   const [attention, all] = withMatch.split("<details>");
   const prNumbers = (html) => html.match(/PR #\d+/g);
   assert.deepEqual(prNumbers(attention), ["PR #2"]);
+  assert.match(attention, /PR #2.*<strong>CI修正<\/strong>.*CI 失敗/);
   assert.match(attention, /href="\/project\?path=%2Frepo&amp;tab=lanes&amp;lane=local%3Aready"><code>ready<\/code>/);
   assert.deepEqual(prNumbers(all), ["PR #1", "PR #2", "PR #3", "PR #4"]);
   assert.match(all, /すべてのオープンPR（4件）.*オープンPRを検索.*4 \/ 4 件表示/);
   assert.match(all, /取り込み先.*<option value="main">main<\/option>.*type="checkbox".*Draftを除く/);
   assert.equal(all.match(/<option value="main">/g).length, 1);
   assert.match(all, /確認済み.*<code>example\/first-fork:ready<\/code> → <code>main<\/code>.*<dt>レビュー<\/dt><dd>レビュー承認<\/dd>.*<dt>CI<\/dt><dd>CI 成功<\/dd>/);
+  assert.match(all, /PR #2.*<strong>CI修正<\/strong>/);
   assert.match(all, /下書き.*作成元リポジトリ未取得 · <code>ready<\/code>/);
   assert.match(all, /レビュー待ち.*下書き<\/strong> <span>Draft<\/span>.*<dt>CI<\/dt><dd>CI なし<\/dd>/);
 
@@ -77,6 +79,24 @@ test("オープンPRの取得結果から件数と照会時刻を表示する", 
   const notApplicable = render({ status: "not_applicable", reason: "GitHubのoriginがありません", checked_at: null, pulls: [] });
   assert.match(notApplicable, /オープンPR情報は対象外です/);
   assert.doesNotMatch(notApplicable, /件中|照会時刻/);
+});
+
+test("照会中のオープンPRとマージ済みPRは進行中の表示を使い、取得失敗と区別する", () => {
+  const render = (status, reason) => renderToStaticMarkup(createElement(exports.default, {
+    project: {
+      branch_rows: [],
+      observed_at: 0,
+      github: { status, reason, open: { status, reason, checked_at: null, pulls: [] } },
+    },
+  }));
+  const pending = render("pending", "GitHubに照会中です。完了すると自動で反映します");
+  assert.equal(pending.match(/<strong>GitHubに照会中<\/strong>/g)?.length, 2);
+  assert.equal(pending.match(/完了すると自動で反映します/g)?.length, 2);
+  assert.doesNotMatch(pending, /オープンPR情報は未取得です|GitHubのPR履歴を確認できません/);
+  const unavailable = render("unavailable", "取得失敗");
+  assert.match(unavailable, /オープンPRを取得できませんでした/);
+  assert.match(unavailable, /GitHubのPR履歴を確認できません/);
+  assert.doesNotMatch(unavailable, /GitHubに照会中/);
 });
 
 test("オープンPRを番号・題名・作成元で絞り込み、検索を空にすると全件に戻る", () => {

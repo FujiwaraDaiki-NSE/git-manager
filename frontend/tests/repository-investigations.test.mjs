@@ -136,6 +136,17 @@ test("search results display both timestamps in the browser timezone and preserv
   }
 });
 
+test("selected message search result shows the full body only when it has text", async () => {
+  const body = "背景の段落\n\n検索語を含む段落\n  続き";
+  for (const value of [body, ""]) {
+    const commit = { hash: "abc", subject: "件名", date: "2026-01-01", author: "author", body: value };
+    const h = await investigationHarness("CommitSearch", [searchFields, { commits: [commit], offset: 0 }, searchFields, null, false, "abc"]);
+    const html = h.html();
+    assert.equal(html.includes("repository-investigation-commit-body"), value !== "");
+    if (value !== "") assert.ok(html.includes(`>${body}</p>`));
+  }
+});
+
 test("date validation describes both date inputs and blocks only reversed ranges", async () => {
   for (const [since, until, invalid] of [["2026-02-02", "2026-02-01", true], ["2026-02-01", "2026-02-01", false], ["2026-02-01", "", false], ["", "2026-02-01", false], ["", "", false]]) {
     const h = await investigationHarness("CommitSearch", [{ ...searchFields, since, until }, null, null, null, false, null], async () => ({ ok: true, json: async () => ({ commits: [], offset: 0 }) }));

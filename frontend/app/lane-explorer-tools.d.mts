@@ -6,6 +6,11 @@ export declare const LANE_UPSTREAM_FILTERS: readonly string[];
 export declare const LANE_UPSTREAM_LABELS: Readonly<Record<string, string>>;
 export type LaneUpstreamState = "synced" | "ahead" | "behind" | "diverged" | "untracked" | "unknown";
 export type LaneUpstreamFilter = "all" | LaneUpstreamState;
+export declare function filterWorkLanes(
+  lanes: readonly ProjectLane[],
+  checkoutPaths: ReadonlySet<string>,
+  filters: { query: string; filter: string; authorFilter: string; upstreamFilter: LaneUpstreamFilter; agentFilter: LaneAgentFilter },
+): { matchingGit: ProjectLane[]; matchingUpstream: ProjectLane[]; matchingBoth: ProjectLane[] };
 export declare function laneLastCommitAuthor(lane: ProjectLane): string | null;
 export declare function laneAuthors(lanes: readonly ProjectLane[]): string[];
 export declare function hasUnknownLaneAuthor(lanes: readonly ProjectLane[]): boolean;

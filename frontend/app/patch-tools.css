@@ -17,6 +17,20 @@
   flex: 1 1 180px;
 }
 
+.patch-search-group .patch-search-line-kind {
+  flex: 0 0 auto;
+}
+
+.patch-search-line-kind select {
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
 .patch-search-group > button {
   align-self: flex-end;
   min-height: 34px;

@@ -16,12 +16,14 @@ function knownTag(tag) {
   return tag !== null && typeof tag === "object";
 }
 
-/** Search by the complete tag name.  A non-empty query never broadens to a substring search. */
-export function searchTags(tags, query) {
-  if (typeof query !== "string") return [];
+/** Search by the complete tag name or by its prefix. */
+export function searchTags(tags, query, matchMode) {
+  if (typeof query !== "string" || (matchMode !== "exact" && matchMode !== "prefix")) return [];
   const needle = query.trim();
   if (needle === "") return tags.filter(knownTag);
-  return tags.filter((tag) => knownTag(tag) && tag.name === needle);
+  return tags.filter((tag) => typeof tag?.name === "string" && (
+    matchMode === "exact" ? tag.name === needle : tag.name.startsWith(needle)
+  ));
 }
 
 /** Apply the explicit lightweight/annotated type condition. */
@@ -68,9 +70,9 @@ export function sortTags(tags, order) {
 }
 
 /** Apply every visible condition in a deterministic order. */
-export function visibleTags(tags, { query, type, sort }) {
+export function visibleTags(tags, { query, matchMode, type, sort }) {
   if (typeof query !== "string" || typeof type !== "string" || typeof sort !== "string") return [];
-  return sortTags(filterTags(searchTags(tags, query), type), sort);
+  return sortTags(filterTags(searchTags(tags, query, matchMode), type), sort);
 }
 
 function csvCell(value) {

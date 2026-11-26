@@ -317,16 +317,21 @@ test("sorting supports branch, path, and status without mutating the source", ()
   assert.deepEqual(rows.map((row) => row.worktree.path), ["/repo/z", "/repo/a", "/repo/c", "/repo/d"]);
 });
 
-test("shell commands quote apostrophes and refuse a missing path", () => {
+test("individual and bulk cd commands skip prunable worktrees and quote usable paths", () => {
   assert.equal(shellQuote("/tmp/it's repo"), "'/tmp/it'\\''s repo'");
-  assert.equal(worktreeCdCommand("/tmp/it's repo"), "cd -- '/tmp/it'\\''s repo'");
+  const usable = worktree({ path: "/tmp/it's repo" });
+  const stale = worktree({ path: "/tmp/stale", state: "prunable" });
+  assert.equal(worktreeCdCommand(usable), "cd -- '/tmp/it'\\''s repo'");
+  assert.equal(worktreeCdCommand(stale), null);
   assert.equal(worktreeCdCommands([
-    { worktree: { path: "/tmp/it's repo" } },
-    { worktree: { path: "/tmp/second" } },
-    { worktree: { path: "" } },
+    { worktree: usable },
+    { worktree: stale },
+    { worktree: worktree({ path: "/tmp/second", git_dir_missing: true }) },
+    { worktree: worktree({ path: "" }) },
   ]), "cd -- '/tmp/it'\\''s repo'\ncd -- '/tmp/second'");
-  assert.equal(worktreeCdCommand(null), null);
-  assert.equal(worktreeCdCommand(""), null);
+  assert.equal(worktreeCdCommands([{ worktree: stale }]), "");
+  assert.equal(worktreeCdCommand(worktree({ path: null })), null);
+  assert.equal(worktreeCdCommand(worktree({ path: "" })), null);
 });
 
 test("TSV cells neutralize formula prefixes and delimiters while preserving unknowns", () => {

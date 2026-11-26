@@ -36,18 +36,31 @@ test("branch filters require explicit known facts and keep merged visibility sep
   const untracked = branch("topic", { upstream: null });
   const tracked = branch("tracked", { upstream: "origin/tracked" });
   const unknown = branch("unknown", { upstream: undefined, worktree: undefined, current: undefined });
-  assert.equal(branchMatchesFilter(current, "current"), true);
-  assert.equal(branchMatchesFilter(otherWorktree, "worktree"), true);
-  assert.equal(branchMatchesFilter(untracked, "untracked-upstream"), true);
-  assert.equal(branchMatchesFilter(tracked, "untracked-upstream"), false);
-  assert.equal(branchMatchesFilter(unknown, "worktree"), false);
-  assert.equal(branchMatchesFilter(unknown, "untracked-upstream"), false);
+  assert.equal(branchMatchesFilter(current, "current", "local"), true);
+  assert.equal(branchMatchesFilter(otherWorktree, "worktree", "local"), true);
+  assert.equal(branchMatchesFilter(untracked, "untracked-upstream", "local"), true);
+  assert.equal(branchMatchesFilter(tracked, "untracked-upstream", "local"), false);
+  assert.equal(branchMatchesFilter(unknown, "worktree", "local"), false);
+  assert.equal(branchMatchesFilter(unknown, "untracked-upstream", "local"), false);
 
   const merged = branch("merged", { merged: true });
   const mergedUnknownWorktree = branch("merged-unknown", { merged: true, worktree: undefined });
-  assert.deepEqual(visibleBranches([merged, current], { query: "", filter: "all", showMerged: false, sort: "name" }).map((item) => item.name), ["main"]);
-  assert.deepEqual(visibleBranches([mergedUnknownWorktree], { query: "", filter: "all", showMerged: false, sort: "name" }).map((item) => item.name), ["merged-unknown"]);
-  assert.deepEqual(visibleBranches([merged, current], { query: "", filter: "all", showMerged: true, sort: "name" }).map((item) => item.name), ["main", "merged"]);
+  const options = { query: "", filter: "all", showMerged: false, sort: "name", scope: "local" };
+  assert.deepEqual(visibleBranches([merged, current], options).map((item) => item.name), ["main"]);
+  assert.deepEqual(visibleBranches([mergedUnknownWorktree], options).map((item) => item.name), ["merged-unknown"]);
+  assert.deepEqual(visibleBranches([merged, current], { ...options, showMerged: true }).map((item) => item.name), ["main", "merged"]);
+});
+
+test("branches without an upstream are visible only in the local group", () => {
+  const local = [branch("topic"), branch("old", { merged: true })];
+  const remotes = [branch("origin/topic", { merged: null })];
+  const options = { query: "", filter: "untracked-upstream", showMerged: false, sort: "name" };
+  const localOptions = { ...options, scope: "local" };
+  const remoteOptions = { ...options, scope: "remote" };
+  assert.deepEqual(visibleBranches(local, localOptions), [local[0]]);
+  assert.equal(visibleBranches(local, { ...localOptions, showMerged: true }).length, 2);
+  assert.deepEqual(visibleBranches(remotes, remoteOptions), []);
+  assert.deepEqual(visibleBranches(remotes, { ...remoteOptions, filter: "all" }), remotes);
 });
 
 test("branch sorting puts missing or invalid dates last and does not mutate input", () => {
@@ -68,7 +81,7 @@ test("visible branch results compose search, filters, merged visibility, and det
     branch("old", { merged: true, date: "2026-09-01T00:00:00Z" }),
   ];
   assert.deepEqual(
-    visibleBranches(branches, { query: "search", filter: "worktree", sort: "date" }).map((item) => item.name),
+    visibleBranches(branches, { query: "search", filter: "worktree", showMerged: false, sort: "date", scope: "local" }).map((item) => item.name),
     ["feature/search"],
   );
 });
