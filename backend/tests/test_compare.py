@@ -68,6 +68,22 @@ def test_direct_comparison_resolves_refs_and_preserves_direction(divergent_repo)
     assert divergent_repo["feature"] in result["command"]
 
 
+def test_direct_comparison_resolves_head_of_selected_worktree(divergent_repo, tmp_path):
+    main = divergent_repo["repo"]
+    linked = tmp_path / "linked"
+    git(main, "worktree", "add", "-q", str(linked), "feature")
+
+    for worktree, expected_head, expected_file in (
+        (main, divergent_repo["main"], "main.txt"),
+        (linked, divergent_repo["feature"], "feature.txt"),
+    ):
+        result = compare.get_comparison(str(worktree), divergent_repo["base"], "HEAD", "direct")
+        assert result["base"] == divergent_repo["base"]
+        assert result["target"] == expected_head
+        assert result["stats"]["files"] == 1
+        assert [file["path"] for file in result["files"]] == [expected_file]
+
+
 def test_merge_base_comparison_requires_one_unique_base(divergent_repo):
     result = compare.get_comparison(
         str(divergent_repo["repo"]),

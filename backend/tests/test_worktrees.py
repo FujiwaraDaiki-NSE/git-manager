@@ -86,12 +86,14 @@ def test_discovery_adds_worktree_outside_scan_and_preserves_context(
     assert main.STATE[str(repo)]["worktree_state"] is None
     assert main.STATE[str(repo)]["merged_branches"] == ["feature", "merged-unused"]
     assert main.STATE[str(repo)]["next_command"]["command"] == "git branch -d merged-unused"
+    assert project.summary_rows(main.STATE)[0]["git"]["merged"] == 2
 
     git(worktree, "commit", "--allow-empty", "-qm", "feature advances")
     refreshed = main._refresh_sync(str(worktree), refresh_project_metadata=True)
     assert refreshed["merged"] is False
     assert refreshed["next_command"] is None
     assert main.STATE[str(repo)]["merged_branches"] == ["merged-unused"]
+    assert project.summary_rows(main.STATE)[0]["git"]["merged"] == 1
 
 
 def test_branches_include_worktree_path(
@@ -692,11 +694,16 @@ locked in use
 worktree /detached
 HEAD deadbeef
 detached
+
+worktree /gone-without-reason
+HEAD deadbeef
+prunable
 """
     )
-    assert [record["state"] for record in records] == ["ok", "prunable", "locked", "ok"]
-    assert [record["lock_reason"] for record in records] == [None, None, "in use", None]
-    assert records[-1]["detached"] is True
+    assert [record["state"] for record in records] == ["ok", "prunable", "locked", "ok", "prunable"]
+    assert [record["lock_reason"] for record in records] == [None, None, "in use", None, None]
+    assert [record["prunable_reason"] for record in records] == [None, "missing", None, None, None]
+    assert records[3]["detached"] is True
 
     clean = {
         "entries": [],

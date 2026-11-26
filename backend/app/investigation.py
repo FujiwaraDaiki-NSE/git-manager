@@ -138,8 +138,13 @@ def search(repo, scope, grep, author, since_at, until_at, file, offset, mode, fi
     values = []
     command = None
     if revision:
-        raw = run(repo, [*args, f"--format={FORMAT}%cI%x00", f"--max-count={limit + 1}", *paths_filter])
-        values = records(raw, (*COMMIT_FIELDS, "committer_date"))
+        log_format = f"{FORMAT}%cI%x00"
+        columns = (*COMMIT_FIELDS, "committer_date")
+        if mode == "message":
+            log_format += "%b%x00"
+            columns += ("body",)
+        raw = run(repo, [*args, f"--format={log_format}", f"--max-count={limit + 1}", *paths_filter])
+        values = records(raw, columns)
         command = shlex.join(["git", *args, "--oneline", f"--max-count={limit}", *paths_filter])
         if pickaxe and offset:
             values = values[offset:]

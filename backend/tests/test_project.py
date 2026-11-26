@@ -56,6 +56,33 @@ def test_all_period_includes_history_beyond_commit_limit(tmp_path: Path) -> None
     assert any(event["subject"] == "base" for event in entire["events"])
 
 
+def test_current_stats_only_request_visible_commit(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    file = repo / "file.txt"
+    file.write_text("old\n")
+    git(repo, "add", "file.txt")
+    git(repo, "commit", "-qm", "before")
+    file.write_text("new\nextra\n")
+    git(repo, "commit", "-qam", "head")
+    head = git(repo, "rev-parse", "HEAD").strip()
+    requested = []
+    read_stats = project._commit_stats_many
+
+    def track_stats(checkout, hashes):
+        requested.append(hashes)
+        return read_stats(checkout, hashes)
+
+    monkeypatch.setattr(project, "_commit_stats_many", track_stats)
+    result = project.build(str(repo), str(repo), range_name="current")
+
+    assert result is not None
+    assert requested == [[head]]
+    stats = {"files": 1, "additions": 2, "deletions": 1, "paths": ["file.txt"]}
+    assert [event["stats"] for event in result["events"]] == [stats]
+    assert [row["stats"] for row in result["graph"]["rows"]] == [stats, None, None]
+
+
 def test_build_keeps_git_facts_separate_and_resolves_linked_lane(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     origin = tmp_path / "origin.git"
@@ -799,6 +826,10 @@ def test_project_marks_a_prunable_linked_worktree_as_foldable_git_fact(tmp_path:
     assert stale["dirty"] is None
     assert stale["conflict"] is None
     assert result["maintenance"]["prunable"] == 1
+    worktree_rows = {row["path"]: row for row in result["worktrees"]}
+    assert worktree_rows[str(linked)]["prunable_reason"] == "gitdir file points to non-existent location"
+    assert worktree_rows[str(linked)]["git_dir_missing"] is False
+    assert worktree_rows[str(repo)]["prunable_reason"] is None
     main = next(lane for lane in result["lanes"] if lane["branch"] == "main")
     assert main["dirty"] is False
     assert main["conflict"] is False

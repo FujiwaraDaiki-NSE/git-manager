@@ -65,6 +65,16 @@ def test_search_filters_and_paging(repo):
         investigation.search(str(repo), '--all', '', '', 'bad-date', '', '', 0, 'message')
 
 
+def test_message_search_returns_multiline_body_and_empty_body(repo):
+    body = "First paragraph.\n\nNeedle only in the body.\n  Indented context."
+    git(repo, 'commit', '--allow-empty', '-m', 'Subject', '-m', body)
+
+    matched = investigation.search(str(repo), 'HEAD', 'Needle only', '', '', '', '', 0, 'message')
+    assert [(c['subject'], c['body']) for c in matched['commits']] == [('Subject', body + '\n')]
+    all_messages = investigation.search(str(repo), 'HEAD', '', '', '', '', '', 0, 'message')
+    assert [(c['subject'], c['body']) for c in all_messages['commits']] == [('Subject', body + '\n'), ('base', '')]
+
+
 def test_search_returns_committer_date_used_for_period(repo, monkeypatch):
     author_date = '2026-11-01T12:00:00+09:00'
     committer_date = '2026-11-20T12:00:00+09:00'
@@ -81,7 +91,7 @@ def test_search_returns_committer_date_used_for_period(repo, monkeypatch):
     assert search_day('2026-11-01') == []
     assert search_day('2026-11-20') == [{
         'hash': sha, 'subject': 'different dates', 'date': author_date,
-        'author': 'Investigator', 'committer_date': committer_date,
+        'author': 'Investigator', 'committer_date': committer_date, 'body': '',
     }]
 
 

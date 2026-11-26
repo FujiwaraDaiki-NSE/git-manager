@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from app import config, github, project, project_snapshots
-from test_project import init_repo, commit, git
+from test_project import init_repo, commit, git, git_at
 
 
 def without_times(value):
@@ -341,6 +341,30 @@ def test_composition_does_not_mutate_recorded_history(snapshot_repo, range_name)
         project.build(str(repo), str(repo), state, range_name=range_name)
         project.build(str(repo), str(repo), state, range_name="current")
     assert json.dumps(facts, sort_keys=True) == before
+
+
+def test_current_snapshot_reuses_recent_stats_and_reads_only_the_missing_tip(snapshot_repo, monkeypatch):
+    repo, state = snapshot_repo
+    git(repo, "switch", "-qc", "historical")
+    git_at(repo, "2000-01-01T00:00:00+00:00", "commit", "--allow-empty", "-qm", "historical tip")
+    old_tip = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "-q", "main")
+    recent = read(repo, state, "7d")
+    requested = []
+    read_stats = project._commit_stats_many
+
+    def track_stats(checkout, hashes):
+        requested.append(hashes)
+        return read_stats(checkout, hashes)
+
+    monkeypatch.setattr(project, "_commit_stats_many", track_stats)
+    current = read(repo, state, "current")
+
+    assert requested == [[old_tip]]
+    current_stats = {event["commit_hash"]: event["stats"] for event in current["events"]}
+    main_tip = git(repo, "rev-parse", "HEAD").strip()
+    assert current_stats[main_tip] == next(event["stats"] for event in recent["events"] if event["commit_hash"] == main_tip)
+    assert current_stats[old_tip] == {"files": 0, "additions": 0, "deletions": 0, "paths": []}
 
 
 def test_parsed_facts_keep_only_recently_read_projects(tmp_path, monkeypatch):

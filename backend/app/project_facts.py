@@ -35,6 +35,21 @@ def observe(name, args, read, *, copy_value=True):
     return deepcopy(values[key]) if copy_value else values[key]
 
 
+def observe_subset(name, args, keys, read):
+    """Read missing keys in one batch without mutating a shared snapshot."""
+    values = _active.get()
+    if values is None:
+        return read(keys)
+    key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
+    known = values.get(key, {})
+    missing = [item for item in keys if item not in known]
+    if missing:
+        observed = read(missing)
+        known = {**known, **{item: observed.get(item) for item in missing}}
+        values[key] = known
+    return deepcopy({item: known[item] for item in keys})
+
+
 def cached(function=None, *, copy_value=True):
     if function is None:
         return lambda function: cached(function, copy_value=copy_value)

@@ -339,6 +339,7 @@ def _worktree_rows(
             "state": state,
             "git_dir_missing": state != "prunable" and scanner.has_missing_git_dir(container_path),
             "lock_reason": item["lock_reason"],
+            "prunable_reason": item["prunable_reason"],
             "detached": bool(item.get("detached", False)),
             "is_main": _key(host_path) == _key(project_id),
         }
@@ -978,19 +979,24 @@ def build(
                 return False
             return occurred >= range_cutoff
 
-        visible_hashes = {
-            row.get("hash")
+        stats_hashes = [
+            row["hash"]
             for row in graph_rows
             if isinstance(row.get("hash"), str) and in_range(row)
-        }
-        stats_hashes = [str(row.get("hash")) for row in graph_rows if row.get("hash")]
-        stats_by_hash = project_facts.observe("project.stats", [repo, stats_hashes], lambda: _commit_stats_many(repo, stats_hashes))
+        ]
+        # Keep the snapshot key independent of the display range so ranges
+        # reuse stats for overlapping commits, including existing snapshots.
+        graph_hashes = [str(row.get("hash")) for row in graph_rows if row.get("hash")]
+        stats_by_hash = project_facts.observe_subset(
+            "project.stats", [repo, graph_hashes], stats_hashes,
+            lambda hashes: _commit_stats_many(repo, hashes),
+        )
         for row in graph_rows:
             # Graph rows are intentionally metadata-only; numstat is the
             # bounded summary needed by a hover card, while the existing
             # commit endpoint remains the sole source of full patch data.
             hash_value = row.get("hash")
-            row["stats"] = stats_by_hash.get(hash_value) if hash_value in visible_hashes else None
+            row["stats"] = stats_by_hash.get(hash_value)
             names = [
                 lane["branch"]
                 for lane in lanes
@@ -1227,9 +1233,7 @@ def _summary_row(project_id: str, rows: list[Mapping[str, Any]], state: Mapping[
                 next_lane_id = f"worktree:{path}"
         elif isinstance(branch, str) and branch:
             next_lane_id = f"branch:{branch}"
-    merged = len(main.get("merged_branches") or []) + sum(
-        1 for row in rows if row.get("is_worktree") and row.get("merged")
-    )
+    merged = len(main.get("merged_branches") or [])
     prunable = sum(1 for row in rows if row.get("worktree_state") == "prunable")
     locked = sum(1 for row in rows if row.get("worktree_state") == "locked")
     lane_count: int | None = None

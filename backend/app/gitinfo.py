@@ -229,6 +229,8 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
             current["state"] = "ok"
         if current["state"] != "locked":
             current["lock_reason"] = None
+        if current["state"] != "prunable":
+            current["prunable_reason"] = None
         current["detached"] = not bool(current.get("branch"))
         worktrees.append(current.copy())
 
@@ -260,8 +262,9 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
                 current["branch"] = branch or None
             elif field == "detached":
                 current["detached"] = True
-            elif field.startswith("prunable"):
+            elif field == "prunable" or field.startswith("prunable "):
                 current["state"] = "prunable"
+                current["prunable_reason"] = field.partition(" ")[2] or None
             elif (field == "locked" or field.startswith("locked ")) and current.get("state") != "prunable":
                 current["state"] = "locked"
                 current["lock_reason"] = field.partition(" ")[2] or None
@@ -288,8 +291,9 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
             current["branch"] = branch or None
         elif line == "detached":
             current["detached"] = True
-        elif line.startswith("prunable"):
+        elif line == "prunable" or line.startswith("prunable "):
             current["state"] = "prunable"
+            current["prunable_reason"] = line.partition(" ")[2] or None
         elif (line == "locked" or line.startswith("locked ")) and current.get("state") != "prunable":
             current["state"] = "locked"
             current["lock_reason"] = line.partition(" ")[2] or None
@@ -299,7 +303,7 @@ def parse_worktree_list(raw: str) -> list[dict[str, Any]]:
 
 def list_worktrees(repo: str) -> list[dict[str, Any]] | None:
     """Return worktree metadata, or ``None`` when git cannot list it."""
-    # Parse the cached Git output so existing snapshots also expose lock reasons.
+    # Parse the cached Git output so existing snapshots also expose worktree reasons.
     raw = _run(repo, ["worktree", "list", "--porcelain", "-z"])
     if raw is None:
         return None
