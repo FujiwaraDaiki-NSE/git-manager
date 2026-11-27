@@ -283,6 +283,26 @@ export function timelineDecisionChanges(events) {
   return changesByEvent;
 }
 
+/** Record the previous explicit status only when the branch status changes. */
+export function timelinePreviousStatuses(events) {
+  const previousByBranch = new Map();
+  const previousByEvent = new Map();
+  for (const event of sortTimelineHistory(events, TIMELINE_SORT_OLDEST)) {
+    if (!isExplicitAgentStatus(event)) continue;
+    const branchKey = agentReportKey(event);
+    if (branchKey === null) continue;
+    let key = branchKey;
+    if (event.branch === "(detached)") {
+      if (typeof event.worktree !== "string" || event.worktree === "") continue;
+      key = JSON.stringify([branchKey, event.worktree]);
+    }
+    const previous = previousByBranch.get(key);
+    if (previous !== undefined && previous !== event.status) previousByEvent.set(event.event_id, previous);
+    previousByBranch.set(key, event.status);
+  }
+  return previousByEvent;
+}
+
 export function timelineHistoryDetails(events, options, projectById) {
   assertArray(events, "events");
   assertOptions(options);

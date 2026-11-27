@@ -110,7 +110,7 @@ function FileVolume({ file }: { file: Numstat }) {
   const volume = commitFileChangeVolume(file);
   return volume === null
     ? <span className="commit-files-unknown" title="バイナリまたはGitが計測していないため変更量は不明">不明</span>
-    : <span>+{volume}</span>;
+    : <span>計{volume.toLocaleString()}行</span>;
 }
 
 export default function CommitFiles({ files, downloadName, renderFileSource, fileDiffContext }: CommitFilesProps) {
@@ -336,7 +336,7 @@ export default function CommitFiles({ files, downloadName, renderFileSource, fil
         <ScrollShadow className="commit-files-table-wrap" label="横スクロールできる表">
           <table className="commit-files-table">
             <caption className="sr-only">コミットで変更されたファイル</caption>
-            <thead><tr><th scope="col">選択</th>{columns[0] && <th scope="col">追加</th>}{columns[1] && <th scope="col">削除</th>}{columns[2] && <th scope="col">変更量</th>}<th scope="col">パス</th></tr></thead>
+            <thead><tr><th scope="col">選択</th>{columns[0] && <th scope="col">追加</th>}{columns[1] && <th scope="col">削除</th>}{columns[2] && <th scope="col">変更量（追加＋削除）</th>}<th scope="col">パス</th></tr></thead>
             <tbody>
               {pageFiles.map((file) => {
                 const identity = commitFileIdentity(file);

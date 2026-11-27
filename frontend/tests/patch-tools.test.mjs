@@ -51,8 +51,8 @@ test('change summaries count parsed additions and deletions, excluding headers a
     'diff --git a/image.png b/image.png',
     'Binary files a/image.png and b/image.png differ',
   ].join('\n'));
-  assert.deepEqual(summarizePatchSection(text), { additions: 2, deletions: 1, binary: false, hasTextLines: true });
-  assert.deepEqual(summarizePatchSection(binary), { additions: 0, deletions: 0, binary: true, hasTextLines: false });
+  assert.deepEqual(summarizePatchSection(text), { additions: 2, deletions: 1, binary: false, hasTextLines: true, hasCombinedHunk: false });
+  assert.deepEqual(summarizePatchSection(binary), { additions: 0, deletions: 0, binary: true, hasTextLines: false, hasCombinedHunk: false });
 });
 
 test('changed-only selection retains hunks, metadata, line numbers, and both change kinds', () => {

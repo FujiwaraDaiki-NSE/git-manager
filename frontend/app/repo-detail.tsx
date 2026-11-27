@@ -26,6 +26,7 @@ import {
   buildStatusStageCommands,
   buildStatusUnstageCommand,
   buildUntrackedDirectoryCommand,
+  buildUntrackedFileDiffCommand,
   canUnstageStatusFile,
   filterStatusFilesByDirectory,
   filterStatusFilesByExtension,
@@ -253,8 +254,11 @@ function StatusPane({ repo }: { repo: Repo }) {
             const canSelectStage = statusStagePaths(entry).length > 0;
             const canSelectUnstage = canUnstageStatusFile(hasHead, entry);
             const directoryCommand = buildUntrackedDirectoryCommand(repo.path, entry);
+            const fileDiffCommand = buildUntrackedFileDiffCommand(repo.path, entry);
+            const contentCommand = directoryCommand ?? fileDiffCommand;
+            const description = fileStatusDescription(entry.xy);
             return <div className="status-file-row" key={entry.xy + entry.path}>
-              <code className="xy" style={{ color: codeColor(entry.xy) }} title={xyTitle(entry.xy)}>{display(entry.xy)}</code>
+              <code className="xy" style={{ color: codeColor(entry.xy) }} title={fileStatusGroups(entry.xy).conflict ? description : xyTitle(entry.xy)}>{display(entry.xy)}</code>
               <label className="status-file-path">
                 {(canSelectStage || canSelectUnstage) && <input
                   type="checkbox"
@@ -272,14 +276,15 @@ function StatusPane({ repo }: { repo: Repo }) {
                 />}
                 <code>{entry.original_path !== null && <>{entry.original_path} → </>}{entry.path}</code>
               </label>
-              <span className="status-file-description">{fileStatusDescription(entry.xy)}</span>
+              <span className="status-file-description">{description}</span>
               <span className="status-file-copy"><CopyButton value={entry.path} label={`${entry.path} のパスをコピー`} /></span>
               {rowStages.length > 0
                 ? rowStages.map((stage) => <button key={stage} className="status-file-diff-button" type="button" onClick={() => { setDiffStage(stage); setSelectedDiffFile(entry.path); }}>{rowStages.length === 1 ? "差分を表示" : stage === "staged" ? "ステージ済み差分" : "未ステージ差分"}</button>)
-                : <span className="status-file-diff-excluded">差分対象外</span>}
-              {directoryCommand !== null && <details className="status-file-directory-command">
+                : fileDiffCommand === null && <span className="status-file-diff-excluded">差分対象外</span>}
+              {contentCommand !== null && <details className="status-file-directory-command">
                 <summary>中身を確認するコマンド</summary>
-                <div className="status-file-diff-command"><code>{directoryCommand}</code><CopyButton value={directoryCommand} label={`${entry.path} の中身を確認するコマンドをコピー`} /></div>
+                <div className="status-file-diff-command"><code>{contentCommand}</code><CopyButton value={contentCommand} label={`${entry.path} の中身を確認するコマンドをコピー`} /></div>
+                {fileDiffCommand !== null && <p className="status-file-diff-note">差分があると終了コード 1 を返します。</p>}
               </details>}
             </div>;
           })}
@@ -327,7 +332,7 @@ function StatusPane({ repo }: { repo: Repo }) {
           </div>
           <WorktreeDiff path={repo.path} file={selectedDiffFile} stage={diffStage} />
         </div>}
-        <details className="status-file-guide"><summary>ステージと状態記号の見方</summary><div className="status-flow" aria-label="作業ディレクトリからステージ、コミットへの流れ"><div className="status-flow-node"><strong>作業ディレクトリ</strong><span>未ステージ</span><code>git diff</code></div><div className="status-flow-arrow"><code>git add</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>ステージ（index）</strong><span>ステージ済み</span><code>git diff --cached</code></div><div className="status-flow-arrow"><code>git commit</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>コミット</strong><span>履歴に保存</span></div></div><p>ステージ済みは次のコミットに含める変更、未ステージは作業ディレクトリだけにある変更です。同じファイルに両方の変更がある場合は、それぞれの絞り込みに表示します。</p><p>記号は左がステージ、右が作業ディレクトリです。M: 変更、A: 追加、D: 削除、R: 名前変更、??: 未追跡。競合はファイルを確認して解消します。</p></details>
+        <details className="status-file-guide"><summary>ステージと状態記号の見方</summary><div className="status-flow" aria-label="作業ディレクトリからステージ、コミットへの流れ"><div className="status-flow-node"><strong>作業ディレクトリ</strong><span>未ステージ</span><code>git diff</code></div><div className="status-flow-arrow"><code>git add</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>ステージ（index）</strong><span>ステージ済み</span><code>git diff --cached</code></div><div className="status-flow-arrow"><code>git commit</code><span aria-hidden="true">→</span></div><div className="status-flow-node"><strong>コミット</strong><span>履歴に保存</span></div></div><p>ステージ済みは次のコミットに含める変更、未ステージは作業ディレクトリだけにある変更です。同じファイルに両方の変更がある場合は、それぞれの絞り込みに表示します。</p><p>通常の変更では左がステージ、右が作業ディレクトリです。M: 変更、A: 追加、D: 削除、R: 名前変更、??: 未追跡。競合の記号は、左がこちら側、右が相手側の状態を示します。</p></details>
       </>}
     </section>
   );
@@ -422,6 +427,10 @@ export function CommitPane({
             <span>{commit.author}</span>
             <span>{commit.date}</span>
           </div>
+          {commit.body && <details className="commit-message" key={commit.hash}>
+            <summary>コミット本文</summary>
+            <p>{commit.body}</p>
+          </details>}
           {commit.parents.length > 1 && (
             <div className="commit-meta">
               {commit.parents.map((parent, index) => (

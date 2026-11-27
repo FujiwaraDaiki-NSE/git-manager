@@ -602,6 +602,10 @@ export function GraphView({
     selectedHash ?? firstKey,
   );
   const [showFirstParent, setShowFirstParent] = useState(false);
+  const [shaQuery, setShaQuery] = useState("");
+  const [showShaResults, setShowShaResults] = useState(false);
+  const shaPrefix = shaQuery.trim().toLowerCase();
+  const shaMatches = shaPrefix ? rows.filter((row) => row.hash.startsWith(shaPrefix)) : [];
   const history = useMemo(() => showFirstParent ? firstParentHistory(rows) : null, [rows, showFirstParent]);
   useEffect(() => {
     setActiveKey((current) => {
@@ -621,6 +625,14 @@ export function GraphView({
   const select = (hash: string) => {
     setActiveKey(hash);
     onSelect?.(hash);
+  };
+  const selectAndFocus = (row: GraphRow) => {
+    select(row.hash);
+    document.getElementById(rowId(row))?.focus();
+  };
+  const jumpToSha = (row: GraphRow) => {
+    setShowShaResults(false);
+    selectAndFocus(row);
   };
   const selectVirtual = () => {
     setActiveKey(virtualKey);
@@ -702,6 +714,50 @@ export function GraphView({
           ? "取得範囲にHEADがありません"
           : `${history.hashes.size}件${history.endsOutside ? "（取得範囲の端）" : ""}`}</span>}
       </div>
+      {onSelect && (
+        <>
+          <form className="graph-sha-jump" onSubmit={(event) => {
+            event.preventDefault();
+            if (!shaPrefix) return;
+            if (shaMatches.length === 1) jumpToSha(shaMatches[0]);
+            else setShowShaResults(true);
+          }}>
+            <label>
+              コミットSHA
+              <input
+                type="search"
+                value={shaQuery}
+                onChange={(event) => {
+                  setShaQuery(event.target.value);
+                  setShowShaResults(false);
+                }}
+                placeholder="完全SHAまたは先頭部分"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+            <button className="copy" type="submit" disabled={!shaPrefix}>移動</button>
+          </form>
+          {showShaResults && (
+            <>
+              <p role="status">{shaMatches.length === 0
+                ? `一致するSHAは現在の取得範囲（${rows.length}件）にありません。`
+                : `${shaMatches.length}件が一致しました。移動先を選んでください。`}</p>
+              {shaMatches.length > 0 && (
+                <ul className="graph-sha-matches" aria-label="SHAの移動先候補">
+                  {shaMatches.map((row) => (
+                    <li key={row.hash}>
+                      <button className="copy" type="button" onClick={() => jumpToSha(row)}>
+                        <code>{row.hash}</code> {row.subject}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </>
+      )}
       {graphRows}
       {onSelect && selectedRow && selectedRow.parents.length > 0 && (
         <div className="commit-meta" role="group" aria-label="親コミットへ移動">
@@ -714,10 +770,7 @@ export function GraphView({
                 key={key}
                 className="copy"
                 type="button"
-                onClick={() => {
-                  select(parent.hash);
-                  document.getElementById(rowId(parent))?.focus();
-                }}
+                onClick={() => selectAndFocus(parent)}
               >
                 {label}へ移動
               </button>
@@ -734,10 +787,7 @@ export function GraphView({
               key={child.hash}
               className="copy"
               type="button"
-              onClick={() => {
-                select(child.hash);
-                document.getElementById(rowId(child))?.focus();
-              }}
+              onClick={() => selectAndFocus(child)}
             >
               子（{child.short}）{child.subject} へ移動
             </button>

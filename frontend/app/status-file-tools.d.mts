@@ -29,6 +29,7 @@ export declare function sortStatusFiles(entries: Entry[], order: StatusFileOrder
 export declare function statusFilesCsv(entries: Entry[]): string;
 export declare function shellQuote(value: string): string;
 export declare function buildUntrackedDirectoryCommand(repoPath: string, entry: Entry): string | null;
+export declare function buildUntrackedFileDiffCommand(repoPath: string, entry: Entry): string | null;
 export declare function canUnstageStatusFile(hasHead: boolean, entry: Entry): boolean;
 export declare function buildStatusUnstageCommand(repoPath: string, hasHead: boolean, selectedEntries: Entry[], allEntries: Entry[]): string | null;
 export declare function statusStagePaths(entry: Entry): string[];

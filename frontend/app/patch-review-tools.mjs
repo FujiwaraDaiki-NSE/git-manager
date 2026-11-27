@@ -13,7 +13,7 @@ export const PATCH_REVIEW_FILE_KINDS = ["all", "text", "binary"];
 export const PATCH_REVIEW_FILE_SORTS = ["original", "path", "changes"];
 
 /**
- * @typedef {{ title: string, lines: Array<{ text: string, kind: string, oldLine: number | null, newLine: number | null }> }} PatchReviewSection
+ * @typedef {ReturnType<typeof import("./parse-patch.mjs").parsePatch>[number]} PatchReviewSection
  * @typedef {{ section: PatchReviewSection, index: number }} PatchReviewEntry
  */
 
@@ -21,7 +21,7 @@ export const PATCH_REVIEW_FILE_SORTS = ["original", "path", "changes"];
  * Classify only what the parsed patch proves.
  *
  * Binary markers take precedence. A non-binary section is a text change only
- * when the parser found at least one added or deleted line. Metadata-only
+ * when the parser found an added or deleted line or a combined hunk. Metadata-only
  * sections remain `other` and are therefore available from the `all` filter
  * without being mislabeled as text or binary.
  *
@@ -31,7 +31,7 @@ export const PATCH_REVIEW_FILE_SORTS = ["original", "path", "changes"];
 export function classifyPatchSection(section) {
   const summary = summarizePatchSection(section);
   if (summary.binary) return "binary";
-  if (summary.additions > 0 || summary.deletions > 0) return "text";
+  if (summary.hasCombinedHunk || summary.additions > 0 || summary.deletions > 0) return "text";
   return "other";
 }
 

@@ -262,6 +262,18 @@
   white-space: normal;
 }
 
+.patch-whitespace {
+  position: relative;
+}
+
+.patch-whitespace::before {
+  content: attr(data-symbol) / "";
+  position: absolute;
+  inset-inline-start: 0;
+  color: var(--muted);
+  user-select: none;
+}
+
 .patch-match {
   border-radius: 2px;
   padding: 1px 0;

@@ -820,6 +820,10 @@ function CommitDetail({
       {state === "loading" && <div className="selection-loading" role="status">完全なコミット詳細を取得中…</div>}
       {state === "error" && <div className="selection-error" role="alert">{error}<button className="subtle-button" type="button" onClick={() => setRetryToken((value) => value + 1)}>再試行</button></div>}
       {state === "ready" && detail && <>
+        {detail.body && <details className="commit-message">
+          <summary>コミット本文</summary>
+          <p>{detail.body}</p>
+        </details>}
         <CommitFiles key={detail.hash} files={detail.files} downloadName={`${detail.hash}-files.tsv`} fileDiffContext={detail.patch_truncated && path ? { repoPath: path, hash: detail.hash } : undefined} />
         <PatchView key={detail.hash} patch={detail.patch} />
         {detail.patch_truncated && <p className="inline-note" role="status">差分が大きいため、一部を省略しています。全体は <code>git show {hash}</code> で確認できます。</p>}

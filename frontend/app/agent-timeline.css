@@ -442,6 +442,7 @@
 .workspace-agent-layout { row-gap: 8px; }
 .workspace-agent-layout.is-sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
 .desktop-notifications { padding: 8px 16px; border-bottom: 1px solid var(--control-border); }
+.desktop-notifications > label { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: 8px; font-size: 11px; }
 .desktop-notifications > span { display: block; margin-top: 4px; color: var(--control-muted); font-size: 11px; }
 @media (max-width: 900px) {
   .workspace-agent-layout { padding-top: 0; }

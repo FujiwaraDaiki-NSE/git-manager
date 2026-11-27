@@ -553,6 +553,11 @@ button.worktree-explorer-metric {
   font-weight: 600;
 }
 
+.worktree-explorer-agent {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
+
 .worktree-explorer-facts .is-unknown,
 .worktree-explorer-no-lane { color: var(--worktree-muted); }
 

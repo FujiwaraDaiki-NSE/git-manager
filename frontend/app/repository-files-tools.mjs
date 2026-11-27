@@ -112,13 +112,14 @@ export function listRepositoryDirectoryEntries(entries, directory) {
   return Array.from(children.values()).sort(compareEntries);
 }
 
-/** Search every retrieved non-directory path, with whitespace-separated terms. */
-export function searchRepositoryFileEntries(entries, query) {
+/** Search retrieved paths of the requested directory status, with whitespace-separated terms. */
+export function searchRepositoryFileEntries(entries, query, directoriesOnly) {
   if (!Array.isArray(entries)) throw new TypeError("entries must be provided explicitly");
   requiredString(query, "query");
+  if (typeof directoriesOnly !== "boolean") throw new TypeError("directoriesOnly must be provided explicitly");
   const terms = query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean);
   return entries
-    .filter((entry) => entryPath(entry) && entry.type !== "tree")
+    .filter((entry) => entryPath(entry) && (entry.type === "tree") === directoriesOnly)
     .filter((entry) => {
       const path = entry.path.toLocaleLowerCase();
       return terms.every((term) => path.includes(term));
@@ -127,12 +128,12 @@ export function searchRepositoryFileEntries(entries, query) {
 }
 
 /** Keep a local directory view tied to the same retrieved inventory. */
-export function filterRepositoryFileEntries(entries, directory, query) {
+export function filterRepositoryFileEntries(entries, directory, query, directoriesOnly) {
   requiredString(query, "query");
   const current = normalizedDirectory(directory);
   return query.trim() === ""
     ? listRepositoryDirectoryEntries(entries, current)
-    : searchRepositoryFileEntries(entries, query);
+    : searchRepositoryFileEntries(entries, query, directoriesOnly);
 }
 
 /** Limit text by encoded UTF-8 bytes so the preview cap is meaningful for CJK text too. */

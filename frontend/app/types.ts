@@ -82,6 +82,7 @@ export type Numstat = {
 export type CommitDetail = {
   hash: string;
   subject: string;
+  body: string;
   author: string;
   date: string;
   parents: string[];

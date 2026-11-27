@@ -111,6 +111,7 @@ function entryKind(entry: RepositoryFileEntry) {
   if (entry.type === "tree") return "ディレクトリ";
   if (entry.type === "commit" || entry.mode === "160000") return "gitlink";
   if (entry.mode === "120000") return "symlink";
+  if (entry.type === "blob" && entry.mode === "100755") return "blob · 実行可能";
   return entry.type;
 }
 
@@ -194,7 +195,7 @@ export default function RepositoryFiles({ path, remote }: { path: string; remote
 
   const visibleEntries = useMemo<RepositoryFileEntry[]>(() => {
     if (!inventory) return [];
-    return organizeInventory(filterRepositoryFileEntries(inventory.entries, directory, query), kind, order);
+    return organizeInventory(filterRepositoryFileEntries(inventory.entries, directory, query, kind === "directory"), kind, order);
   }, [directory, inventory, query, kind, order]);
   const adjacent = adjacentInventoryFiles(visibleEntries, selectedFile);
 
@@ -384,7 +385,7 @@ export default function RepositoryFiles({ path, remote }: { path: string; remote
         {file && fileState === "ready" && (
           <section className="repository-files-viewer" aria-labelledby="repository-files-viewer-title">
             <div className="repository-files-viewer-heading">
-              <div><h4 id="repository-files-viewer-title">{file.path}</h4><p><span>{entryKind(file)}</span> · {file.size === null ? "サイズ対象外" : formatBytes(file.size)} · <code>{file.kind === "gitlink" ? file.hash : shortHash(file.hash)}</code></p></div>
+              <div><h4 id="repository-files-viewer-title">{file.path}</h4><p><span>{entryKind(file)}</span> · Git mode <code>{file.mode}</code> · {file.size === null ? "サイズ対象外" : formatBytes(file.size)} · <code>{file.kind === "gitlink" ? file.hash : shortHash(file.hash)}</code></p></div>
               <div className="repository-files-actions">
                 <button type="button" className="subtle-button" disabled={adjacent.previous === null} onClick={() => { if (adjacent.previous) loadFile(adjacent.previous); }}>前のファイル</button>
                 <span role="status">{adjacent.index < 0 ? "選択ファイルは現在の一覧外" : `${adjacent.index + 1} / ${adjacent.count} ファイル`}</span>

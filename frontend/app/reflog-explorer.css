@@ -287,7 +287,21 @@
 .reflog-explorer-card dl div { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 8px; }
 .reflog-explorer-card dt { font-weight: 700; }
 .reflog-explorer-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.reflog-explorer-card-actions { align-items: center; }
+.reflog-explorer-card-actions,
+.reflog-explorer-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.reflog-explorer-row-actions .table-action { white-space: nowrap; }
+.reflog-explorer .table-action[aria-pressed="true"] {
+  color: var(--control-blue, var(--accent));
+  background: var(--control-blue-soft, var(--selected));
+}
+
 .reflog-explorer-card-actions .copy-button { min-height: 27px; padding: 3px 6px; }
 
 .reflog-explorer-navigation {

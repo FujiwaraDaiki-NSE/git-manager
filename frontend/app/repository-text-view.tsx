@@ -6,8 +6,8 @@ import { buildRepositoryGitHubRangeHref } from "./repository-files-tools.mjs";
 import {
   boundedRepositoryText,
   findRepositoryTextMatches,
+  indexRepositoryTextMatches,
   parseRepositoryLineNumber,
-  repositoryTextLineAtOffset,
   repositoryTextRange,
   REPOSITORY_TEXT_MAX_PREVIEW_BYTES,
   REPOSITORY_TEXT_PAGE_LINES,
@@ -17,8 +17,7 @@ import {
 import "./repository-text-view.css";
 
 type RepositoryTextLine = ReturnType<typeof splitRepositoryText>[number];
-type RepositoryTextMatch = ReturnType<typeof findRepositoryTextMatches>[number] & { id: string; active: boolean };
-type RepositoryTextLineMatch = { offset: number; length: number; id: string; active: boolean };
+type RepositoryTextLineMatch = { offset: number; length: number; id: string };
 
 function displayText(value: string, showWhitespace: boolean, keyPrefix: string): ReactNode {
   if (!showWhitespace || (!value.includes(" ") && !value.includes("\t"))) return visibleRepositoryWhitespace(value, showWhitespace);
@@ -46,23 +45,10 @@ function displayText(value: string, showWhitespace: boolean, keyPrefix: string):
   return pieces;
 }
 
-function lineMatchSegments(line: RepositoryTextLine, matches: RepositoryTextMatch[]): RepositoryTextLineMatch[] {
-  return matches.flatMap((match) => {
-    const start = Math.max(line.start, match.offset);
-    const end = Math.min(line.end, match.end);
-    if (start >= end) return [];
-    return [{
-      offset: start - line.start,
-      length: end - start,
-      id: match.id,
-      active: match.active,
-    }];
-  });
-}
-
 function renderLineContent(
   line: RepositoryTextLine,
   matches: RepositoryTextLineMatch[],
+  activeMatchId: string | null,
   showWhitespace: boolean,
   activeMarkRef: MutableRefObject<HTMLElement | null>,
 ) {
@@ -70,17 +56,18 @@ function renderLineContent(
   const pieces: ReactNode[] = [];
   let cursor = 0;
   matches.forEach((match, index) => {
+    const active = match.id === activeMatchId;
     if (match.offset > cursor) {
       pieces.push(displayText(line.text.slice(cursor, match.offset), showWhitespace, `line-${line.number}-before-${index}`));
     }
     const value = line.text.slice(match.offset, match.offset + match.length);
     pieces.push(
       <mark
-        className={`repository-text-match${match.active ? " is-active" : ""}`}
-        aria-current={match.active ? "true" : undefined}
+        className={`repository-text-match${active ? " is-active" : ""}`}
+        aria-current={active ? "true" : undefined}
         data-match-id={match.id}
         key={`${match.id}-${line.number}-${index}`}
-        ref={match.active ? (node) => { activeMarkRef.current = node; } : undefined}
+        ref={active ? (node) => { activeMarkRef.current = node; } : undefined}
       >
         {displayText(value, showWhitespace, `line-${line.number}-match-${index}`)}
       </mark>,
@@ -110,31 +97,13 @@ export default function RepositoryTextView({ text, remote, revision, path }: { t
   const activeMarkRef = useRef<HTMLElement | null>(null);
 
   const matches = useMemo(() => findRepositoryTextMatches(previewText, searchQuery, caseSensitive), [caseSensitive, previewText, searchQuery]);
-  const matchesWithIds = useMemo<RepositoryTextMatch[]>(() => matches.map((match, index) => ({ ...match, id: `match-${index}-${match.offset}`, active: index === activeMatchIndex })), [activeMatchIndex, matches]);
-  const matchesByLine = useMemo(() => {
-    const grouped = new Map<number, RepositoryTextLineMatch[]>();
-    for (const match of matchesWithIds) {
-      const firstLine = repositoryTextLineAtOffset(lines, match.offset);
-      const lastLine = repositoryTextLineAtOffset(lines, Math.max(match.offset, match.end - 1));
-      if (firstLine === null || lastLine === null) continue;
-      for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber += 1) {
-        const line = lines[lineNumber - 1];
-        if (!line) continue;
-        const segments = lineMatchSegments(line, [match]);
-        if (segments.length > 0) {
-          const current = grouped.get(lineNumber) ?? [];
-          current.push(...segments);
-          grouped.set(lineNumber, current);
-        }
-      }
-    }
-    return grouped;
-  }, [lines, matchesWithIds]);
+  const { firstLines, matchesByLine } = useMemo(() => indexRepositoryTextMatches(lines, matches), [lines, matches]);
   const lineNumber = lines.length;
   const visibleLineCount = Math.min(lineLimit, lineNumber);
   const visibleLines = lines.slice(0, visibleLineCount);
-  const activeMatch = activeMatchIndex >= 0 ? matches[activeMatchIndex] : undefined;
-  const activeMatchLine = activeMatch === undefined ? null : repositoryTextLineAtOffset(lines, activeMatch.offset);
+  const activeMatch = matches[activeMatchIndex];
+  const activeMatchId = activeMatch === undefined ? null : `match-${activeMatchIndex}-${activeMatch.offset}`;
+  const activeMatchLine = activeMatch === undefined ? null : firstLines[activeMatchIndex];
   const goToLineNumber = useMemo(() => parseRepositoryLineNumber(lineQuery, lineNumber), [lineNumber, lineQuery]);
   const range = useMemo(() => repositoryTextRange(previewText, rangeStart, rangeEnd), [previewText, rangeEnd, rangeStart]);
   const githubRangeHref = buildRepositoryGitHubRangeHref(remote, revision, path, range);
@@ -234,7 +203,7 @@ export default function RepositoryTextView({ text, remote, revision, path }: { t
             tabIndex={-1}
           >
             <span className="repository-text-number" aria-label={`${line.number}行目`}>{line.number}</span>
-            <span className="repository-text-content">{renderLineContent(line, matchesForLine, showWhitespace, activeMarkRef)}</span>
+            <span className="repository-text-content">{renderLineContent(line, matchesForLine, activeMatchId, showWhitespace, activeMarkRef)}</span>
           </div>;
         })}
       </div>

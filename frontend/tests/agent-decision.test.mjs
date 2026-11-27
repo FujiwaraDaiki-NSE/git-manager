@@ -12,9 +12,16 @@ const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit
 const module = { exports: {} };
 const CopyButton = ({ value, label }) => React.createElement('button', { 'data-value': value }, label);
 new Function('require', 'module', 'exports', compiled.outputText)(
-  (name) => name.endsWith('.css') ? {} : name === './copy-button' ? { default: CopyButton } : require(name), module, module.exports,
+  (name) => {
+    if (name.endsWith('.css')) return {};
+    if (name === './copy-button') return { default: CopyButton };
+    if (name === 'react') return { useState: (initial) => React.useState(testAnswer ?? initial) };
+    return require(name);
+  }, module, module.exports,
 );
-const render = (decision, compact = false, replyBranch) => renderToStaticMarkup(React.createElement(module.exports.AgentDecisionDetails, { decision, compact, replyBranch }));
+let testAnswer;
+const render = (decision, compact = false, replyTarget) => renderToStaticMarkup(React.createElement(module.exports.AgentDecisionDetails, { decision, compact, replyTarget }));
+const replyTarget = { projectId: '/workspace/one', branch: 'feature/reply', worktree: '/workspace/one-worktree' };
 
 test('decision renders question first, choices and only HTTP(S) links; null renders nothing', () => {
   assert.equal(render(null), '');
@@ -47,10 +54,25 @@ test('decision copy includes question, optional choices and links on separate li
 
 test('current decisions allow selecting an option or writing an answer, including without choices', () => {
   const decision = { question: 'どう進める？', options: ['進める', '見送る'], links: [] };
-  const current = render(decision, false, 'feature/reply');
+  const current = render(decision, false, replyTarget);
   assert.match(current, /<button[^>]*>見送る<\/button>/);
   assert.match(current, /<label>回答<textarea/);
   assert.doesNotMatch(current, /返答文をコピー/);
-  assert.match(render({ ...decision, options: [] }, false, 'feature/reply'), /<label>回答<textarea/);
+  assert.match(render({ ...decision, options: [] }, false, replyTarget), /<label>回答<textarea/);
   assert.doesNotMatch(render(decision), /<textarea|返答文をコピー/);
+});
+
+test('reply copy identifies the reported project, branch and worktree', () => {
+  const decision = { question: 'どう進める？', options: [], links: [] };
+  testAnswer = '進める';
+  try {
+    assert.ok(render(decision, false, replyTarget).includes(
+      'data-value="プロジェクト: /workspace/one\nブランチ: feature/reply\n報告時のパス: /workspace/one-worktree\n質問: どう進める？\n回答: 進める"',
+    ));
+    assert.ok(render(decision, false, { ...replyTarget, worktree: null }).includes(
+      '\n報告時のパス未取得\n質問: どう進める？',
+    ));
+  } finally {
+    testAnswer = undefined;
+  }
 });

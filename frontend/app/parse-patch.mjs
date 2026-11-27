@@ -1,7 +1,7 @@
 /**
  * Preserve every patch line; only assign line numbers inside ordinary unified hunks.
  * @param {string} patch
- * @returns {Array<{title: string, lines: Array<{text: string, kind: string, oldLine: number | null, newLine: number | null}>}>}
+ * @returns {Array<{title: string, lines: Array<{text: string, kind: string, oldLine: number | null, newLine: number | null, prefixLength: number}>}>}
  */
 export function parsePatch(patch) {
   if (patch === "") return [];
@@ -11,6 +11,7 @@ export function parsePatch(patch) {
   let newLine = null;
   let oldRemaining = 0;
   let newRemaining = 0;
+  let combinedParents = 0;
   for (const text of patch.split("\n")) {
     if (/^diff --(?:git|cc|combined) /.test(text)) {
       const samePath = text.match(/^diff --git a\/(.+) b\/\1$/);
@@ -18,14 +19,16 @@ export function parsePatch(patch) {
       sections.push(section);
       oldLine = newLine = null;
       oldRemaining = newRemaining = 0;
+      combinedParents = 0;
     }
     if (section === null) {
       section = { title: "差分", lines: [] };
       sections.push(section);
     }
-    const line = { text, kind: "meta", oldLine: null, newLine: null };
+    const line = { text, kind: "meta", oldLine: null, newLine: null, prefixLength: 0 };
     const hunk = text.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
     if (hunk) {
+      combinedParents = 0;
       oldLine = Number(hunk[1]);
       newLine = Number(hunk[3]);
       oldRemaining = hunk[2] === undefined ? 1 : Number(hunk[2]);
@@ -35,7 +38,14 @@ export function parsePatch(patch) {
       // Combined merge diffs have one column per parent, not a two-file mapping.
       oldLine = newLine = null;
       oldRemaining = newRemaining = 0;
+      const marker = text.match(/^(@{3,}) /);
+      combinedParents = marker === null ? 0 : marker[1].length - 1;
       line.kind = "hunk";
+    } else if (combinedParents > 0) {
+      const prefix = text.slice(0, combinedParents);
+      if (prefix.length === combinedParents && /^[ +\-]+$/.test(prefix)) {
+        line.prefixLength = combinedParents;
+      }
     } else if (oldLine !== null && newLine !== null && (oldRemaining > 0 || newRemaining > 0)) {
       if (text.startsWith("+") && newRemaining > 0) {
         line.kind = "addition";
@@ -52,6 +62,7 @@ export function parsePatch(patch) {
         oldRemaining--;
         newRemaining--;
       }
+      if (line.kind !== "meta") line.prefixLength = 1;
     }
     section.lines.push(line);
   }

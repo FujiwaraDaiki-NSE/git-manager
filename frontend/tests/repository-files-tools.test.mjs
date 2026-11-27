@@ -63,12 +63,18 @@ test("symlink targets stay unavailable when the retrieved tree cannot confirm th
 test("directory browsing creates only immediate children and breadcrumbs stay local", () => {
   assert.deepEqual(listRepositoryDirectoryEntries(entries, "").map((entry) => [entry.path, entry.type]), [["README.md", "blob"], ["src", "tree"]]);
   assert.deepEqual(listRepositoryDirectoryEntries(entries, "src").map((entry) => [entry.path, entry.type]), [["src/deep", "tree"], ["src/example.ts", "blob"]]);
-  assert.deepEqual(filterRepositoryFileEntries(entries, "src", "").map((entry) => entry.path), ["src/deep", "src/example.ts"]);
+  assert.deepEqual(filterRepositoryFileEntries(entries, "src", "", false).map((entry) => entry.path), ["src/deep", "src/example.ts"]);
 });
 
 test("path search covers all retrieved file entries and excludes directories", () => {
-  assert.deepEqual(searchRepositoryFileEntries(entries, "EXAMPLE ts").map((entry) => entry.path), ["src/example.ts"]);
-  assert.deepEqual(searchRepositoryFileEntries(entries, "src" ).map((entry) => entry.path), ["src/deep/value.ts", "src/example.ts"]);
+  assert.deepEqual(searchRepositoryFileEntries(entries, "EXAMPLE ts", false).map((entry) => entry.path), ["src/example.ts"]);
+  assert.deepEqual(searchRepositoryFileEntries(entries, "src", false).map((entry) => entry.path), ["src/deep/value.ts", "src/example.ts"]);
+});
+
+test("directory path search matches retrieved trees across the inventory", () => {
+  assert.deepEqual(filterRepositoryFileEntries(entries, "unrelated", "SRC Deep", true), [entries[3]]);
+  assert.deepEqual(filterRepositoryFileEntries(entries, "", "example.ts", true), []);
+  assert.throws(() => searchRepositoryFileEntries(entries, "src"), /directoriesOnly/);
 });
 
 test("history handoff pins full hash, exact file, explicit follow, and info tab", () => {

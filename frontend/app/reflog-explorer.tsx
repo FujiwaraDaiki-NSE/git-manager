@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CommitFiles from "./commit-files";
 import CopyButton from "./copy-button";
 import PatchView from "./patch-view";
+import { buildInvestigationShareUrl } from "./investigation-presets-tools.mjs";
 import {
   isReflogCommitHash,
   isValidReflogRef,
@@ -156,6 +157,8 @@ export default function ReflogExplorer({ path }: ReflogExplorerProps) {
   const [view, setView] = useState<ReflogView>("table");
   const [inventory, setInventory] = useState<ReflogInventory | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [baseRecordId, setBaseRecordId] = useState<string | null>(null);
+  const [targetRecordId, setTargetRecordId] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState("");
@@ -181,6 +184,8 @@ export default function ReflogExplorer({ path }: ReflogExplorerProps) {
     setView("table");
     setInventory(null);
     setSelectedRecordId(null);
+    setBaseRecordId(null);
+    setTargetRecordId(null);
     setState("idle");
     setError(null);
     setExportStatus("");
@@ -225,6 +230,8 @@ export default function ReflogExplorer({ path }: ReflogExplorerProps) {
     setLatestOnly(false);
     setInventory(null);
     setSelectedRecordId(null);
+    setBaseRecordId(null);
+    setTargetRecordId(null);
     setExportStatus("");
     setState("idle");
     setError(null);
@@ -238,6 +245,8 @@ export default function ReflogExplorer({ path }: ReflogExplorerProps) {
     controllerRef.current = null;
     requestKeyRef.current = null;
     requestSequenceRef.current += 1;
+    setBaseRecordId(null);
+    setTargetRecordId(null);
     if (!isValidReflogRef(ref)) {
       setInventory(null);
       setSelectedRecordId(null);
@@ -324,6 +333,26 @@ export default function ReflogExplorer({ path }: ReflogExplorerProps) {
 
   const command = inventory ? reflogCommand(path, inventory.ref) : null;
   const canRun = isValidReflogRef(ref) && state !== "loading";
+  const baseRecord = inventory?.records.find((record) => record.recordId === baseRecordId);
+  const targetRecord = inventory?.records.find((record) => record.recordId === targetRecordId);
+  let compareHref = null;
+  if (typeof window !== "undefined" && baseRecord && targetRecord) {
+    const url = new URL(window.location.href);
+    url.hash = "commit-compare";
+    compareHref = buildInvestigationShareUrl(url.href, "compare", { base: baseRecord.hash, target: targetRecord.hash, mode: "direct" });
+  }
+
+  function comparisonActions(record: ReflogRecord) {
+    if (!isReflogCommitHash(record.hash)) return null;
+    const isBase = record.recordId === baseRecordId;
+    const isTarget = record.recordId === targetRecordId;
+    return (
+      <>
+        <button className="table-action" type="button" aria-pressed={isBase} disabled={isTarget} onClick={() => setBaseRecordId(isBase ? null : record.recordId)}>比較元</button>
+        <button className="table-action" type="button" aria-pressed={isTarget} disabled={isBase} onClick={() => setTargetRecordId(isTarget ? null : record.recordId)}>比較先</button>
+      </>
+    );
+  }
 
   return (
     <details className="reflog-explorer">
@@ -386,6 +415,14 @@ export default function ReflogExplorer({ path }: ReflogExplorerProps) {
               {selectedRecordId !== null && navigation.index < 0 && <span>選択中の操作は現在の条件外</span>}
               {exportStatus && <span>{exportStatus}</span>}
             </div>
+            {inventory.records.length > 0 && (
+              <div className="reflog-explorer-coverage" role="group" aria-label="reflogの2件を比較">
+                <span>比較元 <code title={baseRecord?.hash}>{baseRecord ? shortHash(baseRecord.hash) : "未選択"}</code></span>
+                <span>→ 比較先 <code title={targetRecord?.hash}>{targetRecord ? shortHash(targetRecord.hash) : "未選択"}</code></span>
+                {compareHref !== null && <a className="table-action" href={compareHref}>直接比較を開く</a>}
+                {(baseRecord || targetRecord) && <button className="subtle-button" type="button" onClick={() => { setBaseRecordId(null); setTargetRecordId(null); }}>比較選択を解除</button>}
+              </div>
+            )}
             {inventory.records.length === 0 ? (
               <p className="reflog-explorer-empty" role="status">{inventory.available ? "保存された移動記録は0件です。" : "この参照の移動履歴は保存されていません（参照が存在しない場合もあります）。"}</p>
             ) : visible.length === 0 ? (
@@ -402,7 +439,7 @@ export default function ReflogExplorer({ path }: ReflogExplorerProps) {
                       <td className="reflog-explorer-message"><strong>{kind ?? "操作種別未取得"}</strong><span>{messageValue(record)}</span></td>
                       <td>{record.actor || "actor未取得"}</td>
                       <td className="reflog-explorer-hash"><code title={record.hash}>{shortHash(record.hash)}</code><CopyButton value={record.hash} label="コミットIDをコピー" /></td>
-                      <td><button className="table-action" type="button" onClick={() => setSelectedRecordId(record.recordId)}>{selected ? "表示中" : "操作を表示"}</button></td>
+                      <td><div className="reflog-explorer-row-actions"><button className="table-action" type="button" onClick={() => setSelectedRecordId(record.recordId)}>{selected ? "表示中" : "操作を表示"}</button>{comparisonActions(record)}</div></td>
                     </tr>;
                   })}</tbody>
                 </table>
@@ -416,7 +453,7 @@ export default function ReflogExplorer({ path }: ReflogExplorerProps) {
                     <div className="reflog-explorer-card-heading"><strong>{kind ?? "操作種別未取得"}</strong><time dateTime={record.date ?? undefined}>{exactDate(record.date)}</time></div>
                     <p className="reflog-explorer-card-message">{messageValue(record)}</p>
                     <dl><div><dt>actor</dt><dd>{record.actor || "actor未取得"}</dd></div><div><dt>hash</dt><dd><code title={record.hash}>{shortHash(record.hash)}</code></dd></div><div><dt>selector</dt><dd><code>{record.selector || "selector未取得"}</code></dd></div></dl>
-                    <div className="reflog-explorer-card-actions"><CopyButton value={record.hash} label="コミットIDをコピー" /><button className="table-action" type="button" onClick={() => setSelectedRecordId(record.recordId)}>{selected ? "表示中" : "操作を表示"}</button></div>
+                    <div className="reflog-explorer-card-actions"><CopyButton value={record.hash} label="コミットIDをコピー" /><button className="table-action" type="button" onClick={() => setSelectedRecordId(record.recordId)}>{selected ? "表示中" : "操作を表示"}</button>{comparisonActions(record)}</div>
                   </article>;
                 })}
               </div>

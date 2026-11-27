@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
-import { createElement } from "react";
+import { Children, createElement, useState } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import * as projectFlow from "../app/project-flow.mjs";
@@ -15,9 +15,11 @@ const compiled = ts.transpileModule(source, {
 });
 const exports = {};
 const require = createRequire(import.meta.url);
+let openState = null;
 runInNewContext(compiled.outputText, {
   exports,
   require(id) {
+    if (id === "react") return { ...require(id), useState: (initial) => openState === null ? useState(initial) : openState.shift() };
     if (id === "./pr-tools.mjs") return prTools;
     if (id === "./project-flow.mjs") return projectFlow;
     if (id === "next/navigation") return { useSearchParams: () => new URLSearchParams("path=%2Frepo&tab=info&event=old") };
@@ -26,6 +28,52 @@ runInNewContext(compiled.outputText, {
     if (id === "./copy-button") return () => null;
     return require(id);
   },
+});
+
+test("ローカル追跡ブランチの絞り込みはPR番号を使い、ブランチ行の未取得を表示する", () => {
+  const pull = {
+    number: 1, url: "https://github.com/example/repo/pull/1", title: "追跡あり",
+    headRefName: "topic", headRepository: "example/repo", baseRefName: "main",
+    isDraft: false, ciState: "SUCCESS", reviewDecision: "APPROVED",
+  };
+  const pulls = [
+    pull,
+    { ...pull, number: 2, title: "同名fork", headRepository: "fork/repo" },
+    { ...pull, number: 3, title: "リモートのみ" },
+    { ...pull, number: 4, title: "ローカルのみ" },
+  ];
+  const lane = { id: "local:topic", branch: "topic" };
+  const rows = [
+    { remote_ref: "origin/topic", locals: [lane], open_pull_requests: [pull] },
+    { remote_ref: "origin/other", locals: [], open_pull_requests: [pulls[2]] },
+    { remote_ref: null, locals: [lane], open_pull_requests: [pulls[3]] },
+  ];
+  const open = { status: "available", checked_at: null, pulls };
+  let trackedOnly = false;
+  function render(branchRows, query = "") {
+    openState = [[query, () => {}], ["main", () => {}], [true, () => {}], [trackedOnly, (checked) => { trackedOnly = checked; }]];
+    try {
+      const [component] = exports.default({ project: { github: { open }, branch_rows: branchRows } }).props.children;
+      return component.type(component.props);
+    } finally {
+      openState = null;
+    }
+  }
+  function checkboxes(node) {
+    if (node?.type === "input" && node.props.type === "checkbox") return [node];
+    return Children.toArray(node?.props?.children).flatMap(checkboxes);
+  }
+  const all = render(rows);
+  assert.match(renderToStaticMarkup(all), /4 \/ 4 件表示/);
+  checkboxes(all)[1].props.onChange({ target: { checked: true } });
+  const filtered = renderToStaticMarkup(render(rows));
+  assert.match(filtered, /1 \/ 4 件表示.*PR #1/);
+  assert.doesNotMatch(filtered, /PR #[234]/);
+  assert.match(renderToStaticMarkup(render(rows, "#2")), /0 \/ 4 件表示/);
+
+  const unavailable = render(null);
+  assert.equal(checkboxes(unavailable)[1].props.disabled, true);
+  assert.match(renderToStaticMarkup(unavailable), /判定できません.*4 \/ 4 件表示/);
 });
 
 test("オープンPRの取得結果から件数と照会時刻を表示する", () => {

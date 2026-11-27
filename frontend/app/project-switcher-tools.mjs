@@ -6,7 +6,7 @@ export { FAVORITES_STORAGE_KEY };
 /** Browser-local order of recently visited project main paths. */
 export const RECENT_PROJECT_PATHS_STORAGE_KEY = "gitdash.project-switcher.recent-paths";
 
-export const PROJECT_SWITCHER_ORDERS = ["recent", "name"];
+export const PROJECT_SWITCHER_ORDERS = /** @type {const} */ (["recent", "last-opened", "name"]);
 
 /**
  * Parse the browser-local recent path list without accepting a partial value.
@@ -120,14 +120,26 @@ function compareProjectName(left, right) {
 }
 
 /**
- * Sort switcher results by the selected explicit order. Unknown activity is
- * kept after projects with a known authoritative activity time.
+ * Sort switcher results by the selected explicit order. Projects without a
+ * recorded visit or activity time follow the known values in their respective orders.
  * @param {import("./types").ProjectSummary[]} projects
- * @param {"recent" | "name"} order
+ * @param {typeof PROJECT_SWITCHER_ORDERS[number]} order
+ * @param {string[]} recentPaths
  */
-export function sortProjectSwitcherProjects(projects, order) {
+export function sortProjectSwitcherProjects(projects, order, recentPaths) {
   if (!PROJECT_SWITCHER_ORDERS.includes(order)) {
     throw new Error(`Unknown project switcher order: ${String(order)}`);
+  }
+  if (order === "last-opened") {
+    const visitRanks = new Map(recentPaths.map((path, index) => [path, index]));
+    return [...projects].sort((left, right) => {
+      const leftRank = left.main_path === null ? undefined : visitRanks.get(left.main_path);
+      const rightRank = right.main_path === null ? undefined : visitRanks.get(right.main_path);
+      if (leftRank === undefined && rightRank !== undefined) return 1;
+      if (leftRank !== undefined && rightRank === undefined) return -1;
+      if (leftRank !== undefined && rightRank !== undefined && leftRank !== rightRank) return leftRank - rightRank;
+      return compareProjectName(left, right);
+    });
   }
   return [...projects].sort((left, right) => {
     if (order === "name") return compareProjectName(left, right);

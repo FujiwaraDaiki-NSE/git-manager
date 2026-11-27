@@ -900,6 +900,11 @@ body {
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
+.commit-message p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .commit-meta strong {
   font-family: var(--sans);
 }

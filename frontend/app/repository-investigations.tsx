@@ -57,9 +57,14 @@ function searchDateBounds(since: string, until: string) {
   const nextMidnight = new Date(`${nextDate.toISOString().split("T")[0]}T00:00:00`);
   return { since_at: sinceAt, until_at: new Date(nextMidnight.getTime() - 1000).toISOString() };
 }
+const searchModes = {
+  message: "件名・本文",
+  content: "出現数が変わった文字列（git log -S）",
+  "diff-regex": "追加・削除行を正規表現で検索（git log -G）",
+};
 const settings = {
   overlaps: ["worktree間の変更パス重なり", "worktree-overlaps", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"],
-  search: ["リポジトリ全体のコミット検索", "commit-search", "件名・本文と作成者はGitの正規表現、変更パスはGitのpathspecで検索します。変更内容では、文字列の出現数がファイル内で変わったコミットを検索します。検索対象の参照SHAはページ間で固定します。"],
+  search: ["リポジトリ全体のコミット検索", "commit-search", "件名・本文と作成者はGitの正規表現、変更パスはGitのpathspecで検索します。検索対象の参照SHAはページ間で固定します。"],
   recovery: ["到達不能コミットの復旧候補", "recovery-candidates", "現在のref・HEADから到達できない、reflogに残る履歴を表示します。reflog保存期間外は検出できません。復旧コマンドは対象リポジトリで実行してください。"],
   cherry: ["パッチ同等コミットの判定", "patch-equivalence", "パッチ同等＝安全な重複とは限りません。= はパッチ同等、< はAのみ、> はBのみです。共通コミットは表示しません。"],
 };
@@ -83,7 +88,7 @@ function Investigation(props: InvestigationProps) {
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   const [title, endpoint, note] = settings[kind];
-  const inputs = kind === "search" ? [["scope", "検索範囲（--all または ref）"], ["mode", "検索対象"], ["grep", "検索文字列"], ["author", "作成者"], ["since", "開始日"], ["until", "終了日"], ["file", "変更パス"]] : kind === "cherry" ? [["left", "A ブランチ / ref"], ["right", "B ブランチ / ref"]] : [];
+  const inputs = kind === "search" ? [["scope", "検索範囲（--all または ref）"], ["mode", "検索対象"], ["grep", fields.mode === "diff-regex" ? "検索パターン" : "検索文字列"], ["author", "作成者"], ["since", "開始日"], ["until", "終了日"], ["file", "変更パス"]] : kind === "cherry" ? [["left", "A ブランチ / ref"], ["right", "B ブランチ / ref"]] : [];
   async function run(values: Record<string, string>, offset: number, fixedShas: string[] | null = null) {
     if (kind === "search" && values.since !== "" && values.until !== "" && values.since > values.until) return;
     controller.current?.abort();
@@ -127,8 +132,7 @@ function Investigation(props: InvestigationProps) {
             <label key={key} htmlFor={`${inputId}-${key}`}>
               <span>{label}</span>
               {key === "mode" ? <select id={`${inputId}-${key}`} value={fields.mode} onChange={e => setFields({ ...fields, mode: e.target.value })}>
-                <option value="message">件名・本文</option>
-                <option value="content">変更内容の文字列（git log -S）</option>
+                {Object.entries(searchModes).map(([mode, name]) => <option key={mode} value={mode}>{name}</option>)}
               </select> : <input id={`${inputId}-${key}`} type={key === "since" || key === "until" ? "date" : "text"} required={key === "scope" || key === "left" || key === "right"} value={fields[key]} aria-invalid={(key === "since" || key === "until") && invalidDates ? true : undefined} aria-describedby={(key === "since" || key === "until") && invalidDates ? dateErrorId : undefined} onChange={e => setFields({ ...fields, [key]: e.target.value })} />}
             </label>
           ))}
@@ -138,7 +142,7 @@ function Investigation(props: InvestigationProps) {
         {error && <p className="tag-explorer-error" role="alert">取得できませんでした。{error}</p>}
         {data && <div aria-live="polite" aria-busy={loading}>
           {pageLoading && <p className="tag-explorer-state" role="status">{pageLoading}</p>}
-          {kind === "search" && request && <p className="tag-explorer-note">適用した条件: {request.mode === "content" ? "変更内容の文字列" : "件名・本文"}「{request.grep}」、作成者「{request.author}」、期間「{request.since} ～ {request.until}」、変更パス「{request.file}」（空欄は条件なし）</p>}
+          {kind === "search" && request && <p className="tag-explorer-note">適用した条件: {searchModes[request.mode as keyof typeof searchModes]}「{request.grep}」、作成者「{request.author}」、期間「{request.since} ～ {request.until}」、変更パス「{request.file}」（空欄は条件なし）</p>}
           {kind === "search" && request && <p className="tag-explorer-note">検索開始時点の参照で固定中 <button className="tag-explorer-export" type="button" disabled={loading} onClick={() => void run(request, 0)}>最新状態で検索し直す</button></p>}
           {data.scope && <p className="tag-explorer-note">検索範囲: <code>{data.scope}</code></p>}
           {kind === "search" && data.commits && data.commits.length > 0 && <p className="tag-explorer-note">{data.offset! + 1}〜{data.offset! + data.commits.length}件目を表示</p>}

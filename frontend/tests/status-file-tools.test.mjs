@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import {
   buildStatusStageCommands,
   buildStatusUnstageCommand,
   buildUntrackedDirectoryCommand,
+  buildUntrackedFileDiffCommand,
   filterStatusFilesByDirectory,
   filterStatusFilesByExtension,
   listStatusFileDirectories,
@@ -46,6 +47,24 @@ test("untracked directory command lists only unignored files under the literal d
   assert.equal(execSync(buildCommand("??", "dir[1]/"), { encoding: "utf8" }), "dir[1]/visible.txt\n");
   assert.equal(buildCommand("??", ".gitignore"), null);
   assert.equal(buildCommand(".M", "dir[1]/"), null);
+});
+
+test("untracked file diff reads the literal file and leaves it untracked", (t) => {
+  const repo = mkdtempSync(join(tmpdir(), "status diff '"));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  git("init", "-q");
+  const buildCommand = (xy, path) => buildUntrackedFileDiffCommand(repo, { xy, path, original_path: null });
+  for (const path of ["space 'file[1].txt", "-"]) {
+    writeFileSync(join(repo, path), "untracked content\n");
+    const result = spawnSync(buildCommand("??", path), { shell: true, encoding: "utf8" });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /^\+untracked content$/m);
+  }
+  assert.deepEqual(git("status", "--short", "-z").split("\0"), ["?? -", "?? space 'file[1].txt", ""]);
+  assert.equal(buildCommand("??", "directory/"), null);
+  assert.equal(buildCommand("??", "unreadable\uFFFD.txt"), null);
+  assert.equal(buildCommand(".M", "tracked.txt"), null);
 });
 
 test("unstage command restores only the selected regular file's index and keeps worktree edits", (t) => {

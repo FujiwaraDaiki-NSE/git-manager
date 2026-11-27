@@ -15,6 +15,24 @@
   cursor: pointer;
 }
 
+.graph-sha-jump,
+.graph-sha-jump label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.graph-sha-jump { margin-bottom: 8px; }
+.graph-sha-jump input { min-width: 0; max-width: 100%; }
+.graph-sha-matches { margin-block: 6px 8px; padding-inline-start: 20px; }
+.graph-sha-matches .copy {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
 .graph-row-first-parent .graph-row-content {
   border-inline-start: 3px solid var(--accent);
   padding-inline-start: 4px;

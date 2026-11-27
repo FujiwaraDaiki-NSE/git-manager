@@ -24,11 +24,14 @@ test('classifies parsed sections from explicit text and binary evidence', () => 
     'diff --git a/mode.txt b/mode.txt',
     'old mode 100644',
     'new mode 100755',
+    'diff --cc merge.txt',
+    '@@@ -1 -1 +1 @@@',
+    '++merged',
   ].join('\n'));
-  assert.deepEqual(sections.map(({ section }) => classifyPatchSection(section)), ['text', 'binary', 'other']);
-  assert.deepEqual(filterPatchReviewEntries(sections, 'text').map(({ index }) => index), [0]);
+  assert.deepEqual(sections.map(({ section }) => classifyPatchSection(section)), ['text', 'binary', 'other', 'text']);
+  assert.deepEqual(filterPatchReviewEntries(sections, 'text').map(({ index }) => index), [0, 3]);
   assert.deepEqual(filterPatchReviewEntries(sections, 'binary').map(({ index }) => index), [1]);
-  assert.equal(filterPatchReviewEntries(sections, 'all').length, 3);
+  assert.equal(filterPatchReviewEntries(sections, 'all').length, 4);
 });
 
 test('sorts by path or total changed lines while retaining original indexes', () => {

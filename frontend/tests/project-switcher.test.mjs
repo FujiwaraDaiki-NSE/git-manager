@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
-import {parseRecentProjectPaths, recordRecentProjectPath, filterProjectSwitcherProjects, findProjectSwitcherWorktrees, sortProjectSwitcherProjects, projectSwitcherResultIndex} from '../app/project-switcher-tools.mjs';
+import {parseRecentProjectPaths, recordRecentProjectPath, serializeRecentProjectPaths, filterProjectSwitcherProjects, findProjectSwitcherWorktrees, sortProjectSwitcherProjects, projectSwitcherResultIndex} from '../app/project-switcher-tools.mjs';
 
 const require = createRequire(new URL('../app/project-switcher.tsx', import.meta.url));
 const compilerOptions = { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 };
@@ -67,8 +67,22 @@ test('favorite and recent intersection uses exact identities, not duplicate name
  const rows=[{id:'a',name:'same',main_path:'/a',remote:null},{id:'b',name:'same',main_path:'/b',remote:null}];
  assert.deepEqual(filterProjectSwitcherProjects(rows,{query:'same',favoritesOnly:true,recentOnly:true,favoriteIds:new Set(['a']),recentPaths:['/b']}),[]);
  assert.deepEqual(filterProjectSwitcherProjects(rows,{query:'/a',favoritesOnly:true,recentOnly:true,favoriteIds:new Set(['a']),recentPaths:['/a']}),[rows[0]]);
- assert.deepEqual(sortProjectSwitcherProjects(rows,'name'),rows);
- assert.throws(()=>sortProjectSwitcherProjects(rows,'invalid'));
+ assert.deepEqual(sortProjectSwitcherProjects(rows,'name',[]),rows);
+ assert.throws(()=>sortProjectSwitcherProjects(rows,'invalid',[]));
+});
+
+test('last opened follows saved main paths, with unvisited projects afterward by name', () => {
+  const gitManager = { id: 'git-manager', name: 'git-manager', main_path: '/git-manager' };
+  const designDb = { id: 'design-db', name: 'design_db', main_path: '/design_db' };
+  const unvisited = { id: 'other', name: 'design_db', main_path: '/other/design_db' };
+  const missingPath = { id: 'unknown', name: 'alpha', main_path: null };
+  const projects = [designDb, unvisited, gitManager, missingPath];
+  const history = ['/git-manager', '/design_db', '/git-manager'].reduce(recordRecentProjectPath, []);
+  const reloaded = parseRecentProjectPaths(serializeRecentProjectPaths(history));
+  assert.deepEqual(sortProjectSwitcherProjects(projects, 'last-opened', reloaded), [
+    gitManager, designDb, missingPath, unvisited,
+  ]);
+  assert.deepEqual(projects, [designDb, unvisited, gitManager, missingPath]);
 });
 test('keyboard arrows wrap, Home/End select boundaries, invalid indexes do not move focus',()=>{
  assert.equal(projectSwitcherResultIndex('ArrowUp',0,3),2);

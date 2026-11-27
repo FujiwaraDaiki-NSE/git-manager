@@ -88,10 +88,19 @@ function OpenPullRequestAttention({ open, branchRows }: {
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState("");
   const [excludeDraft, setExcludeDraft] = useState(false);
+  const [trackedOnly, setTrackedOnly] = useState(false);
   const searchParams = useSearchParams();
   const pulls = open?.status === "available" ? Array.from(new Map(open.pulls.map((pr) => [pr.number, pr])).values()) : [];
   const targets = [...new Set(pulls.map((pr) => pr.baseRefName))].sort();
-  const filtered = filterOpenPullRequests(pulls, { query, target, excludeDraft });
+  let filtered = filterOpenPullRequests(pulls, { query, target, excludeDraft });
+  if (trackedOnly && branchRows !== null) {
+    const trackedNumbers = new Set<number>();
+    for (const row of branchRows) {
+      if (row.remote_ref === null || row.locals.length === 0 || !row.open_pull_requests) continue;
+      for (const pr of row.open_pull_requests) trackedNumbers.add(pr.number);
+    }
+    filtered = filtered.filter((pr) => trackedNumbers.has(pr.number));
+  }
   const result = open?.status === "available" ? {
     pulls,
     matches: openPullRequestsNeedingAttention(pulls),
@@ -158,7 +167,9 @@ function OpenPullRequestAttention({ open, branchRows }: {
                     </select>
                   </label>
                   <label><input type="checkbox" checked={excludeDraft} onChange={(event) => setExcludeDraft(event.target.checked)} /> Draftを除く</label>
+                  <label><input type="checkbox" checked={trackedOnly && branchRows !== null} disabled={branchRows === null} onChange={(event) => setTrackedOnly(event.target.checked)} /> ローカル追跡ブランチあり</label>
                 </div>
+                {branchRows === null && <p className="pr-explorer-inline-note" role="status">ブランチ行が未取得のため、ローカル追跡ブランチの有無を判定できません。</p>}
                 <p className="pr-explorer-inline-note" role="status">{filtered.length} / {result.pulls.length} 件表示</p>
                 {filtered.length === 0 ? <p className="pr-explorer-inline-note">検索条件に一致するオープンPRはありません</p> : <ul className="pr-explorer-open-list pr-explorer-open-all">
                   {filtered.map((pr) => {

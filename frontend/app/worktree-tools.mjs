@@ -4,6 +4,8 @@
  * and is linked only when its path is exactly equal to the worktree path.
  */
 
+import { agentTaskState } from "./agent-overview.mjs";
+
 export const WORKTREE_STATE_FILTERS = Object.freeze(/** @type {const} */ ([
   "all",
   "main",
@@ -107,6 +109,14 @@ export function buildWorktreeInventory(project) {
     worktree,
     lane: exactLaneForPath(worktree.path, project.lanes),
   }));
+}
+
+/** @param {{ worktree: { path: string }, lane: import("./types").ProjectLane | null }} row */
+export function worktreeAgentReport(row) {
+  const agent = row.lane?.agent;
+  if (!agent || agent.worktree !== row.worktree.path) return null;
+  const status = agentTaskState(agent);
+  return status === null ? null : { status, summary: agent.summary };
 }
 
 /** The raw worktree state remains independent from main/detached identity flags. */

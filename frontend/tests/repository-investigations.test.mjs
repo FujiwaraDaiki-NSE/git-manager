@@ -31,7 +31,7 @@ test("patch equivalence displays the compared refs and short SHAs with the repro
 test("commit search pages send large SHA arrays in POST bodies and refresh with GET", async () => {
   const shas = Array.from({ length: 1800 }, (_, i) => i.toString(16).padStart(40, "0"));
   const fields = { scope: "--all", mode: "message", grep: "needle", author: "", since: "", until: "", file: "" };
-  const submitted = { ...fields, mode: "content", since_at: "", until_at: "" };
+  const submitted = { ...fields, mode: "diff-regex", since_at: "", until_at: "" };
   const result = { commits: [], offset: 0, has_more: true, fixed_shas: shas };
   const source = readFileSync(new URL("../app/repository-investigations.tsx", import.meta.url), "utf8").replace(/^import .*\.css";$/gm, "");
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
@@ -55,6 +55,10 @@ test("commit search pages send large SHA arrays in POST bodies and refresh with 
     React.Children.forEach(node.props?.children, visit);
   }
   visit(tree);
+  const html = renderToStaticMarkup(tree);
+  assert.match(html, /option value="content".*git log -S/);
+  assert.match(html, /option value="diff-regex".*git log -G/);
+  assert.match(html, /適用した条件: 追加・削除行を正規表現で検索（git log -G）「needle」/);
   buttons.find(button => button.props.children === "次の50件").props.onClick();
   await Promise.resolve();
   assert.equal(calls[0].url, "/api/repo/commit-search");
@@ -64,14 +68,14 @@ test("commit search pages send large SHA arrays in POST bodies and refresh with 
   assert.deepEqual(body.fixed_shas, shas);
   assert.equal(body.offset, 50);
   assert.equal(body.grep, "needle");
-  assert.equal(body.mode, "content");
+  assert.equal(body.mode, "diff-regex");
   buttons.find(button => button.props.children === "最新状態で検索し直す").props.onClick();
   await Promise.resolve();
   assert.match(calls[1].url, /^\/api\/repo\/commit-search\?/);
   assert.ok(!calls[1].url.includes("fixed_shas"));
   const params = new URLSearchParams(calls[1].url.split("?")[1]);
   assert.equal(params.get("offset"), "0");
-  assert.equal(params.get("mode"), "content");
+  assert.equal(params.get("mode"), "diff-regex");
   assert.equal(calls[1].init.method, undefined);
 });
 
@@ -112,6 +116,15 @@ async function investigationHarness(kind, initial, fetchResult, props = {}) {
   return { render, nodes, calls, states, html: () => renderToStaticMarkup(render()) };
 }
 const searchFields = { scope: "--all", mode: "message", grep: "", author: "", since: "", until: "", file: "" };
+
+test("diff regex input errors appear in the existing search alert", async () => {
+  const detail = "正規表現を確認してください";
+  const h = await investigationHarness("CommitSearch", [{ ...searchFields, mode: "diff-regex", grep: "[" }],
+    async () => ({ ok: false, status: 422, json: async () => ({ detail }) }));
+  h.nodes(h.render(), "form")[0].props.onSubmit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(h.html(), /role="alert">[^<]*正規表現を確認してください/);
+});
 
 test("search results display both timestamps in the browser timezone and preserve their ISO values", async () => {
   const originalZone = process.env.TZ;
@@ -227,7 +240,7 @@ test("overlaps retain XY codes and caution alongside shared Japanese status desc
   const opened = [];
   const h = await investigationHarness("WorktreeOverlaps", [searchFields, { overlaps: [{ path: "file", worktrees }] }], undefined, { agentTasks: null, onOpenWorktree: path => opened.push(path) });
   const html = h.html();
-  for (const text of ["M ", " M", "??", "UU", "ステージ: 変更", "作業: 変更", "未追跡", "競合を解消してください", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"]) assert.ok(html.includes(text));
+  for (const text of ["M ", " M", "??", "UU", "ステージ: 変更", "作業: 変更", "未追跡", "双方で変更", "同じパスを変更中でも、競合するとは限りません。各worktreeを順に観測した結果です。"]) assert.ok(html.includes(text));
   const rows = h.nodes(h.render(), "li").filter(node => node.props.className === "tag-explorer-commit-meta");
   assert.equal(rows.length, 2);
   assert.match(renderToStaticMarkup(rows[0]), /\/repo0.*ステージ: 変更.*作業: 変更.*未追跡/);

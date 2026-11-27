@@ -18,7 +18,13 @@ import {
   sortProjectSwitcherProjects,
 } from "./project-switcher-tools.mjs";
 
-type ProjectSwitcherOrder = "recent" | "name";
+type ProjectSwitcherOrder = typeof PROJECT_SWITCHER_ORDERS[number];
+
+const orderLabels: Record<ProjectSwitcherOrder, string> = {
+  recent: "最近の活動",
+  "last-opened": "最後に開いた順",
+  name: "名前",
+};
 
 function resultAnchors(dialog: HTMLDialogElement | null) {
   return dialog
@@ -151,7 +157,7 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
     }
   };
 
-  const orderedProjects = useMemo(() => sortProjectSwitcherProjects(projects, order), [projects, order]);
+  const orderedProjects = useMemo(() => sortProjectSwitcherProjects(projects, order, recentPaths), [projects, order, recentPaths]);
   const filters = useMemo(() => ({ query, favoritesOnly, recentOnly, favoriteIds: favorites, recentPaths }), [query, favoritesOnly, recentOnly, favorites, recentPaths]);
   const matches = useMemo(() => filterProjectSwitcherProjects(orderedProjects, filters), [orderedProjects, filters]);
   const worktreeMatches = useMemo(() => findProjectSwitcherWorktrees(orderedProjects, repos, filters, homeQuery), [orderedProjects, repos, filters, homeQuery]);
@@ -189,13 +195,29 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
     rememberRecentPath(path);
     closeSwitcher();
   };
-  const emptyMessage = query.trim()
-    ? "一致するプロジェクトや作業ディレクトリがありません。"
-    : recentOnly
-    ? "最近見たプロジェクトはありません。"
+  const hasQuery = query.trim().length > 0;
+  const activeFilterLabel = favoritesOnly && recentOnly
+    ? "お気に入り・最近見たもの"
     : favoritesOnly
-      ? "お気に入りのプロジェクトはありません。"
+      ? "お気に入りのみ"
+      : recentOnly
+        ? "最近見たもの"
+        : null;
+  const emptyMessage = hasQuery
+    ? "一致するプロジェクトや作業ディレクトリがありません。"
+    : activeFilterLabel !== null
+      ? `「${activeFilterLabel}」に一致するプロジェクトがありません。`
       : "一致するプロジェクトがありません。";
+
+  const handleEmptyReset = () => {
+    if (hasQuery) {
+      setQuery("");
+    } else {
+      setFavoritesOnly(false);
+      setRecentOnly(false);
+    }
+    input.current?.focus();
+  };
 
   return <>
     <button className="project-switch-trigger" type="button" aria-haspopup="dialog" aria-expanded={open} onClick={(event) => { previousFocus.current = event.currentTarget; setOpen(true); }}>プロジェクトを切り替え <kbd>Ctrl K</kbd></button>
@@ -208,14 +230,14 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
       <div className="project-switch-options" role="group" aria-label="プロジェクトの絞り込みと並び順">
         <button className="project-switch-filter" type="button" aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly((value) => !value)}>{favoritesOnly ? "★ お気に入りのみ" : "☆ お気に入りのみ"}</button>
         <button className="project-switch-filter" type="button" aria-pressed={recentOnly} onClick={() => setRecentOnly((value) => !value)}>最近見たもの <span aria-hidden="true">{recentPaths.length}</span></button>
-        <label className="project-switch-sort"><span>並び順</span><select aria-label="切り替え一覧の並び順" value={order} onChange={(event) => setOrder(event.target.value as ProjectSwitcherOrder)}>{PROJECT_SWITCHER_ORDERS.map((value) => <option key={value} value={value}>{value === "recent" ? "最近の活動" : "名前"}</option>)}</select></label>
+        <label className="project-switch-sort"><span>並び順</span><select aria-label="切り替え一覧の並び順" value={order} onChange={(event) => setOrder(event.target.value as ProjectSwitcherOrder)}>{PROJECT_SWITCHER_ORDERS.map((value) => <option key={value} value={value}>{orderLabels[value]}</option>)}</select></label>
         <button className="subtle-button project-switch-clear" type="button" disabled={!recentPaths.length && !recentStorageIssue} onClick={clearRecentHistory}>最近見た履歴をクリア</button>
       </div>
       <p className="project-switch-local-note">お気に入りと最近見た履歴は、このブラウザにのみ保存されます。</p>
       {favoritesStorageIssue && <div className="project-switch-storage-issue" role="alert">お気に入りの保存データを読み込めません。ホーム画面で保存を再設定できます。</div>}
       {recentStorageIssue && <div className="project-switch-storage-issue" role="alert">最近見た履歴を保存できないため、この画面では一時的に表示しています。</div>}
       {error && <div className="project-switch-empty" role="alert">プロジェクト一覧を取得できませんでした。{showResults && "前回取得した一覧を表示しています。"}<button className="subtle-button" type="button" onClick={refreshProjects}>再試行</button></div>}
-      <div className="project-switch-count" role="status">{initialLoading ? "プロジェクトを読み込み中…" : showResults ? `${matches.length} プロジェクト${query.trim() ? ` · ${worktreeMatches.length} 作業ディレクトリ` : ""}${loading ? " · 更新中" : ""}` : ""}</div>
+      <div className="project-switch-count" role="status">{initialLoading ? "プロジェクトを読み込み中…" : showResults ? `${matches.length} プロジェクト${hasQuery ? ` · ${worktreeMatches.length} 作業ディレクトリ` : ""}${loading ? " · 更新中" : ""}` : ""}</div>
       {showResults && <div className="project-switch-results">
         {matches.map((project) => project.main_path === null ? <div className="project-switch-unavailable" key={project.id} aria-disabled="true">{project.name}<span>作業パス未取得</span></div> : <Link prefetch={false} href={`/project?path=${encodeURIComponent(project.main_path)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`} key={project.id} data-project-switch-result="true" aria-current={project.main_path === currentPath ? "page" : undefined} onClick={(event) => handleResultClick(event, project.main_path)} onKeyDown={handleResultKeyDown}><span><strong>{project.name}</strong><code>{project.main_path}</code></span><span>{project.main_path === currentPath ? "表示中" : "→"}</span></Link>)}
         {worktreeMatches.map(({ project, path, branch, href }) => (
@@ -224,7 +246,12 @@ export default function ProjectSwitcher({ currentPath, homeQuery }: { currentPat
             <span aria-hidden="true">→</span>
           </Link>
         ))}
-        {matches.length === 0 && worktreeMatches.length === 0 && <div className="project-switch-empty">{emptyMessage}<button className="subtle-button" type="button" onClick={() => { setQuery(""); input.current?.focus(); }}>検索をクリア</button></div>}
+        {matches.length === 0 && worktreeMatches.length === 0 && <div className="project-switch-empty">
+          {emptyMessage}
+          {(hasQuery || (activeFilterLabel !== null && projects.length > 0)) && <button className="subtle-button" type="button" onClick={handleEmptyReset}>
+            {hasQuery ? "検索をクリア" : `「${activeFilterLabel}」の絞り込みを解除`}
+          </button>}
+        </div>}
       </div>}
       <div className="project-switch-footer"><span><kbd>↓</kbd> 検索結果へ <kbd>↑</kbd><kbd>↓</kbd><kbd>Home</kbd><kbd>End</kbd> 移動 <kbd>Enter</kbd> 開く</span><span><kbd>Esc</kbd> 閉じる</span></div>
     </dialog>

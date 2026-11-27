@@ -43,6 +43,7 @@ import {
   timelineDecisionChanges,
   timelineHistoryCsv,
   timelineHistoryDetails,
+  timelinePreviousStatuses,
 } from "./agent-timeline-investigation-tools.mjs";
 import type { TimelineDecisionChange, TimelineFilterOptions } from "./agent-timeline-investigation-tools.mjs";
 import type { AgentEvent, AgentTask, ProjectResponse, ProjectSummary, Repo } from "./types";
@@ -171,7 +172,7 @@ function CurrentRow({ project, name, task, repos, oldDecision = false, acknowled
         <TimeValue value={task.occurred_at} />
       </ProjectBranch>
       {agentTaskState(task) === "waiting_for_user" && !task.decision?.question.trim() && <p className="agent-timeline-question-note">質問の記載なし</p>}
-      <AgentDecisionDetails key={JSON.stringify(identity)} decision={task.decision} replyBranch={branch} />
+      <AgentDecisionDetails key={JSON.stringify(identity)} decision={task.decision} replyTarget={reportProjectId && branch ? { projectId: reportProjectId, branch, worktree } : undefined} />
       {location !== null && <p className="agent-timeline-report-path">
         報告時のパス <code>{worktree}</code>{location.note !== null && <span role="status">{location.note}</span>}
       </p>}
@@ -208,18 +209,20 @@ function DecisionComparisonValue({ value }: { value: TimelineDecisionChange["bef
   return <ul>{value.map((item, index) => <li key={index}>{item}</li>)}</ul>;
 }
 
-function HistoryRow({ event, project, repos, decisionChanges }: {
+function HistoryRow({ event, project, repos, decisionChanges, previousStatus }: {
   event: AgentEvent;
   project: TimelineProject | null;
   repos: ReadonlyMap<string, Repo> | null;
   decisionChanges: TimelineDecisionChange[] | undefined;
+  previousStatus: string | undefined;
 }) {
   const name = projectLabel(project, event.project_id);
+  const status = historicalStatus(event);
   return (
     <li className={`agent-timeline-history-row ${event.kind === "lifecycle" ? "is-lifecycle" : "is-status"} status-${statusClass(event.status)}`}>
       <ProjectBranch project={project} name={name} report={event} repos={repos}>
         <span className="agent-timeline-row-head"><strong>{name}</strong><span>{branchLabel(event.branch)}</span></span>
-        <span className="agent-timeline-status-line"><span title={event.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{historicalStatus(event)}</span></span>
+        <span className="agent-timeline-status-line"><span title={event.status === "merge_ready" ? "agentによる準備完了の報告です。実際のマージ可否を保証しません。" : undefined} className="agent-timeline-status">{previousStatus === undefined ? status : `${agentStateLabel(previousStatus)} → ${status}`}</span></span>
         <span className="agent-timeline-summary">{historicalSummary(event)}</span>
         <TimeValue value={event.occurred_at} />
       </ProjectBranch>
@@ -240,11 +243,12 @@ function HistoryRow({ event, project, repos, decisionChanges }: {
   );
 }
 
-function HistoryList({ events, projectById, repos, decisionChanges }: {
+function HistoryList({ events, projectById, repos, decisionChanges, previousStatuses }: {
   events: AgentEvent[];
   projectById: Map<string, ProjectSummary>;
   repos: ReadonlyMap<string, Repo> | null;
   decisionChanges: Map<string, TimelineDecisionChange[]>;
+  previousStatuses: Map<string, string>;
 }) {
   const groups: { date: string | null; events: AgentEvent[] }[] = [];
   for (const event of events) {
@@ -257,7 +261,7 @@ function HistoryList({ events, projectById, repos, decisionChanges }: {
     <div key={date === null ? events[0].event_id : date}>
       <h4 className="agent-timeline-history-date">{date === null ? "日付未取得" : <time dateTime={date}>{date}</time>}</h4>
       <ol className="agent-timeline-list agent-timeline-history-list">
-        {events.map((event) => <HistoryRow key={event.event_id} event={event} project={event.project_id ? projectById.get(event.project_id) || null : null} repos={repos} decisionChanges={decisionChanges.get(event.event_id)} />)}
+        {events.map((event) => <HistoryRow key={event.event_id} event={event} project={event.project_id ? projectById.get(event.project_id) || null : null} repos={repos} decisionChanges={decisionChanges.get(event.event_id)} previousStatus={previousStatuses.get(event.event_id)} />)}
       </ol>
     </div>
   ));
@@ -461,6 +465,7 @@ export default function AgentTimelineSidebar({
   );
   const history = scoped && scopedProjectId === null ? [] : historyDetails.filtered;
   const decisionChanges = useMemo(() => timelineDecisionChanges(events), [events]);
+  const previousStatuses = useMemo(() => timelinePreviousStatuses(events), [events]);
   const currentLoading = displaySnapshot.projectsLoading && projects.length === 0;
   const currentEmptyMessage = scoped && scopedProjectId === null
     ? null
@@ -570,7 +575,7 @@ export default function AgentTimelineSidebar({
           {history.length === 0 && !displaySnapshot.loading && displaySnapshot.error && <p className="agent-timeline-empty agent-timeline-error" role="alert">履歴を取得できませんでした。</p>}
           {history.length === 0 && !displaySnapshot.loading && !displaySnapshot.error && !historyDetails.dateWindow.error && events.length === 0 && <p className="agent-timeline-empty" role="status">保存されたagentイベントはありません。</p>}
           {history.length === 0 && !displaySnapshot.loading && !displaySnapshot.error && !historyDetails.dateWindow.error && events.length > 0 && <p className="agent-timeline-empty" role="status">条件に一致する取得済み履歴はありません。</p>}
-          {history.length > 0 && <HistoryList events={history} projectById={projectById} repos={reposLoading ? null : repos} decisionChanges={decisionChanges} />}
+          {history.length > 0 && <HistoryList events={history} projectById={projectById} repos={reposLoading ? null : repos} decisionChanges={decisionChanges} previousStatuses={previousStatuses} />}
           {historyError && <p className="agent-timeline-empty agent-timeline-error" role="alert">古い履歴を取得できませんでした。{historyError}</p>}
           {historyHasMore && <button type="button" disabled={historyLoading || isPaused} onClick={loadOlderEvents}>{historyLoading ? "履歴を取得中…" : "さらに読み込む"}</button>}
           <div className="agent-timeline-history-actions">

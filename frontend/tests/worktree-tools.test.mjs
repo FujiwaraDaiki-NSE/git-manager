@@ -6,6 +6,7 @@ import {
   escapeTsvCell,
   filterWorktreeInventory,
   hasComparableWorktreeHead,
+  worktreeAgentReport,
   worktreeBranchFilterValue,
   worktreeBranchKey,
   worktreeCdCommands,
@@ -77,6 +78,25 @@ function filterOptions(overrides = {}) {
     ...overrides,
   };
 }
+
+test("inventory shows only explicit agent reports attributed to that exact worktree", () => {
+  const agent = { worktree: "/repo/main", kind: "status", status: "implementing", summary: "実装しています" };
+  const worktrees = [worktree(), worktree({ path: "/repo/other", is_main: false })];
+  const lanes = [lane("/repo/main", { agent }), lane("/repo/other", { agent })];
+
+  assert.deepEqual(buildWorktreeInventory({ worktrees, lanes }).map(worktreeAgentReport), [
+    { status: "implementing", summary: "実装しています" },
+    null,
+  ]);
+  for (const [overrides, expected] of [
+    [{ summary: null }, { status: "implementing", summary: null }],
+    [{ worktree: null }, null],
+    [{ kind: "lifecycle" }, null],
+  ]) {
+    const row = { worktree: worktrees[0], lane: lane("/repo/main", { agent: { ...agent, ...overrides } }) };
+    assert.deepEqual(worktreeAgentReport(row), expected);
+  }
+});
 
 test("HEAD comparison accepts complete hashes and excludes missing or unborn tips", () => {
   assert.equal(hasComparableWorktreeHead("1".repeat(40)), true);

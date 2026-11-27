@@ -4,6 +4,7 @@ import {
   REPOSITORY_TEXT_MAX_PREVIEW_BYTES,
   boundedRepositoryText,
   findRepositoryTextMatches,
+  indexRepositoryTextMatches,
   parseRepositoryLineNumber,
   repositoryTextLineAtOffset,
   repositoryTextRange,
@@ -56,6 +57,21 @@ test("literal search escapes regex syntax and supports optional case sensitivity
     { offset: 7, length: 6, end: 13 },
   ]);
   assert.throws(() => findRepositoryTextMatches(text, "a+b"), /caseSensitive/);
+});
+
+test("search indexing preserves match order and splits highlights around line endings", () => {
+  const text = "ab\r\ncd ab\r\ncd";
+  const lines = splitRepositoryText(text);
+  const spanning = indexRepositoryTextMatches(lines, findRepositoryTextMatches(text, "b\r\nc", true));
+  assert.deepEqual(spanning.firstLines, [1, 2]);
+  assert.deepEqual([...spanning.matchesByLine], [
+    [1, [{ offset: 1, length: 1, id: "match-0-1" }]],
+    [2, [{ offset: 0, length: 1, id: "match-0-1" }, { offset: 4, length: 1, id: "match-1-8" }]],
+    [3, [{ offset: 0, length: 1, id: "match-1-8" }]],
+  ]);
+  const endings = indexRepositoryTextMatches(lines, findRepositoryTextMatches(text, "\r\n", true));
+  assert.deepEqual(endings.firstLines, [1, 2]);
+  assert.equal(endings.matchesByLine.size, 0);
 });
 
 test("whitespace visibility changes only the visual string", () => {

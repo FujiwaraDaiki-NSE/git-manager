@@ -41,20 +41,22 @@ export function splitPatchByFile(patch) {
 
 /**
  * @param {PatchSection} section
- * @returns {{ additions: number, deletions: number, binary: boolean, hasTextLines: boolean }}
+ * @returns {{ additions: number, deletions: number, binary: boolean, hasTextLines: boolean, hasCombinedHunk: boolean }}
  */
 export function summarizePatchSection(section) {
   let additions = 0;
   let deletions = 0;
   let binary = false;
   let hasTextLines = false;
+  let hasCombinedHunk = false;
   for (const line of section.lines) {
     if (line.kind === "addition") additions += 1;
     if (line.kind === "deletion") deletions += 1;
     if (BINARY_LINE.test(line.text)) binary = true;
     if (line.kind === "context" || line.kind === "addition" || line.kind === "deletion") hasTextLines = true;
+    if (line.kind === "hunk" && line.text.startsWith("@@@")) hasCombinedHunk = true;
   }
-  return { additions, deletions, binary, hasTextLines };
+  return { additions, deletions, binary, hasTextLines, hasCombinedHunk };
 }
 
 /**

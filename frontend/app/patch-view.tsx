@@ -7,7 +7,6 @@ import { parsePatch } from "./parse-patch.mjs";
 import { findPatchMatches, selectPatchRows, splitPatchByFile, summarizePatchSection } from "./patch-tools.mjs";
 import {
   buildVisiblePatch,
-  classifyPatchSection,
   filterPatchReviewEntries,
   patchReviewProgress,
   sortPatchReviewEntries,
@@ -46,20 +45,47 @@ function scrollToPatchRow(container: HTMLDivElement | null, lineIndex: number, f
   if (focus) row.focus({ preventScroll: true });
 }
 
-function PatchText({ text, matches, activeMatchId }: { text: string; matches: PatchMatch[]; activeMatchId: string | null }) {
-  if (matches.length === 0) return <>{text}</>;
+function PatchText({ line, matches, activeMatchId, showWhitespace }: { line: PatchSection["lines"][number]; matches: PatchMatch[]; activeMatchId: string | null; showWhitespace: boolean }) {
+  const { text, prefixLength } = line;
+  const decorate = showWhitespace && prefixLength > 0;
+  if (!decorate && matches.length === 0) return <>{text}</>;
+
+  const bodyEnd = text.endsWith("\r") ? text.length - 1 : text.length;
+  let trailingStart = bodyEnd;
+  if (decorate) {
+    while (trailingStart > prefixLength && (text[trailingStart - 1] === " " || text[trailingStart - 1] === "\t")) trailingStart--;
+  }
+  // Search offsets include the prefix. Decorate only the body inside each raw slice.
+  const renderText = (start: number, end: number) => {
+    if (!decorate) return text.slice(start, end);
+    const pieces: React.ReactNode[] = [];
+    let cursor = start;
+    for (let index = Math.max(start, prefixLength); index < Math.min(end, bodyEnd); index++) {
+      const character = text[index];
+      if (character !== "\t" && (character !== " " || index < trailingStart)) continue;
+      if (cursor < index) pieces.push(text.slice(cursor, index));
+      pieces.push(<span className="patch-whitespace" data-symbol={character === "\t" ? "→" : "·"} key={index}>{character}</span>);
+      cursor = index + 1;
+    }
+    if (cursor < end) pieces.push(text.slice(cursor, end));
+    return pieces;
+  };
+
   const pieces: React.ReactNode[] = [];
   let cursor = 0;
   matches.forEach((match, index) => {
-    if (match.offset > cursor) pieces.push(text.slice(cursor, match.offset));
-    pieces.push(<mark className={`patch-match${activeMatchId === match.id ? " patch-match-active" : ""}`} aria-current={activeMatchId === match.id ? "true" : undefined} key={`${match.id}-${index}`}>{text.slice(match.offset, match.offset + match.length)}</mark>);
+    if (match.offset > cursor) pieces.push(renderText(cursor, match.offset));
+    pieces.push(<mark className={`patch-match${activeMatchId === match.id ? " patch-match-active" : ""}`} aria-current={activeMatchId === match.id ? "true" : undefined} key={`${match.id}-${index}`}>{renderText(match.offset, match.offset + match.length)}</mark>);
     cursor = match.offset + match.length;
   });
-  if (cursor < text.length) pieces.push(text.slice(cursor));
+  if (cursor < text.length) pieces.push(renderText(cursor, text.length));
+  if (decorate && bodyEnd === prefixLength) {
+    pieces.push(<span className="patch-whitespace" data-symbol="∅" aria-hidden="true" key="empty" />);
+  }
   return <>{pieces}</>;
 }
 
-function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBySide }: { section: PatchSection; wrap: boolean; changedOnly: boolean; matches: PatchMatch[]; activeMatchId: string | null; sideBySide: boolean }) {
+function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBySide, showWhitespace }: { section: PatchSection; wrap: boolean; changedOnly: boolean; matches: PatchMatch[]; activeMatchId: string | null; sideBySide: boolean; showWhitespace: boolean }) {
   const [limit, setLimit] = useState(PATCH_PAGE_LINES);
   const containerRef = useRef<HTMLDivElement>(null);
   const focusRow = useRef<number | null>(null);
@@ -124,10 +150,10 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBy
       {sideBySide ? <div className="patch-side-by-side">
         <div className="patch-side-heading"><span>変更前</span><span>変更後</span></div>
         {sideBySideRows(selectedLines.slice(0, count)).map((pair, index) => <div className="patch-side-row" key={index}>
-          {pair.shared ? <pre className={`patch-side-shared patch-${pair.shared.line.kind}`} data-patch-row={pair.shared.lineIndex} tabIndex={-1}><PatchText text={pair.shared.line.text} matches={lineMatches.get(pair.shared.lineIndex) ?? []} activeMatchId={activeMatchId} /></pre>
+          {pair.shared ? <pre className={`patch-side-shared patch-${pair.shared.line.kind}`} data-patch-row={pair.shared.lineIndex} tabIndex={-1}><PatchText line={pair.shared.line} matches={lineMatches.get(pair.shared.lineIndex) ?? []} activeMatchId={activeMatchId} showWhitespace={showWhitespace} /></pre>
             : [pair.left, pair.right].map((row, side) => <div key={side} className={`patch-side-cell${row ? ` patch-${row.line.kind}` : " patch-side-empty"}${row?.lineIndex === activeMatch?.lineIndex ? " patch-line-active" : ""}`} data-patch-row={row?.lineIndex} tabIndex={-1}>
               <span className="patch-number" aria-hidden="true">{row ? side === 0 ? row.line.oldLine : row.line.newLine : null}</span>
-              <pre className="patch-side-text">{row && <PatchText text={row.line.text} matches={lineMatches.get(row.lineIndex) ?? []} activeMatchId={activeMatchId} />}</pre>
+              <pre className="patch-side-text">{row && <PatchText line={row.line} matches={lineMatches.get(row.lineIndex) ?? []} activeMatchId={activeMatchId} showWhitespace={showWhitespace} />}</pre>
             </div>)}
         </div>)}
       </div> : <>      <pre>{selectedLines.slice(0, count).map(({ line, lineIndex }) => {
@@ -135,7 +161,7 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBy
         return <span className={`patch-line patch-${line.kind}${activeMatch?.lineIndex === lineIndex ? " patch-line-active" : ""}`} data-patch-row={lineIndex} tabIndex={-1} key={lineIndex} data-patch-active={activeMatch?.lineIndex === lineIndex ? "true" : undefined}>
           <span className="patch-number" aria-hidden="true">{line.oldLine}</span>
           <span className="patch-number" aria-hidden="true">{line.newLine}</span>
-          <span className="patch-text"><PatchText text={line.text} matches={matchesForLine} activeMatchId={activeMatchId} />{lineIndex < section.lines.length - 1 ? "\n" : ""}</span>
+          <span className="patch-text"><PatchText line={line} matches={matchesForLine} activeMatchId={activeMatchId} showWhitespace={showWhitespace} />{lineIndex < section.lines.length - 1 ? "\n" : ""}</span>
         </span>;
       })}</pre></>}
 
@@ -152,8 +178,8 @@ function PatchLines({ section, wrap, changedOnly, matches, activeMatchId, sideBy
 
 function FileSummary({ section }: { section: PatchSection }) {
   const summary = summarizePatchSection(section);
-  const kind = classifyPatchSection(section);
-  if (kind === "binary") return <span className="patch-file-summary patch-file-summary-empty" aria-label="バイナリ差分（テキスト行なし）"><span className="patch-file-stat patch-file-stat-binary">バイナリ</span><span>テキスト行なし</span></span>;
+  if (summary.binary) return <span className="patch-file-summary patch-file-summary-empty" aria-label="バイナリ差分（テキスト行なし）"><span className="patch-file-stat patch-file-stat-binary">バイナリ</span><span>テキスト行なし</span></span>;
+  if (summary.hasCombinedHunk) return <span className="patch-file-summary"><span className="patch-file-stat">複数親の差分</span></span>;
   if (!summary.hasTextLines || (summary.additions === 0 && summary.deletions === 0)) return <span className="patch-file-summary patch-file-summary-empty" aria-label="テキスト差分なし"><span className="patch-file-stat">テキスト差分なし</span></span>;
   return <span className="patch-file-summary" aria-label={`追加 ${summary.additions} 行、削除 ${summary.deletions} 行`}>
     <span className="patch-file-stat patch-file-stat-addition"><strong aria-hidden="true">＋</strong>{summary.additions.toLocaleString()}</span>
@@ -166,6 +192,7 @@ export default function PatchView({ patch }: { patch: string }) {
   const sectionPatches = useMemo(() => splitPatchByFile(patch), [patch]);
   const indexedSections = useMemo<PatchReviewEntry[]>(() => sections.map((section, index) => ({ section, index })), [sections]);
   const [wrap, setWrap] = useState(false);
+  const [showWhitespace, setShowWhitespace] = useState(false);
   const [layout, setLayout] = useState("unified");
   const [wide, setWide] = useState(false);
   useEffect(() => { const media = window.matchMedia("(min-width: 900px)"); const update = () => setWide(media.matches); update(); media.addEventListener("change", update); return () => media.removeEventListener("change", update); }, []);
@@ -296,6 +323,7 @@ export default function PatchView({ patch }: { patch: string }) {
       <span className="patch-legend"><span>＋ 追加</span><span>− 削除</span></span>
       <button type="button" aria-pressed={changedOnly} onClick={() => setChangedOnly((value) => !value)}>{changedOnly ? "すべての行を表示" : "変更行のみ"}</button>
       <button type="button" aria-pressed={wrap} onClick={() => setWrap((value) => !value)}>行を折り返す</button>
+      <button type="button" aria-pressed={showWhitespace} title="∅ 空行、→ タブ、· 行末の半角空白" onClick={() => setShowWhitespace((value) => !value)}>空白を可視化</button>
       <details className="patch-advanced"><summary>詳細</summary>      {sections.length > 1 && <div className="patch-review-controls" aria-label="差分ファイルの表示設定">
         <label>内容<select value={fileKind} onChange={(event) => setFileKind(event.target.value as PatchFileKind)}>
           <option value="all">すべて</option>
@@ -345,7 +373,7 @@ export default function PatchView({ patch }: { patch: string }) {
             </button>
             <span className="patch-file-copy" onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={(event) => event.stopPropagation()}><CopyButton value={rawSection} label={`${section.title} の差分をコピー`} /></span>
           </summary>
-          {expanded.has(index) && <PatchLines sideBySide={wide && layout === "side-by-side"} section={section} wrap={wrap} changedOnly={changedOnly} matches={sectionMatches} activeMatchId={activeMatchId} />}
+          {expanded.has(index) && <PatchLines sideBySide={wide && layout === "side-by-side"} section={section} wrap={wrap} changedOnly={changedOnly} matches={sectionMatches} activeMatchId={activeMatchId} showWhitespace={showWhitespace} />}
         </details>;
       })}
     </div>

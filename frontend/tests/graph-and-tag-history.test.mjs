@@ -7,10 +7,13 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import * as branchRelation from "../app/branch-relation.mjs";
+import * as investigationPresets from "../app/investigation-presets-tools.mjs";
+import * as reflogTools from "../app/reflog-explorer-tools.mjs";
+import * as reflogInvestigation from "../app/reflog-investigation-tools.mjs";
 import * as tagTools from "../app/tag-explorer-tools.mjs";
 import * as tagInvestigation from "../app/tag-investigation-tools.mjs";
 
-function componentHarness(filename, dependencies, fetch) {
+function componentHarness(filename, dependencies, fetch, window) {
   const source = new URL(`../app/${filename}`, import.meta.url);
   const require = createRequire(source);
   const compiled = ts.transpileModule(readFileSync(source, "utf8"), {
@@ -28,13 +31,17 @@ function componentHarness(filename, dependencies, fetch) {
     useEffect() {},
     useMemo: (compute) => compute(),
     useCallback: (callback) => callback,
-    useRef: (current) => ({ current }),
+    useRef(current) {
+      const index = cursor++;
+      if (!(index in state)) state[index] = { current };
+      return state[index];
+    },
   };
-  new Function("require", "exports", "fetch", compiled.outputText)((id) => {
+  new Function("require", "exports", "fetch", "window", compiled.outputText)((id) => {
     if (id === "react") return hooks;
     if (id.endsWith(".css")) return {};
     return dependencies[id] ?? require(id);
-  }, exports, fetch);
+  }, exports, fetch, window);
   return (props) => {
     cursor = 0;
     return exports.default(props);
@@ -109,6 +116,88 @@ test("graph navigates to each loaded child, including a merge's second-parent li
   assert.deepEqual(selected, [first.hash, merge.hash]);
   assert.deepEqual(focused, [`graph-row-${first.hash}`, `graph-row-${merge.hash}`]);
   assert.match(renderToStaticMarkup(childGroup(first.hash)), /取得範囲内に子コミットはありません/);
+});
+
+test("graph jumps to a unique SHA prefix and waits for a choice on multiple matches", (t) => {
+  const graphView = componentHarness("graph-view.tsx", { "./branch-relation.mjs": branchRelation });
+  const row = (hash) => ({
+    hash, short: hash.slice(0, 7), subject: hash, parents: [], refs: [], lane: 0,
+    through: [], in_lanes: [], out_lanes: [], is_merge: false,
+  });
+  const rows = [row("c154700" + "a".repeat(33)), row("c156911" + "b".repeat(33))];
+  const selected = [];
+  const focused = [];
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    getElementById: (id) => ({ focus: () => focused.push(id) }),
+  } });
+  t.after(() => {
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else delete globalThis.document;
+  });
+  const render = () => graphView({ rows, maxLane: 0, onSelect: (hash) => selected.push(hash) });
+  const search = (value) => {
+    findNode(render(), (node) => node.props.type === "search").props.onChange({ target: { value } });
+    findNode(render(), (node) => node.type === "form").props.onSubmit({ preventDefault() {} });
+  };
+
+  search(" C154700 ");
+  assert.deepEqual(selected, [rows[0].hash]);
+  search("c15");
+  const choices = findNode(render(), (node) => node.props["aria-label"] === "SHAの移動先候補");
+  assert.equal(choices.props.children.length, 2);
+  assert.deepEqual(selected, [rows[0].hash]);
+  choices.props.children[1].props.children.props.onClick();
+  assert.deepEqual(selected, rows.map((item) => item.hash));
+  assert.deepEqual(focused, rows.map((item) => `graph-row-${item.hash}`));
+
+  search("e1fc8b8");
+  assert.match(renderToStaticMarkup(render()), /現在の取得範囲（2件）にありません/);
+  assert.equal(selected.length, 2);
+});
+
+test("reflog comparison uses the explicitly chosen rows across filters and clears on ref change", async () => {
+  const path = "/repos/gitdash";
+  const current = new URL("http://localhost/project?tab=info&range=30d&home=%2F%3Fq%3Dgit&investigation=compare&investigationBase=old#reflog");
+  current.searchParams.set("path", path);
+  const base = { hash: "a".repeat(40), selector: "HEAD@{1}", message: "commit: change", actor: null, date: null };
+  const target = { ...base, hash: "b".repeat(40), selector: "HEAD@{0}", message: "reset: moving to HEAD~1" };
+  const reflogExplorer = componentHarness("reflog-explorer.tsx", {
+    "./commit-files": { default: () => null },
+    "./copy-button": { default: () => null },
+    "./patch-view": { default: () => null },
+    "./investigation-presets-tools.mjs": investigationPresets,
+    "./reflog-explorer-tools.mjs": reflogTools,
+    "./reflog-investigation-tools.mjs": reflogInvestigation,
+  }, async () => ({ ok: true, json: async () => ({ ref: "HEAD", records: [target, base], available: true, truncated: false }) }), { location: current });
+  const find = (predicate) => findNode(reflogExplorer({ path }), predicate);
+  const change = (label, value) => find((node) => node.props["aria-label"] === label).props.onChange({ target: { value } });
+  const button = (label) => find((node) => node.type === "button" && node.props.children === label);
+  const link = () => find((node) => node.type === "a" && node.props.children === "直接比較を開く");
+  change("reflogを調べるref", "HEAD");
+  button("このrefを調査").props.onClick();
+  await setImmediate();
+
+  change("reflogを検索", base.hash);
+  button("比較元").props.onClick();
+  assert.equal(button("比較先").props.disabled, true);
+  assert.equal(link(), undefined);
+  change("reflogを検索", target.hash);
+  button("カード").props.onClick();
+  button("比較先").props.onClick();
+
+  const url = new URL(link().props.href, "http://localhost");
+  assert.equal(url.pathname, "/project");
+  assert.equal(url.hash, "#commit-compare");
+  assert.equal(url.searchParams.get("path"), path);
+  assert.equal(url.searchParams.get("tab"), "info");
+  assert.equal(url.searchParams.get("range"), "30d");
+  assert.equal(url.searchParams.get("home"), "/?q=git");
+  assert.deepEqual(investigationPresets.parseInvestigationUrl(url.search).values, {
+    base: base.hash, target: target.hash, mode: "direct",
+  });
+  change("reflogを調べるref", "refs/heads/main");
+  assert.equal(link(), undefined);
 });
 
 test("tag comparison preserves explicit order across searches and uses only commit target hashes", async () => {

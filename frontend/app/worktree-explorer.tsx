@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import CopyButton from "./copy-button";
+import { agentStateLabel } from "./agent-overview.mjs";
 import { buildInvestigationShareUrl } from "./investigation-presets-tools.mjs";
 import type { ProjectLane, ProjectResponse } from "./types";
 import {
@@ -9,6 +10,7 @@ import {
   buildWorktreeInventory,
   filterWorktreeInventory,
   hasComparableWorktreeHead,
+  worktreeAgentReport,
   worktreeBranchKey,
   worktreeCdCommands,
   sortWorktreeInventory,
@@ -412,6 +414,7 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
           const tokens = worktreeStateTokens(row.worktree);
           const cd = worktreeCdCommand(row.worktree);
           const lane = row.lane;
+          const agent = worktreeAgentReport(row);
           return (
             <article className={`worktree-explorer-card state-${state} health-${health} sync-${sync}`} key={`${row.worktree.path}:${index}`}>
               <div className="worktree-explorer-card-marker" aria-hidden="true" />
@@ -436,6 +439,7 @@ export default function WorktreeExplorer({ project, onOpenGit, onSelectLane }: W
                   <span><b>HEAD</b> {worktreeHeadLabel(row)}</span>
                   {lane ? <span title={lane.path ?? undefined}><b>作業ブランチ</b> {lane.name}</span> : <span className="is-unknown"><b>作業ブランチ</b> 対応する作業情報なし</span>}
                   <span className={sync === "unknown" ? "is-unknown" : undefined}><b>同期</b> {upstreamFactLabel(row)}</span>
+                  {agent !== null && <span className="worktree-explorer-agent"><b>agent</b> {agentStateLabel(agent.status)}{agent.summary && <> · {agent.summary}</>}</span>}
                 </div>
               </div>
               <div className="worktree-explorer-card-actions">

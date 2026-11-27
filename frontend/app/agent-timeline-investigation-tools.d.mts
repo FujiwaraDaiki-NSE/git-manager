@@ -55,6 +55,7 @@ export function filterTimelineCurrentRows(rows: TimelineCurrentRow[], options: T
 export function filterTimelineHistoryEvents(events: AgentEvent[], options: TimelineFilterOptions, projectById: Map<string, ProjectSummary>): AgentEvent[];
 export function sortTimelineHistory(events: AgentEvent[], sort: "newest" | "oldest"): AgentEvent[];
 export function timelineDecisionChanges(events: AgentEvent[]): Map<string, TimelineDecisionChange[]>;
+export function timelinePreviousStatuses(events: AgentEvent[]): Map<string, string>;
 export function timelineHistoryDetails(events: AgentEvent[], options: TimelineFilterOptions, projectById: Map<string, ProjectSummary>): TimelineHistoryDetails;
 export function timelineHistoryCsv(events: AgentEvent[]): string;
 export function filterTimelineSnapshot(snapshot: { currentRows: TimelineCurrentRow[]; history: AgentEvent[] }, options: TimelineFilterOptions, projectById: Map<string, ProjectSummary>): { currentRows: TimelineCurrentRow[]; history: AgentEvent[]; dateWindow: TimelineDateWindow };

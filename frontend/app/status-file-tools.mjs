@@ -12,7 +12,6 @@ export const STATUS_FILE_EXTENSION_ALL = "all";
 export const STATUS_FILE_EXTENSION_NONE = "none";
 export const STATUS_FILE_ORDERS = ["asc", "desc"];
 
-const conflictCodes = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
 const changeCodes = new Set(["A", "M", "D", "R", "C", "T"]);
 
 function pathDirectory(path) {
@@ -136,7 +135,7 @@ function entryKind(entry) {
   if (entry.xy === "??") return "untracked";
   // Rename/copy requires the source supplied by the status snapshot.
   if (/[RC]/.test(entry.xy) && (typeof entry.original_path !== "string" || entry.original_path.length === 0)) return "unsupported";
-  if (conflictCodes.has(entry.xy)) return "conflict";
+  if (fileStatusGroups(entry.xy).conflict) return "conflict";
   if (
     (entry.xy[0] === "." || changeCodes.has(entry.xy[0]))
     && (entry.xy[1] === "." || changeCodes.has(entry.xy[1]))
@@ -161,6 +160,13 @@ function literalPathspec(path) {
 export function buildUntrackedDirectoryCommand(repoPath, entry) {
   if (entryKind(entry) !== "untracked" || !entry.path.endsWith("/") || entry.path.includes("\uFFFD")) return null;
   return `git -C ${shellQuote(repoPath)} ls-files --others --exclude-standard -- ${literalPathspec(entry.path)}`;
+}
+
+export function buildUntrackedFileDiffCommand(repoPath, entry) {
+  if (entryKind(entry) !== "untracked" || entry.path.endsWith("/") || entry.path.includes("\uFFFD")) return null;
+  // Git reads stdin for a bare "-" even after "--".
+  const path = entry.path === "-" ? "./-" : entry.path;
+  return `git -C ${shellQuote(repoPath)} diff --no-index -- /dev/null ${shellQuote(path)}`;
 }
 
 export function canUnstageStatusFile(hasHead, entry) {

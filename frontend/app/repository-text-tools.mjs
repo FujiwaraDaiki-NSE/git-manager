@@ -124,6 +124,27 @@ export function repositoryTextLineAtOffset(lines, offset) {
   return lines[lines.length - 1].number;
 }
 
+/** Index a search result once for highlighting and for navigation to its first line. */
+export function indexRepositoryTextMatches(lines, matches) {
+  const matchesByLine = new Map();
+  const firstLines = matches.map((match, index) => {
+    const firstLine = repositoryTextLineAtOffset(lines, match.offset);
+    const lastLine = repositoryTextLineAtOffset(lines, match.end - 1);
+    if (firstLine === null || lastLine === null) return null;
+    const id = `match-${index}-${match.offset}`;
+    for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber += 1) {
+      const line = lines[lineNumber - 1];
+      const start = Math.max(line.start, match.offset);
+      const end = Math.min(line.end, match.end);
+      if (start >= end) continue;
+      if (!matchesByLine.has(lineNumber)) matchesByLine.set(lineNumber, []);
+      matchesByLine.get(lineNumber).push({ offset: start - line.start, length: end - start, id });
+    }
+    return firstLine;
+  });
+  return { firstLines, matchesByLine };
+}
+
 /** Convert only the visual representation; callers must keep the original text for copying. */
 export function visibleRepositoryWhitespace(value, visible) {
   requiredString(value, "value");
