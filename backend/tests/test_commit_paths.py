@@ -24,10 +24,12 @@ def test_commit_preserves_filenames_and_rename_pairs(tmp_path):
         (tmp_path / name).write_text('new content\n')
     (tmp_path / 'binary.bin').write_bytes(b'\0\1\2')
     git(tmp_path, 'add', '.')
-    git(tmp_path, 'commit', '-qm', '日本語の変更\x1f区切り文字も保持')
+    body = '変更理由\n\n- 名前を保持\n- 区切り文字\x1fを保持\n'
+    git(tmp_path, 'commit', '-qm', '日本語の変更\x1f区切り文字も保持', '-m', body)
     result = detail.get_commit(str(tmp_path), git(tmp_path, 'rev-parse', 'HEAD').strip())
     assert result is not None
     assert result['subject'] == '日本語の変更\x1f区切り文字も保持'
+    assert result['body'] == body
     files = {file['path']: file for file in result['files']}
     assert set(files) == {*names, renamed, 'binary.bin'}
     assert files[renamed]['old_path'] == old
@@ -45,6 +47,7 @@ def test_empty_commit_has_no_files(tmp_path):
     git(tmp_path, 'commit', '--allow-empty', '-qm', 'empty')
     result = detail.get_commit(str(tmp_path), git(tmp_path, 'rev-parse', 'HEAD').strip())
     assert result is not None
+    assert result['body'] == ''
     assert result['files'] == []
     assert result['parents'] == []
     assert result['patch'] == ''

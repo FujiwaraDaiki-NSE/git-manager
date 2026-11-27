@@ -90,7 +90,8 @@ def test_recovery_candidates_with_unborn_head(tmp_path, monkeypatch):
     assert client.get(endpoint, params={'path': path}).status_code == 502
 
 
-def test_commit_content_search_pages_matching_changes_at_fixed_shas(investigation):
+@pytest.mark.parametrize(('mode', 'option'), [('content', '-S'), ('diff-regex', '-G')])
+def test_commit_content_search_pages_matching_changes_at_fixed_shas(investigation, mode, option):
     from pathlib import Path
 
     client, path, _, _, _, git = investigation
@@ -101,24 +102,27 @@ def test_commit_content_search_pages_matching_changes_at_fixed_shas(investigatio
         git('commit', '-am', f'change {i}')
     source.write_text(f'{needle}\nanchor\n')
     git('commit', '-am', 'add flag')
-    source.write_text(f'anchor\n{needle}\n')
-    git('commit', '-am', 'move flag')
+    source.write_text(f'rewritten {needle}\nanchor\n')
+    git('commit', '-am', 'rewrite flag without changing its count')
+    rewrite = git('rev-parse', 'HEAD')
     git('commit', '--allow-empty', '-m', needle)
-    params = dict(path=path, scope='main', grep=needle, author='API Test', since_at='', until_at='', file='file.txt', offset=0)
+    pattern = needle if mode == 'content' else r"flag 'value'[.]\[1\]$"
+    params = dict(path=path, scope='main', grep=pattern, author='API Test', since_at='', until_at='', file='file.txt', offset=0)
     endpoint = '/api/repo/commit-search'
     assert client.get(endpoint, params=params).status_code == 422
     assert client.get(endpoint, params={**params, 'mode': 'invalid'}).status_code == 422
     message = client.get(endpoint, params={**params, 'mode': 'message'}).json()
     assert message['commits'] == []
-    expected = git('log', '--format=%H', f'-S{needle}', 'main', '--', 'file.txt').splitlines()
-    assert len(expected) == 53
-    response = client.get(endpoint, params={**params, 'mode': 'content'})
+    expected = git('log', '--format=%H', f'{option}{pattern}', 'main', '--', 'file.txt').splitlines()
+    assert len(expected) == (53 if mode == 'content' else 54)
+    assert (rewrite in expected) == (mode == 'diff-regex')
+    response = client.get(endpoint, params={**params, 'mode': mode})
     assert response.status_code == 200, response.text
     first = response.json()
     assert first['has_more']
     source.write_text('removed after search\n')
     git('commit', '-am', 'advance main')
-    response = client.post(endpoint, json={**params, 'mode': 'content', 'offset': 50, 'fixed_shas': first['fixed_shas']})
+    response = client.post(endpoint, json={**params, 'mode': mode, 'offset': 50, 'fixed_shas': first['fixed_shas']})
     assert response.status_code == 200, response.text
     second = response.json()
     assert not second['has_more']
@@ -127,6 +131,17 @@ def test_commit_content_search_pages_matching_changes_at_fixed_shas(investigatio
     for page in (first, second):
         lines = subprocess.check_output(['bash', '-c', page['command']], cwd=path, text=True).splitlines()
         assert [line.split()[0] for line in lines] == [git('rev-parse', '--short', commit['hash']) for commit in page['commits']]
+
+
+def test_invalid_diff_regex_is_a_client_error(investigation):
+    client, path, _, _, _, _ = investigation
+    endpoint = '/api/repo/commit-search'
+    params = dict(path=path, scope='main', mode='diff-regex', grep='[', author='',
+                  since_at='', until_at='', file='', offset=0)
+    for response in (client.get(endpoint, params=params), client.post(endpoint, json={**params, 'fixed_shas': []})):
+        assert response.status_code == 422
+        assert response.json() == {'detail': '正規表現を確認してください'}
+    assert client.get(endpoint, params={**params, 'mode': 'content'}).status_code == 200
 
 
 def test_branch_pairs_are_loaded_separately_without_changing_relations(investigation, monkeypatch, tmp_path_factory):

@@ -6,7 +6,7 @@ from app import investigation, compare
 from pydantic import BaseModel, Field
 
 
-CommitSearchMode = Literal["message", "content"]
+CommitSearchMode = Literal["message", "content", "diff-regex"]
 
 
 class CommitSearchPage(BaseModel):

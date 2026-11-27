@@ -30,11 +30,11 @@ def valid_hash(value: str) -> bool:
 
 
 def _parse_numstat(raw: str) -> dict[str, Any] | None:
-    header = raw.split("\0", 5)
-    if len(header) != 6 or not header[0]:
+    header = raw.split("\0", 6)
+    if len(header) != 7 or not header[0]:
         return None
-    commit_hash, subject, author, date, parents, body = header
-    records = iter(body.removeprefix("\n").split("\0"))
+    commit_hash, subject, author, date, parents, body, numstat = header
+    records = iter(numstat.removeprefix("\n").split("\0"))
     files: list[dict[str, Any]] = []
     for record in records:
         if not record:
@@ -66,6 +66,7 @@ def _parse_numstat(raw: str) -> dict[str, Any] | None:
     return {
         "hash": commit_hash,
         "subject": subject,
+        "body": body,
         "author": author,
         "date": date,
         "parents": parents.split() if parents else [],
@@ -93,7 +94,7 @@ def get_commit(repo: str, commit_hash: str) -> dict[str, Any] | None:
             "--no-textconv",
             "--numstat",
             "-z",
-            "--format=%H%x00%s%x00%an%x00%cI%x00%P",
+            "--format=%H%x00%s%x00%an%x00%cI%x00%P%x00%b",
             commit_hash,
         ],
     )

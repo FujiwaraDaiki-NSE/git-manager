@@ -3,6 +3,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from app import detail, project
 
 
@@ -336,27 +338,38 @@ def test_project_preserves_each_octopus_source_parent_as_a_relation(tmp_path: Pa
     assert len(release["merge_targets"]) == 2
 
 
-def test_project_keeps_multiple_merges_on_one_source_lane(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("second_merge_date", "expected_target"),
+    [("2026-01-01T00:00:02Z", None), ("2026-01-01T00:00:03Z", "staging")],
+    ids=["same-second", "unique-latest"],
+)
+def test_project_keeps_multiple_merges_on_one_source_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, second_merge_date: str, expected_target: str | None
+) -> None:
     repo = tmp_path / "repo"
+    start = "2026-01-01T00:00:00Z"
+    first_merge_date = "2026-01-01T00:00:02Z"
+    monkeypatch.setenv("GIT_AUTHOR_DATE", start)
+    monkeypatch.setenv("GIT_COMMITTER_DATE", start)
     init_repo(repo)
     base = git(repo, "rev-parse", "HEAD").strip()
 
     git(repo, "switch", "-q", "-c", "feature")
     (repo / "feature-v1.txt").write_text("v1\n", encoding="utf-8")
     git(repo, "add", "feature-v1.txt")
-    commit(repo, "feature v1")
+    git_at(repo, "2026-01-01T00:00:01Z", "commit", "-qm", "feature v1")
 
-    git(repo, "switch", "-q", "-c", "release", base)
-    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge v1 into release")
+    git_at(repo, first_merge_date, "switch", "-q", "-c", "release", base)
+    git_at(repo, first_merge_date, "merge", "--no-ff", "-q", "feature", "-m", "merge v1 into release")
     first_merge = git(repo, "rev-parse", "HEAD").strip()
 
-    git(repo, "switch", "-q", "feature")
+    git_at(repo, first_merge_date, "switch", "-q", "feature")
     (repo / "feature-v2.txt").write_text("v2\n", encoding="utf-8")
     git(repo, "add", "feature-v2.txt")
-    commit(repo, "feature v2")
+    git_at(repo, first_merge_date, "commit", "-qm", "feature v2")
 
-    git(repo, "switch", "-q", "-c", "staging", base)
-    git(repo, "merge", "--no-ff", "-q", "feature", "-m", "merge v2 into staging")
+    git_at(repo, second_merge_date, "switch", "-q", "-c", "staging", base)
+    git_at(repo, second_merge_date, "merge", "--no-ff", "-q", "feature", "-m", "merge v2 into staging")
     second_merge = git(repo, "rev-parse", "HEAD").strip()
 
     result = project.build(str(repo), str(repo), {str(repo): {"entries": []}})
@@ -365,7 +378,7 @@ def test_project_keeps_multiple_merges_on_one_source_lane(tmp_path: Path) -> Non
     feature = next(lane for lane in result["lanes"] if lane["branch"] == "feature")
     assert {item["commit_hash"] for item in feature["merge_sources"]} == {first_merge, second_merge}
     assert {item["target_branch"] for item in feature["merge_sources"]} == {"release", "staging"}
-    assert feature["merge_target"] is None
+    assert feature["merge_target"] == expected_target
     assert len(result["merge_relations"]) == 2
     first_relation = next(item for item in result["merge_relations"] if item["commit_hash"] == first_merge)
     assert first_relation["source_branch"] == "feature"

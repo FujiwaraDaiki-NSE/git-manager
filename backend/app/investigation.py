@@ -21,6 +21,25 @@ def run(repo, args):
     return value
 
 
+def _validate_diff_regex(repo, pattern):
+    # diff and log share Git's -G implementation. An empty diff still compiles
+    # the pattern, even when the actual log search would walk no commits.
+    try:
+        result = subprocess.run(
+            [gitinfo.GIT, "-C", repo, "diff", "--no-index", "--quiet", f"-G{pattern}", "--", os.devnull, os.devnull],
+            capture_output=True,
+            timeout=gitinfo.config.GIT_TIMEOUT_SEC,
+            env={**os.environ, **gitinfo.NON_INTERACTIVE_ENV, "LANGUAGE": "C"},
+        )
+    except (subprocess.TimeoutExpired, OSError) as error:
+        raise RuntimeError("Gitの調査結果を取得できませんでした") from error
+    if result.returncode == 0:
+        return
+    if any(line.startswith(b"fatal: invalid regex: ") for line in result.stderr.splitlines()):
+        raise ValueError("正規表現を確認してください")
+    raise RuntimeError("Gitの調査結果を取得できませんでした")
+
+
 def records(raw, columns):
     fields = raw.split("\0")
     if fields[-1].strip():
@@ -119,9 +138,12 @@ def search(repo, scope, grep, author, since_at, until_at, file, offset, mode, fi
             if checked.stdout.splitlines() != ["commit"] * len(revision):
                 raise InvalidSearchSnapshot("fixed_shas に存在しない、またはcommitではないSHAがあります")
     args = ["log", *revision]
-    pickaxe = mode == "content" and grep != ""
+    pickaxe = mode in ("content", "diff-regex") and grep != ""
     if pickaxe:
-        args.extend(["--no-textconv", f"-S{grep}"])
+        if mode == "diff-regex":
+            _validate_diff_regex(repo, grep)
+        option = "-S" if mode == "content" else "-G"
+        args.extend(["--no-textconv", f"{option}{grep}"])
     elif grep:
         args.append(f"--grep={grep}")
     if author:
@@ -130,7 +152,7 @@ def search(repo, scope, grep, author, since_at, until_at, file, offset, mode, fi
         args.append(f"--since-as-filter={since.isoformat()}")
     if until is not None:
         args.append(f"--until={until.isoformat()}")
-    # Git applies --skip before -S filters the history. Slice the matches instead.
+    # Git applies --skip before pickaxe filters the history. Slice the matches instead.
     limit = PAGE_SIZE + offset if pickaxe else PAGE_SIZE
     if not pickaxe:
         args.append(f"--skip={offset}")
