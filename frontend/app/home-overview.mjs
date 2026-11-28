@@ -1,6 +1,28 @@
 import { isAcknowledged } from "./agent-acknowledgements.mjs";
 import { AGENT_DECISION_STATUSES, agentReportFreshness } from "./agent-timeline-tools.mjs";
 import { agentTaskState, projectLatestTime, sortProjects } from "./agent-overview.mjs";
+import { githubRepositoryKey } from "./remote-label.mjs";
+
+/** @param {import("./types").ProjectSummary[]} projects */
+export function githubCloneGroupsByProject(projects) {
+  /** @type {Map<string, { id: string, main_path: string }[]>} */
+  const groups = new Map();
+  for (const { id, main_path, remote, remote_status } of projects) {
+    if (main_path === null || remote_status !== "configured") continue;
+    const key = githubRepositoryKey(remote);
+    if (key === null) continue;
+    const clone = { id, main_path };
+    const group = groups.get(key);
+    if (group) group.push(clone);
+    else groups.set(key, [clone]);
+  }
+  const byProject = new Map();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    for (const { id } of group) byProject.set(id, group);
+  }
+  return byProject;
+}
 
 export const AGENT_SUMMARY_KEYS = [
   "waiting_for_user",

@@ -1,6 +1,12 @@
 export const UNKNOWN_FILE_HISTORY_AUTHOR_FILTER = "__gitdash_file_history_unknown_author__";
 export const FILE_HISTORY_AUTHOR_FILTER_PREFIX = "__gitdash_file_history_author__:";
 
+/** @param {{status: string | null, parents: string[], path: string | null}} record */
+export function deletedFileSource(record) {
+  if (record.status !== "D" || record.parents.length !== 1 || !record.path) return null;
+  return { revision: record.parents[0], file: record.path };
+}
+
 function knownAuthor(value) {
   return typeof value === "string" && value.length > 0;
 }

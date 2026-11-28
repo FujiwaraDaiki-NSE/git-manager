@@ -23,11 +23,18 @@ test("comparison sources load the two pinned file paths and show each response i
     },
     useEffect(effect) { current.cleanup ??= effect(); },
   };
-  new Function("require", "exports", "fetch", outputText)((id) => {
+  const requireModule = (id) => {
     if (id === "react") return hooks;
     if (id === "./repository-files-tools.mjs") return repositoryFilesTools;
+    if (id === "./repository-file-source") return sourceExports;
     return id.startsWith("./") ? {} : require(id);
-  }, exports, fetch);
+  };
+  const sourceExports = {};
+  const fileSource = ts.transpileModule(readFileSync(new URL("../app/repository-file-source.tsx", import.meta.url), "utf8"), {
+    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS },
+  });
+  new Function("require", "exports", "fetch", fileSource.outputText)(requireModule, sourceExports, fetch);
+  new Function("require", "exports", outputText)(requireModule, exports);
 
   function openRow(file) {
     const view = exports.ComparisonFileSources({

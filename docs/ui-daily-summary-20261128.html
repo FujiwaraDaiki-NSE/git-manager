@@ -1,0 +1,55 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>UI改善 2026-11-28</title><style>body{font:16px/1.7 system-ui;max-width:1100px;margin:32px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
+<h1>コミット本文・SHA移動・reflog比較・-G検索・別クローン・agent状態の読みやすさ — 2026-11-28</h1>
+<p>「再起動直後のfetch殺到」は 2026-11-21 に解消済みです。今朝の再ビルド直後は、最初の1リクエストだけ git-manager /api/project 3.5秒（起動時refreshの窓。既知の残り）、その後は fetch 中（git 5〜8プロセス）でも design_db 0.39〜1.95秒・git-manager 0.06〜1.12秒、/api/health 4ms以下でした。開始時30点 + 検証済み加点82点 = 112点 → 100点（上限）。加点基準による評価であり、客観的な品質保証ではありません。</p>
+
+<h2>高速化（+5 × 1）</h2>
+<table><tr><th>内容</th><th>実測</th></tr>
+<tr><td>版のファイル本文検索の「次へ／前へ」で、全一致の行位置を毎回計算し直さない</td><td>b0f08e9 <code>frontend/app/globals.css</code>（3,327行・半角空白7,704件）、同一Chromiumで「次へ」20回の中央値: DOM更新 13.80 → 0.90ms（CPU 4倍低速化時 57.6 → 4.05ms、次フレームまで 62.8 → 16.6ms）。通常CPUでは次フレームまでの時間はほぼ同じ。本番画面で 1 → 21 / 7704件と順に進むことを確認</td></tr>
+</table>
+
+<h2>機能追加（+5 × 13）</h2>
+<table><tr><th>内容</th><th>実画面での確認</th></tr>
+<tr><td>コミット詳細（Git詳細のグラフ／プロジェクト側）に折りたたみの「コミット本文」</td><td>git-manager c154700: 本文の段落と箇条書きが改行を保って表示</td></tr>
+<tr><td>グラフで取得済みコミットへSHA（完全／先頭部分）で移動</td><td><code>c154700</code> で行と詳細が切替、<code>c15</code> で「2件が一致」</td></tr>
+<tr><td>reflogの2行を比較元／比較先に選んで直接比較を開く</td><td>942c68b → b20cd17（reset行）: 39ファイル、<code>git diff --name-status</code> と一致</td></tr>
+<tr><td>コミット検索に「追加・削除行を正規表現で検索（git log -G）」</td><td>main・<code>frontend/app/project-control.tsx</code>・<code>CommitFiles</code>: -G で e08e648 が出て、-S では出ない。不正な正規表現は 422「正規表現を確認してください」</td></tr>
+<tr><td>すべてのオープンPRに「ローカル追跡ブランチあり」</td><td>thinkplatform: 85 → 4件（#1726 #2697 #2698 #2699）。ローカルの upstream 設定から求めた4件と一致</td></tr>
+<tr><td>worktree台帳のカードに、報告時パスが一致する agent の状態と要約</td><td>git-manager 36カード中、報告のある3カードに「agent 完了 · …」等</td></tr>
+<tr><td>Ctrl K の並び順に「最後に開いた順」</td><td>thinkplatform → git-manager → langchain（保存済み訪問履歴の順）</td></tr>
+<tr><td>未追跡ファイルに <code>git diff --no-index -- /dev/null &lt;path&gt;</code> の確認コマンド</td><td>git-manager <code>backend/uv.lock</code>: 実行で新規ファイル差分、その後も <code>??</code> のまま</td></tr>
+<tr><td>ホームカードに同じGitHubリポジトリの「他のクローン N件」</td><td>thinkplatform-dev/thinkplatform: 4件（DEV/sagyo、テスト戦略、test-tp、poc）、リンクで各パスが開く</td></tr>
+<tr><td>参照の関係一覧から「この参照 → 相手のファイル差分」</td><td>git-manager main ↔ codex/agent-timeline: 5ecc7da → d8a9240、328ファイル（git と一致）</td></tr>
+<tr><td>追跡参照がローカルにないブランチに <code>git ls-remote --exit-code --heads</code> の確認コマンド</td><td>design_db <code>chore/disable-dependabot-version-updates</code>: 実行先つきで表示、実行すると終了コード2（リモートにもない）</td></tr>
+<tr><td>ファイル履歴の削除行から「削除直前の原文」</td><td>git-manager <code>backend/uv.lock</code> の削除 47b5cad: 親 5786f06 の原文（<code>version = 1</code>、<code>revision = 3</code>）</td></tr>
+<tr><td>サブモジュールから「親での参照更新履歴」</td><td>OCR_PaddleOCR <code>PaddleOCR</code>: 親HEAD f8c78ca で履歴 → d0a4eab first commit（A）</td></tr>
+</table>
+
+<h2>UIをリッチに（+2 × 4）</h2>
+<table><tr><th>内容</th><th>実画面での確認</th></tr>
+<tr><td>ブランチの履歴で工程の移り変わり（例: テスト中 → レビュー待ち）</td><td>design_db feat/dictionary-p7b-instrument の履歴</td></tr>
+<tr><td>パッチ表示の「空白を可視化」（空行 ∅・タブ →・行末空白 ·）</td><td>e3bf464 の末尾空行削除が <code>-∅</code> と表示</td></tr>
+<tr><td>版のファイル一覧で実行ビット（100755）を表示、詳細に Git mode</td><td><code>.codex/hooks/report_agent_event.py</code>: 「blob · 実行可能 · Git mode 100755」</td></tr>
+<tr><td>判断カードに「報告時のブランチ／現在のチェックアウト」の違い</td><td>design_db development 等3件: 「現在 HEAD切り離し（ブランチなし） 68b02e6」（実HEADと一致）</td></tr>
+</table>
+
+<h2>バグ修正（+1 × 3）</h2>
+<table><tr><th>内容</th><th>実画面での確認</th></tr>
+<tr><td>マージコミットの複数親差分（<code>@@@</code>）を「テキスト差分なし」扱いしていた</td><td>a56d6c3 <code>frontend/app/repo-stream.ts</code>: 見出し「複数親の差分」</td></tr>
+<tr><td>種別「ディレクトリ」＋パス検索が常に0件</td><td>b0f08e9 <code>frontend/app</code>: 4ディレクトリがヒット</td></tr>
+<tr><td>Ctrl K の0件画面の「検索をクリア」が絞り込みを解除しなかった</td><td>お気に入り0件で「『お気に入りのみ』の絞り込みを解除」→ 112件に戻る</td></tr>
+</table>
+
+<h2>文言修正（+1 × 1）</h2>
+<table><tr><th>内容</th><th>実画面での確認</th></tr>
+<tr><td>変更量を「＋47」ではなく「計N行」、列名「変更量（追加＋削除）」</td><td>コミット詳細の変更ファイル一覧</td></tr>
+</table>
+
+<h2>加点していないもの</h2>
+<ul>
+<li>競合コードの意味表示（双方で変更／相手側で削除…）: 稼働中の画面に競合ファイルがなく、実画面で確認できなかった（単体テストとCodexの検証環境のみ）。</li>
+<li>返答文にプロジェクトと報告時worktreeを含める: 稼働データに質問つきの判断カードがなく、実画面で確認できなかった。</li>
+<li>デスクトップ通知の「お気に入りのみ」: 選択欄の表示は確認したが、新しい報告によるOS通知の絞り込みは実画面で確認できなかった。</li>
+<li>flakyテスト test_project_keeps_multiple_merges_on_one_source_lane の時刻固定化: ユーザー向けの変更ではない。</li>
+<li>レビュー起点の自己修正（タブ間の通知対象同期、detached報告の遷移、-G の422、各リンクの range/home 保持、ls-remote の説明文）。</li>
+</ul>
+<p>テスト: frontend 全件成功・tsc OK、backend 489件成功。コミット c64a33b / 5ecc7da と本日の第2コミットを origin/main に push。</p>

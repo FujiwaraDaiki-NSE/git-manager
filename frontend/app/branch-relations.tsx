@@ -24,6 +24,7 @@ import {
   RELATION_PAIRS_PAGE_SIZE,
   RELATION_EVENTS_PAGE_SIZE,
   RELATION_UNRESOLVED_PAGE_SIZE,
+  referenceFileComparisonHref,
   visibleRelationRows,
   filterHistoricalEdges,
   filterVisibleReferencePairs,
@@ -155,6 +156,9 @@ function RelationPairRow({
   refsById: Map<string, ProjectBranchConnectionRef>;
 }) {
   const other = refsById.get(item.otherRefId);
+  const comparisonHref = typeof window !== "undefined" && selectedRef && other
+    ? referenceFileComparisonHref(window.location.href, path, selectedRef.hash, other.hash)
+    : null;
   const hasCounts = typeof item.selectedOnly === "number" && typeof item.otherOnly === "number";
   const counts = hasCounts
     ? `この参照のみ ${item.selectedOnly} · 相手のみ ${item.otherOnly}`
@@ -165,6 +169,7 @@ function RelationPairRow({
   return <li className={`branch-relation-pair is-${item.relation}`}>
     <div className="branch-relation-pair-main"><RefName reference={selectedRef} /><span aria-hidden="true">↔</span><RefName reference={other} /><RelationBadge relation={item.relation} /></div>
     <div className="branch-relation-pair-facts"><span>{counts}</span>{item.mergeBases === null ? <span>共通祖先未取得</span> : item.mergeBases.length ? <span>共通祖先 {item.mergeBases.map((hash: string) => hashText(hash))}</span> : <span>共通祖先なし</span>}{item.pair.reason && <span>{reasonLabel(item.pair.reason)}</span>}</div>
+    {comparisonHref !== null && <div><a className="table-action" href={comparisonHref}>この参照 → 相手のファイル差分</a></div>}
     {command !== null && <details>
       <summary>内訳をGitで確認</summary>
       <div><code style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{command}</code></div>

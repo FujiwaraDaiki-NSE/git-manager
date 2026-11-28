@@ -7,6 +7,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { worktreeCommand } from "../app/next-command-tools.mjs";
+import { shellQuote } from "../app/status-file-tools.mjs";
 
 const source = readFileSync(new URL("../app/git-state-facts.tsx", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source.replace('import "./git-state-facts.css";', ""), { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
@@ -16,6 +17,7 @@ const CopyButton = ({ value, label }) => React.createElement("button", { type: "
 runInNewContext(compiled.outputText, { exports: module.exports, require: (id) => {
   if (id === "./copy-button") return { __esModule: true, default: CopyButton };
   if (id === "./next-command-tools.mjs") return { worktreeCommand };
+  if (id === "./status-file-tools.mjs") return { shellQuote };
   return baseRequire(id);
 } });
 const { FetchFacts, FetchFailureBreakdown, OperationFacts, DestinationFacts } = module.exports;
@@ -65,7 +67,7 @@ test("cherry-pick uses the observed checkout for both display and copy", () => {
 });
 
 test("branch destinations show both push URLs and explain rejected push", () => {
-  const html = render(DestinationFacts, { destinations: { fetch_remote: "origin", fetch_urls: ["https://example.test/read"], upstream: null, upstream_ref: "refs/heads/renamed", upstream_state: "configured", push_remote: "publish", push_remote_config: { selected_key: "branch.main.pushRemote", keys: [{ key: "branch.main.pushRemote", command: "git config --show-origin --show-scope --get-all branch.main.pushRemote", values: [{ value: "publish", scope: "local", origin: "file:.git/config" }] }] }, push_urls: ["ssh://one", "ssh://two"], push_ref: null, push_ref_reason: "simple: 名前が異なるためpushは拒否", push_refspecs: [], push_default: "simple" } });
+  const html = render(DestinationFacts, { projectPath: "/repo", destinations: { fetch_remote: "origin", fetch_urls: ["https://example.test/read"], upstream: null, upstream_ref: "refs/heads/renamed", upstream_state: "configured", push_remote: "publish", push_remote_config: { selected_key: "branch.main.pushRemote", keys: [{ key: "branch.main.pushRemote", command: "git config --show-origin --show-scope --get-all branch.main.pushRemote", values: [{ value: "publish", scope: "local", origin: "file:.git/config" }] }] }, push_urls: ["ssh://one", "ssh://two"], push_ref: null, push_ref_reason: "simple: 名前が異なるためpushは拒否", push_refspecs: [], push_default: "simple" } });
   assert.match(html, /追跡参照なし/);
   assert.match(html, /<details><summary>push先の設定を調べる<\/summary>/);
   assert.match(html, /publish<\/code><strong> 採用<\/strong>/);
@@ -73,5 +75,29 @@ test("branch destinations show both push URLs and explain rejected push", () => 
   assert.match(html, /--show-origin --show-scope --get-all/);
   assert.match(html, /ssh:\/\/one \/ ssh:\/\/two/);
   assert.match(html, /名前が異なるためpushは拒否/);
-  assert.match(render(DestinationFacts, { destinations: null }), /未取得/);
+  assert.match(render(DestinationFacts, { destinations: null, projectPath: "/repo" }), /未取得/);
+});
+
+test("missing local tracking ref offers a quoted remote check from the project root", () => {
+  const destinations = {
+    upstream_gone: true, upstream_state: "configured", upstream: "read'only/renamed",
+    upstream_ref: "refs/heads/renamed'branch", fetch_remote: "read'only", fetch_urls: null,
+    push_remote: "publish", push_urls: null, push_ref: null, push_ref_reason: null,
+    push_refspecs: null, push_default: null, push_remote_config: { selected_key: null, keys: [] },
+  };
+  const renderDestinations = (overrides) => render(DestinationFacts, {
+    destinations: { ...destinations, ...overrides }, projectPath: "/repo's main checkout",
+  });
+  const html = renderDestinations({});
+  const command = "git -C &#x27;/repo&#x27;\\&#x27;&#x27;s main checkout&#x27; ls-remote --exit-code --heads -- &#x27;read&#x27;\\&#x27;&#x27;only&#x27; &#x27;refs/heads/renamed&#x27;\\&#x27;&#x27;branch&#x27;";
+  assert.ok(html.includes(`<code>${command}</code>`));
+  assert.ok(html.includes(`data-value="${command}"`));
+  assert.match(html, /終了コード 2＝一致なし。0 のときは、出力の参照名がコマンドで指定した参照名と完全一致するか確認/);
+  for (const overrides of [
+    { upstream_gone: false }, { fetch_remote: null }, { fetch_remote: "." },
+    { upstream_ref: null }, { upstream_ref: "renamed" }, { upstream_ref: "refs/tags/renamed" },
+    { upstream_ref: "refs/heads/*" }, { upstream_ref: "refs/heads/invalid ref" },
+  ]) {
+    assert.doesNotMatch(renderDestinations(overrides), /ls-remote/);
+  }
 });

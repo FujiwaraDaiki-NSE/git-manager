@@ -3883,6 +3883,7 @@ body {
 .project-card-extra dl > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; }
 .project-card-extra dd { margin: 0; overflow-wrap: anywhere; color: var(--control-ink); }
 .project-card-extra code { font-size: 10px; }
+.project-card-clones { display: grid; gap: 6px; margin: 0; padding-inline-start: 20px; overflow-wrap: anywhere; }
 .project-grid-compact .project-card-heading h3 { font-size: 17px; }
 .git-reading-guide { border: 1px solid var(--control-border); background: var(--control-panel); border-radius: 12px; margin-top: 24px; padding: 16px 20px; color: var(--control-muted); font-size: 12px; }
 .git-reading-guide summary { color: var(--control-ink); font-weight: 600; cursor: pointer; }

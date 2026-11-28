@@ -2,12 +2,16 @@
 import { useEffect, useState } from "react";
 import CopyButton from "./copy-button";
 import type { Repo } from "./types";
+import { updateProjectUrl } from "./project-flow.mjs";
+import { buildRepositoryFileHistoryHref } from "./repository-files-tools.mjs";
 import { submoduleCommands, submoduleLabels } from "./submodule-status.mjs";
 
 type Entry = { path: string; recorded_commit: string | null; checkout_commit: string | null; status: keyof typeof submoduleLabels };
 
 export default function Submodules({ repo }: { repo: Repo }) {
   const path = repo.path;
+  const head = repo.head;
+  const hasHead = typeof head === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(head);
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [status, setStatus] = useState<"loading" | "success" | "failed">("loading");
   const [retry, setRetry] = useState(0);
@@ -32,6 +36,9 @@ export default function Submodules({ repo }: { repo: Repo }) {
   if (status === "failed") return <div role="alert"><p>サブモジュールの状態を取得できませんでした。</p><button type="button" onClick={() => setRetry(retry + 1)}>再取得</button></div>;
   // 定義なしでは即座に空で返るため、初回取得表示のちらつきを避ける。
   if (visibleEntries === null || visibleEntries.length === 0) return null;
+  const historySourceUrl = typeof window !== "undefined"
+    ? updateProjectUrl(window.location.href, { gitPath: null, gitTab: null })
+    : null;
   return <section className="status-pane" aria-label="サブモジュール">
     <div className="section-head"><h3>サブモジュール</h3><code className="cmdhint">git submodule status</code></div>
     {status === "loading" && <p role="status">更新中（前回の結果を表示）</p>}
@@ -40,6 +47,7 @@ export default function Submodules({ repo }: { repo: Repo }) {
       <strong><code>{entry.path}</code></strong> <span>{submoduleLabels[entry.status]}</span>
       <p>親のindex <code>{entry.recorded_commit === null ? "競合のため未確定" : entry.recorded_commit}</code></p>
       <p>現在のチェックアウト <code>{entry.checkout_commit === null ? "未確定" : entry.checkout_commit}</code></p>
+      {historySourceUrl !== null && hasHead && <a className="subtle-button" href={buildRepositoryFileHistoryHref(historySourceUrl, path, head, entry.path, false)}>親での参照更新履歴</a>}
       {entry.status === "same" && <p>親リポジトリの記録コミットと一致しています。</p>}
       {submoduleCommands(entry.status, entry.path, path, entry.recorded_commit, entry.checkout_commit).map(({ meaning, command }) => <div key={command}>
         <p>{meaning}</p><code>{command}</code> <CopyButton value={command} label={`${entry.path}: ${command} をコピー`} />

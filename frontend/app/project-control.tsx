@@ -758,7 +758,7 @@ function LaneDetail({ lane, project, defaultBranch, onOpenGit }: { lane: Project
       </dl>
       {laneComparison !== null && <CommitCompare key={JSON.stringify([project.main_path, lane.id])} path={project.main_path} laneComparison={{ ...laneComparison, directLabel: "追跡先 → ローカル先端の差分" }} />}
       <OperationFacts operations={lane.operations} path={lane.path} />
-      {lane.branch !== null && <DestinationFacts destinations={lane.destinations} />}
+      {lane.branch !== null && <DestinationFacts destinations={lane.destinations} projectPath={project.main_path} />}
       <p>記録がない場合も、取り込まれていないとは限りません。<Link href={`${relationHref.split("#")[0]}#branch-relations-title`}>現在の包含関係・未解決の記録を確認</Link></p>
       <details className="flow-help selection-help">
         <summary>Git状態と比較先の見方</summary>

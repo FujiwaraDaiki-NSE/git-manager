@@ -3,6 +3,7 @@
 import "./git-state-facts.css";
 import CopyButton from "./copy-button";
 import { worktreeCommand } from "./next-command-tools.mjs";
+import { shellQuote } from "./status-file-tools.mjs";
 import type { FetchStatus, GitOperation, BranchDestinations, ProjectSummary, PushRemoteConfig } from "./types";
 
 const categories = { authentication: "認証", connection: "接続", timeout: "タイムアウト", other: "その他" };
@@ -83,7 +84,31 @@ function PushRemoteDetails({ config, remote }: { config: PushRemoteConfig; remot
     </details>
   );
 }
-export function DestinationFacts({ destinations: d }: { destinations: BranchDestinations | null | undefined }) {
+export function DestinationFacts({ destinations: d, projectPath }: { destinations: BranchDestinations | null | undefined; projectPath: string }) {
   const value = (v: string | null) => v === null ? "未設定" : v;
-  return <section className="git-state-facts" aria-label="fetch先・追跡先・push先"><strong>fetch先・追跡先・push先</strong>{d == null ? <p>未取得</p> : <><dl className="selection-list"><div><dt>fetch元remote</dt><dd>{value(d.fetch_remote)}</dd></div><div><dt>fetch URL</dt><dd>{d.fetch_urls === null ? d.fetch_remote === null ? "設定なし" : "取得不能" : d.fetch_urls.join(" / ")}</dd></div><div><dt>upstream（追跡先）</dt><dd>{d.upstream_state === "unset" ? "未設定" : d.upstream === null ? "追跡参照なし" : d.upstream}{d.upstream_ref && <small>{d.upstream_ref}</small>}</dd></div><div><dt>実効push remote</dt><dd>{value(d.push_remote)}</dd></div><div><dt>push URL（全送信先）</dt><dd>{d.push_urls === null ? d.push_remote === null ? "設定なし" : "取得不能" : d.push_urls.join(" / ")}</dd></div><div><dt>push先ref</dt><dd>{d.push_ref === null ? d.push_ref_reason : d.push_ref}</dd></div><div><dt>remote.push refspec</dt><dd>{d.push_refspecs === null ? "未取得" : d.push_refspecs.length === 0 ? "設定なし" : d.push_refspecs.join(" / ")}</dd></div><div><dt>push.default</dt><dd>{value(d.push_default)}</dd></div></dl><PushRemoteDetails config={d.push_remote_config} remote={d.push_remote} /></>}</section>;
+  const remoteCheckCommand = d?.upstream_gone === true
+    && d.fetch_remote && d.fetch_remote !== "."
+    && d.upstream_ref && /^refs\/heads\/[^\x00-\x20\x7f~^:?*\[\\]+$/.test(d.upstream_ref)
+    ? `git ls-remote --exit-code --heads -- ${shellQuote(d.fetch_remote)} ${shellQuote(d.upstream_ref)}`
+    : null;
+  return <section className="git-state-facts" aria-label="fetch先・追跡先・push先">
+    <strong>fetch先・追跡先・push先</strong>
+    {d == null ? <p>未取得</p> : <>
+      <dl className="selection-list">
+        <div><dt>fetch元remote</dt><dd>{value(d.fetch_remote)}</dd></div>
+        <div><dt>fetch URL</dt><dd>{d.fetch_urls === null ? d.fetch_remote === null ? "設定なし" : "取得不能" : d.fetch_urls.join(" / ")}</dd></div>
+        <div><dt>upstream（追跡先）</dt><dd>
+          {d.upstream_state === "unset" ? "未設定" : d.upstream === null ? "追跡参照なし" : d.upstream}
+          {d.upstream_ref && <small>{d.upstream_ref}</small>}
+          {remoteCheckCommand !== null && <Command command={remoteCheckCommand} path={projectPath} reason="リモートで追跡先を確認。終了コード 2＝一致なし。0 のときは、出力の参照名がコマンドで指定した参照名と完全一致するか確認してください。" />}
+        </dd></div>
+        <div><dt>実効push remote</dt><dd>{value(d.push_remote)}</dd></div>
+        <div><dt>push URL（全送信先）</dt><dd>{d.push_urls === null ? d.push_remote === null ? "設定なし" : "取得不能" : d.push_urls.join(" / ")}</dd></div>
+        <div><dt>push先ref</dt><dd>{d.push_ref === null ? d.push_ref_reason : d.push_ref}</dd></div>
+        <div><dt>remote.push refspec</dt><dd>{d.push_refspecs === null ? "未取得" : d.push_refspecs.length === 0 ? "設定なし" : d.push_refspecs.join(" / ")}</dd></div>
+        <div><dt>push.default</dt><dd>{value(d.push_default)}</dd></div>
+      </dl>
+      <PushRemoteDetails config={d.push_remote_config} remote={d.push_remote} />
+    </>}
+  </section>;
 }

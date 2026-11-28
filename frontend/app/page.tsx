@@ -27,6 +27,7 @@ import {
   agentCount,
   countProjectsWithUnknownAgentCounts,
   formatAgentCount,
+  githubCloneGroupsByProject,
   homeSearch,
   isActiveAgentTask,
   isDormantProject,
@@ -111,9 +112,14 @@ function stateClass(state: AgentRunState | null | undefined) {
   return state ? `agent-state-${state.replace(/[^a-z0-9_-]/gi, "-")}` : "agent-state-unknown";
 }
 
+function projectHref(path: string, homeQuery: string) {
+  return `/project?path=${encodeURIComponent(path)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`;
+}
+
 function ProjectCard({
   acknowledgements,
   project,
+  cloneGroup,
   gitStatusFailures,
   favorite,
   density,
@@ -125,6 +131,7 @@ function ProjectCard({
 }: {
   acknowledgements: Acknowledgements | null;
   project: ProjectSummary;
+  cloneGroup: { id: string; main_path: string }[] | undefined;
   gitStatusFailures: GitStatusFailure[] | null;
   favorite: boolean;
   density: CardDensity;
@@ -135,7 +142,7 @@ function ProjectCard({
   onInteractStart: () => void;
 }) {
   const target = project.main_path;
-  const href = target === null ? null : `/project?path=${encodeURIComponent(target)}&tab=flow&range=7d${homeQuery ? `&home=${encodeURIComponent(homeQuery)}` : ""}`;
+  const href = target === null ? null : projectHref(target, homeQuery);
   const workHref = (filter: LaneGitFilter, lane: string | null) => {
     if (target === null) return null;
     const params = new URLSearchParams({ path: target, tab: "lanes", range: "current" });
@@ -196,6 +203,14 @@ function ProjectCard({
           {href ? <Link data-project-open className="open-project" href={href} prefetch={false} aria-label={`${project.name} の詳細を開く`}>開く <span aria-hidden="true">↗</span></Link> : <span className="no-checkout">作業パス未取得</span>}
         </div>
       </div>
+      {cloneGroup && <details className="project-card-extra">
+        <summary>他のクローン {cloneGroup.length - 1}件</summary>
+        <ul className="project-card-clones">
+          {cloneGroup.filter(({ id }) => id !== project.id).map(({ id, main_path }) => (
+            <li key={id}><Link href={projectHref(main_path, homeQuery)} prefetch={false}><code>{main_path}</code></Link></li>
+          ))}
+        </ul>
+      </details>}
       {hasAgentCounts && <div className="project-card-agent-counts" aria-label="ブランチの作業状況件数">
         {summaryCards.map(({ key, label }) => {
           const count = agentCount(project, key);
@@ -460,6 +475,7 @@ export default function Page() {
   }, [matchingProjects, acknowledgements]);
   const dormantCount = matchingProjects.length - nonDormantProjects.length;
   const visible = view.hideDormant ? nonDormantProjects : matchingProjects;
+  const cloneGroups = useMemo(() => githubCloneGroupsByProject(projects), [projects]);
   const oldActiveReports = countOldActiveReports(projects, Date.now());
   const totals = useMemo(() => aggregateAgentCounts(projects), [projects]);
   useEffect(() => {
@@ -595,7 +611,7 @@ export default function Page() {
       {invalidUrlParams.length === 0 && projectsUnavailable && loading && <SkeletonGrid />}
       {error && <div className="home-state home-state-error" role="alert"><strong>{hasPreviousProjects ? "最新情報を取得できませんでした。前回取得した一覧を表示しています。" : "プロジェクト情報を取得できませんでした。"}</strong><span className="sr-only">{error}</span><button type="button" onClick={retry}>再試行</button></div>}
       {invalidUrlParams.length === 0 && !loading && !error && visible.length === 0 && <div className="home-state home-empty"><h3>該当するプロジェクトがありません</h3><p>{hasActiveFilters ? "現在の条件に一致するプロジェクトはありません。条件をリセットして一覧を確認できます。" : "登録されたプロジェクトはありません。"}</p>{hasActiveFilters && <button type="button" onClick={resetView}>条件をリセット</button>}</div>}
-      {invalidUrlParams.length === 0 && <section ref={gridRef} className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard acknowledgements={acknowledgements} key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} gitStatusFailures={gitStatusFailuresByProject.get(project.id) ?? null} />)}</section>}
+      {invalidUrlParams.length === 0 && <section ref={gridRef} className={`project-grid${view.density === "compact" ? " project-grid-compact" : ""}`} aria-label="プロジェクト一覧">{visible.map((project) => <ProjectCard acknowledgements={acknowledgements} key={project.id} showPath={duplicateNames.has(project.name)} density={view.density} homeQuery={homeQuery} favorite={favorites.has(project.id)} onFavorite={() => toggleFavorite(project.id)} onInteractEnd={finishInteraction} onInteractStart={() => startInteraction(project.id)} project={project} cloneGroup={cloneGroups.get(project.id)} gitStatusFailures={gitStatusFailuresByProject.get(project.id) ?? null} />)}</section>}
       <GitGuide path={null} />
       <details className="git-reading-guide"><summary>Git状態の見方</summary><div>
         <p><strong>変更あり</strong> 作業ディレクトリに未コミットの変更があります。<code>git status</code> で確認できます。</p>

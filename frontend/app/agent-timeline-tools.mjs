@@ -51,17 +51,27 @@ export function timelineDecisionCopy(header, report) {
 /**
  * @param {string} path
  * @param {string} projectId
- * @param {ReadonlyMap<string, Pick<import("./types").Repo, "common_dir" | "worktree_state">> | null} repos
+ * @param {string | null} reportedBranch
+ * @param {ReadonlyMap<string, Pick<import("./types").Repo, "common_dir" | "worktree_state" | "pending" | "error" | "branch" | "detached" | "head">> | null} repos
  */
-export function timelineWorktreeLocation(path, projectId, repos) {
-  if (repos === null) return { command: null, note: "現在の台帳を取得中…" };
-  if (timelineProjectId(path, repos) !== projectId) {
-    return { command: null, note: "現在の台帳にない" };
+export function timelineWorktreeLocation(path, projectId, reportedBranch, repos) {
+  if (repos === null) return { command: null, note: "現在の台帳を取得中…", checkout: null };
+  const repo = repos.get(path);
+  if (repo?.common_dir !== projectId) {
+    return { command: null, note: "現在の台帳にない", checkout: null };
   }
-  if (repos.get(path)?.worktree_state === "prunable") {
-    return { command: null, note: "作業ディレクトリが存在しないため移動できません" };
+  if (repo.worktree_state === "prunable") {
+    return { command: null, note: "作業ディレクトリが存在しないため移動できません", checkout: null };
   }
-  return { command: agentWorktreeCommand(path), note: null };
+  let checkout = null;
+  if (reportedBranch && !repo.pending && !repo.error) {
+    if (repo.detached === true && reportedBranch !== "(detached)") {
+      checkout = { branch: "(detached)", head: typeof repo.head === "string" ? repo.head : null };
+    } else if (repo.detached === false && repo.branch && repo.branch !== "(detached)" && repo.branch !== reportedBranch) {
+      checkout = { branch: repo.branch, head: null };
+    }
+  }
+  return { command: agentWorktreeCommand(path), note: null, checkout };
 }
 
 /**

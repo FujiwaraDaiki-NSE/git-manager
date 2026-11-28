@@ -93,6 +93,34 @@ test("Git next-check links use lane IDs and omit selection when the ID is null",
   }
 });
 
+test("Home links to other GitHub clones even when filters hide their cards", () => {
+  const clone = (id, remote, extra = {}) => ({ ...project(id, 0), remote, remote_status: "configured", ...extra });
+  const html = home("?q=alpha")({
+    projectSummaries: [
+      clone("/alpha", "git@github.com:Org/Example.git", { worktree_count: 5 }),
+      clone("/other/https copy", "https://github.com/org/example"),
+      clone("/other/ssh", "ssh://git@github.com/org/Example.git/"),
+      clone("/other/host", "https://gitlab.com/org/example"),
+      clone("/other/fork", "https://github.com/fork/example"),
+      clone("/other/failed", "https://github.com/org/example", { remote_status: "failed" }),
+      clone("/other/no-path", "https://github.com/org/example", { main_path: null }),
+      clone("/alpha-unrelated", "https://github.com/org/unrelated"),
+    ],
+    projectsLoading: false, projectsError: null,
+  });
+  const groups = [...html.matchAll(/<summary>他のクローン (\d+)件<\/summary>(.*?)<\/details>/g)];
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0][1], "2");
+  const links = [...groups[0][2].matchAll(/href="([^"]+)"><code>([^<]+)<\/code>/g)];
+  assert.deepEqual(links.map(([, , label]) => label), ["/other/https copy", "/other/ssh"]);
+  for (const [, href, label] of links) {
+    const url = new URL(href.replaceAll("&amp;", "&"), "http://localhost");
+    assert.equal(url.pathname, "/project");
+    assert.equal(url.searchParams.get("path"), label);
+    assert.equal(url.searchParams.get("home"), "q=alpha");
+  }
+});
+
 test("Home filters for Git status failures independently of fetch failures", () => {
   const render = home("?git=git-status-failure");
   const html = render({

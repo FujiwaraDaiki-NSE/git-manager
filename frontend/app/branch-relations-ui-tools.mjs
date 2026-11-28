@@ -8,6 +8,23 @@ import {
   referenceDisplayName,
   relationLabel,
 } from "./branch-relations-tools.mjs";
+import { buildInvestigationShareUrl } from "./investigation-presets-tools.mjs";
+
+const FULL_COMMIT_HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+
+export function referenceFileComparisonHref(href, path, selectedHash, otherHash) {
+  if (typeof selectedHash !== "string" || !FULL_COMMIT_HASH.test(selectedHash)
+    || typeof otherHash !== "string" || !FULL_COMMIT_HASH.test(otherHash)) return null;
+  const url = new URL(href);
+  url.searchParams.set("path", path);
+  url.searchParams.set("tab", "info");
+  url.hash = "commit-compare";
+  return buildInvestigationShareUrl(url.href, "compare", {
+    base: selectedHash,
+    target: otherHash,
+    mode: "direct",
+  });
+}
 
 const RELATION_ORDER = Object.freeze({
   equal: 0,

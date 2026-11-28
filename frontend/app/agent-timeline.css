@@ -471,6 +471,7 @@
 .agent-timeline-project-link:focus-visible { outline: 2px solid var(--control-blue); outline-offset: -2px; }
 .agent-timeline-card-actions { display: flex; flex-wrap: wrap; align-items: start; gap: 8px; padding: 0 10px 10px; }
 .agent-timeline-card-actions .copy-button { min-height: 28px; font-size: 10px; }
+.agent-timeline-checkout { margin: 0; align-self: center; color: var(--control-muted); font: 11px/1.5 var(--control-sans); overflow-wrap: anywhere; }
 .agent-timeline-card-actions .copy-feedback { max-width: 280px; }
 .agent-timeline-acknowledged { margin-block: 12px; }
 .agent-timeline-acknowledged > summary { cursor: pointer; color: var(--control-muted); font-size: 12px; padding-block: 6px; }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import CopyButton from "./copy-button";
 import CommitFiles from "./commit-files";
 import PatchView from "./patch-view";
+import RepositoryFileSource from "./repository-file-source";
 import InvestigationPresets, { type FileHistoryPresetValues } from "./investigation-presets";
 import {
   adjacentFileHistory,
@@ -24,6 +25,7 @@ import {
   sortFileHistory,
 } from "./file-history-investigation-tools.mjs";
 import {
+  deletedFileSource,
   encodeFileHistoryAuthor,
   fileHistoryAuthors,
   fileHistoryCsv,
@@ -91,6 +93,33 @@ function displayedPath(record: FileHistoryRecord) {
 
 function recordKey(record: FileHistoryRecord, index: number) {
   return `${record.hash}:${record.path ?? ""}:${index}`;
+}
+
+function FileHistoryRow({ path, record, selected, onSelect }: {
+  path: string;
+  record: FileHistoryRecord;
+  selected: boolean;
+  onSelect: (hash: string) => void;
+}) {
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const source = deletedFileSource(record);
+  return <>
+    <tr className={selected ? "is-selected" : undefined}>
+      <td className="file-history-hash"><code title={record.hash}>{shortHash(record.hash)}</code><CopyButton value={record.hash} label={`${shortHash(record.hash)} をコピー`} /></td>
+      <td>{record.subject || "件名未取得"}</td>
+      <td>{record.author || "作成者未取得"}</td>
+      <td><time dateTime={record.date || undefined}>{exactDate(record.date)}</time></td>
+      <td>{statusLabel(record.status)}</td>
+      <td className="file-history-path" title={displayedPath(record)}>{displayedPath(record)}</td>
+      <td className="file-history-row-actions">
+        <button type="button" className="table-action" onClick={() => onSelect(record.hash)}>コミットを表示</button>
+        {source !== null && <button type="button" className="table-action" aria-expanded={sourceOpen} onClick={() => setSourceOpen(!sourceOpen)}>削除直前の原文</button>}
+      </td>
+    </tr>
+    {source !== null && sourceOpen && <tr className="file-history-deleted-source">
+      <td colSpan={7}><RepositoryFileSource label="削除直前" path={path} revision={source.revision} file={source.file} /></td>
+    </tr>}
+  </>;
 }
 
 async function responseError(response: Response) {
@@ -446,7 +475,7 @@ export default function FileHistoryExplorer({ path }: { path: string }) {
           </div>
           <div className="file-history-coverage" role="status"><span>{visibleRecords.length} / {records.length} 件を表示</span><span>{follow ? "名前変更を追跡中" : "入力パスのみ"}</span><span>{limitReached ? "取得上限に達しました。残りの履歴はターミナルで確認してください。" : hasMore ? "追加ページあり" : "すべて取得済み"}</span>{dateRangeError && <span>ローカル日付範囲が無効です。</span>}{exportStatus && <span>{exportStatus}</span>}</div>
           {dateRangeError && <p className="file-history-date-error" role="alert">{dateRangeError}</p>}
-          {visibleRecords.length === 0 ? <p className="file-history-empty" role="status">{records.length === 0 ? "一致するコミットはありません。" : dateRangeError ? "日付範囲が無効なため、履歴を表示できません。" : "条件に一致する取得済み履歴はありません。"}</p> : <div className="file-history-table-wrap" role="region" aria-label="ファイル履歴" tabIndex={0}><table className="file-history-table"><thead><tr><th>ハッシュ</th><th>件名</th><th>作成者</th><th>日時</th><th>変更</th><th>パス</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{visibleRecords.map((record, index) => <tr key={recordKey(record, index)} className={record.hash === selectedHash ? "is-selected" : undefined}><td className="file-history-hash"><code title={record.hash}>{shortHash(record.hash)}</code><CopyButton value={record.hash} label={`${shortHash(record.hash)} をコピー`} /></td><td>{record.subject || "件名未取得"}</td><td>{record.author || "作成者未取得"}</td><td><time dateTime={record.date || undefined}>{exactDate(record.date)}</time></td><td>{statusLabel(record.status)}</td><td className="file-history-path" title={displayedPath(record)}>{displayedPath(record)}</td><td><button type="button" className="table-action" onClick={() => setSelectedHash(record.hash)}>コミットを表示</button></td></tr>)}</tbody></table></div>}
+          {visibleRecords.length === 0 ? <p className="file-history-empty" role="status">{records.length === 0 ? "一致するコミットはありません。" : dateRangeError ? "日付範囲が無効なため、履歴を表示できません。" : "条件に一致する取得済み履歴はありません。"}</p> : <div className="file-history-table-wrap" role="region" aria-label="ファイル履歴" tabIndex={0}><table className="file-history-table"><thead><tr><th>ハッシュ</th><th>件名</th><th>作成者</th><th>日時</th><th>変更</th><th>パス</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{visibleRecords.map((record, index) => <FileHistoryRow key={recordKey(record, index)} path={path} record={record} selected={record.hash === selectedHash} onSelect={setSelectedHash} />)}</tbody></table></div>}
           {hasMore && nextOffset !== null && <button type="button" className="file-history-more" onClick={loadMore} disabled={state === "loading"}>{state === "loading" ? "追加履歴を取得中…" : "さらに履歴を取得"}</button>}
           <div className="file-history-navigation" role="group" aria-label="表示中コミットの移動">
             <button type="button" className="subtle-button" onClick={() => navigation.previous && setSelectedHash(navigation.previous.hash)} disabled={navigation.previous === null} aria-label="前の表示中コミットを選択">← 前のコミット</button>

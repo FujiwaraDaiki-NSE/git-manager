@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   filterHistoricalEdges,
   filterVisibleReferencePairs,
+  referenceFileComparisonHref,
   sortVisibleReferencePairs,
   visiblePairsJson,
   visiblePairsMarkdown,
@@ -23,6 +24,24 @@ const pair = (otherRefId, relation, selectedOnly, otherOnly, reason = null) => (
   otherOnly,
   mergeBases: [],
   pair: { reason },
+});
+
+test("file comparison pins both full SHA values and preserves the project URL context", () => {
+  const path = "/repos/project #1";
+  const base = refs[0].hash;
+  const target = "b".repeat(64);
+  const href = "http://localhost/project?path=%2Fworktree&tab=flow&home=q%3Dgit&range=24h&investigation=file-history&investigationFile=README.md#relations";
+  const compareUrl = (from, to) => new URL(referenceFileComparisonHref(href, path, from, to));
+  const url = compareUrl(base, target);
+  assert.equal(url.pathname, "/project");
+  assert.equal(url.hash, "#commit-compare");
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    path, tab: "info", home: "q=git", range: "24h", investigation: "compare", investigationBase: base, investigationTarget: target, investigationMode: "direct",
+  });
+  assert.equal(compareUrl(target, base).searchParams.get("investigationBase"), target);
+  assert.equal(compareUrl(target, base).searchParams.get("investigationTarget"), base);
+  assert.equal(referenceFileComparisonHref(href, path, null, target), null);
+  assert.equal(referenceFileComparisonHref(href, path, base, target.slice(0, 7)), null);
 });
 
 test("pair filters use exact relation and other ref kind values", () => {

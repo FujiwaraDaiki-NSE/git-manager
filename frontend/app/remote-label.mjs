@@ -1,3 +1,9 @@
+export function githubRepositoryKey(remote) {
+  if (remote === null) return null;
+  const match = /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/github\.com\/)([a-z0-9-]+\/[a-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(remote.trim());
+  return match ? match[1].toLowerCase() : null;
+}
+
 export function remoteLabel(remote, status) {
   if (status === "unset") return "origin未設定";
   if (status === "failed") return "リモート取得失敗";

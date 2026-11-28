@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  deletedFileSource,
   encodeFileHistoryAuthor,
   fileHistoryAuthors,
   fileHistoryCsv,
@@ -16,6 +17,16 @@ const records = [
   { hash: "b".repeat(40), subject: "Rename", author: "Ren", date: "2026-09-30T10:00:00Z", status: "R100", path: "src/new.ts", old_path: "src/old.ts" },
   { hash: "c".repeat(40), subject: null, author: null, date: null, status: "D", path: "gone.txt", old_path: null },
 ];
+
+test("deleted file source uses the historical path and the sole parent", () => {
+  const parent = "d".repeat(40);
+  const deletion = { status: "D", parents: [parent], path: "old/文 +?#.txt" };
+  assert.deepEqual(deletedFileSource(deletion), { revision: parent, file: deletion.path });
+  assert.equal(deletedFileSource({ ...deletion, status: "M" }), null);
+  assert.equal(deletedFileSource({ ...deletion, parents: [] }), null);
+  assert.equal(deletedFileSource({ ...deletion, parents: [parent, "e".repeat(40)] }), null);
+  assert.equal(deletedFileSource({ ...deletion, path: null }), null);
+});
 
 test("file history authors and filtering use exact retrieved values", () => {
   assert.deepEqual(fileHistoryAuthors(records), ["Aki", "Ren"]);

@@ -127,6 +127,7 @@
 }
 
 .file-history-table-wrap {
+  container-type: inline-size;
   overflow: auto;
   max-width: 100%;
   border: 1px solid var(--control-border);
@@ -173,6 +174,33 @@
   max-width: 300px;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.file-history-row-actions .table-action {
+  display: block;
+  white-space: nowrap;
+}
+
+.file-history-row-actions .table-action + .table-action {
+  margin-top: 6px;
+}
+
+.file-history-deleted-source section {
+  position: sticky;
+  left: 10px;
+  max-width: calc(100cqw - 20px);
+  padding: 8px;
+  background: var(--control-panel-soft);
+}
+
+.file-history-deleted-source h5 { margin: 0; }
+.file-history-deleted-source p { margin: 6px 0; overflow-wrap: anywhere; }
+.file-history-deleted-source pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .file-history-empty {

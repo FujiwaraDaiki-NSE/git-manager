@@ -186,13 +186,31 @@ test("worktree copy requires the exact reported path in the current project regi
     ["/worktrees/gone", { common_dir: project, worktree_state: "prunable" }],
   ]);
 
-  assert.deepEqual(timelineWorktreeLocation(path, project, null), { command: null, note: "現在の台帳を取得中…" });
-  const missing = { command: null, note: "現在の台帳にない" };
-  assert.deepEqual(timelineWorktreeLocation(path, project, new Map()), missing);
-  assert.deepEqual(timelineWorktreeLocation("/worktrees/removed", project, repos), missing);
-  assert.deepEqual(timelineWorktreeLocation("/worktrees/reused", project, repos), missing);
-  assert.deepEqual(timelineWorktreeLocation("/worktrees/gone", project, repos), {
-    command: null, note: "作業ディレクトリが存在しないため移動できません",
+  assert.deepEqual(timelineWorktreeLocation(path, project, "feature", null), { command: null, note: "現在の台帳を取得中…", checkout: null });
+  const missing = { command: null, note: "現在の台帳にない", checkout: null };
+  assert.deepEqual(timelineWorktreeLocation(path, project, "feature", new Map()), missing);
+  assert.deepEqual(timelineWorktreeLocation("/worktrees/removed", project, "feature", repos), missing);
+  assert.deepEqual(timelineWorktreeLocation("/worktrees/reused", project, "feature", repos), missing);
+  assert.deepEqual(timelineWorktreeLocation("/worktrees/gone", project, "feature", repos), {
+    command: null, note: "作業ディレクトリが存在しないため移動できません", checkout: null,
   });
-  assert.deepEqual(timelineWorktreeLocation(path, project, repos), { command: "cd '/worktrees/design_db feature'", note: null });
+  assert.deepEqual(timelineWorktreeLocation(path, project, "feature", repos), { command: "cd '/worktrees/design_db feature'", note: null, checkout: null });
+});
+
+test("worktree copy includes a checkout only when the reported and observed branches differ", () => {
+  const project = "/workspace/design_db";
+  const path = project;
+  const repo = { common_dir: project, worktree_state: null, branch: "main", detached: false };
+  const location = (reportedBranch, state) => timelineWorktreeLocation(path, project, reportedBranch, new Map([[path, { ...repo, ...state }]]));
+  const detached = { detached: true, branch: "(detached)", head: "68b02e6b26caca38282480ae5e43056697856a60" };
+  assert.deepEqual(location("development", detached), {
+    command: "cd '/workspace/design_db'", note: null, checkout: { branch: "(detached)", head: detached.head },
+  });
+  assert.deepEqual(location("development", {}).checkout, { branch: "main", head: null });
+  assert.deepEqual(location("(detached)", {}).checkout, { branch: "main", head: null });
+  assert.equal(location("(detached)", detached).checkout, null);
+  assert.equal(location("main", {}).checkout, null);
+  assert.equal(location(null, detached).checkout, null);
+  assert.equal(location("development", { ...detached, pending: true }).checkout, null);
+  assert.equal(location("development", { ...detached, error: "Gitエラー" }).checkout, null);
 });

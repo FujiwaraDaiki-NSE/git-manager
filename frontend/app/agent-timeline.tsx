@@ -154,7 +154,8 @@ function CurrentRow({ project, name, task, repos, oldDecision = false, acknowled
 }) {
   const decision = AGENT_DECISION_STATUSES.includes(agentTaskState(task));
   const worktree = task.worktree;
-  const location = decision && worktree ? timelineWorktreeLocation(worktree, project.id, repos) : null;
+  const location = decision && worktree ? timelineWorktreeLocation(worktree, project.id, task.branch, repos) : null;
+  const checkout = location?.checkout;
   const freshness = agentReportFreshness(task.occurred_at, now);
   const reportKey = agentReportKey(task);
   const identity = reportIdentity(task);
@@ -180,6 +181,10 @@ function CurrentRow({ project, name, task, repos, oldDecision = false, acknowled
         {reportProjectId && branch && <button type="button" className="agent-timeline-pause" onClick={() => onBranchHistory({ projectId: reportProjectId, branch })}>このブランチの履歴</button>}
         {canAcknowledge && <button id={reportKey === null ? undefined : `agent-ack-${encodeURIComponent(reportKey)}`} type="button" className="agent-timeline-pause" onClick={() => onAcknowledge(task, !acknowledged)}>{acknowledged ? "未確認に戻す" : "確認済みにする"}</button>}
         {location?.command != null && <CopyButton value={location.command} label="worktreeへ移動するコマンドをコピー" />}
+        {checkout && <p className="agent-timeline-checkout">
+          報告時 <code>{branchLabel(branch)}</code> ／ 現在 <code>{branchLabel(checkout.branch)}</code>
+          {checkout.head && <> <code title={checkout.head}>{checkout.head.slice(0, 7)}</code></>}
+        </p>}
       </div>}
     </li>
   );
